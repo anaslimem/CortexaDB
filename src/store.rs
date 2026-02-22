@@ -55,10 +55,12 @@ impl MnemosStore {
         vector_dimension: usize,
     ) -> Result<Self> {
         let engine = Engine::recover(wal_path, segments_dir)?;
-        Ok(Self {
+        let mut store = Self {
             engine,
             indexes: IndexLayer::new(vector_dimension),
-        })
+        };
+        let _ = store.rebuild_vector_index()?;
+        Ok(store)
     }
 
     pub fn insert_memory(&mut self, entry: MemoryEntry) -> Result<CommandId> {
@@ -247,5 +249,29 @@ mod tests {
 
         store.delete_memory(MemoryId(10)).unwrap();
         assert_eq!(store.indexed_embeddings(), 0);
+    }
+
+    #[test]
+    fn test_store_recover_auto_rebuilds_vector_index() {
+        let temp = TempDir::new().unwrap();
+        let wal = temp.path().join("store.wal");
+        let seg = temp.path().join("segments");
+
+        {
+            let mut store = MnemosStore::new(&wal, &seg, 3).unwrap();
+            let entry = MemoryEntry::new(MemoryId(77), "agent1".to_string(), b"z".to_vec(), 1000)
+                .with_embedding(vec![1.0, 0.0, 0.0]);
+            store.insert_memory(entry).unwrap();
+            assert_eq!(store.indexed_embeddings(), 1);
+        }
+
+        let recovered = MnemosStore::recover(&wal, &seg, 3).unwrap();
+        assert_eq!(recovered.indexed_embeddings(), 1);
+
+        let mut options = QueryOptions::with_top_k(1);
+        options.namespace = Some("agent1".to_string());
+        let out = recovered.query("hello", options, &TestEmbedder).unwrap();
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.hits[0].id, MemoryId(77));
     }
 }
