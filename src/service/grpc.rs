@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use tokio::sync::{RwLock, mpsc, oneshot};
 use tonic::{Request, Response, Status};
 
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
@@ -16,15 +17,97 @@ pub use proto::mnemos_service_server::MnemosServiceServer;
 
 #[derive(Clone)]
 pub struct MnemosGrpcService {
-    store: Arc<Mutex<MnemosStore>>,
+    store: Arc<RwLock<MnemosStore>>,
+    writer_tx: mpsc::Sender<WriteRequest>,
 }
 
 impl MnemosGrpcService {
     pub fn new(store: MnemosStore) -> Self {
-        Self {
-            store: Arc::new(Mutex::new(store)),
-        }
+        let store = Arc::new(RwLock::new(store));
+        let (writer_tx, mut writer_rx) = mpsc::channel::<WriteRequest>(1024);
+
+        let writer_store = Arc::clone(&store);
+        tokio::spawn(async move {
+            while let Some(req) = writer_rx.recv().await {
+                let result: Result<WriteResult, String> = {
+                    let mut store = writer_store.write().await;
+                    match req.command {
+                        WriteCommand::InsertMemory(entry) => store
+                            .insert_memory(entry)
+                            .map(|id| WriteResult::CommandId(id.0))
+                            .map_err(|e| e.to_string()),
+                        WriteCommand::DeleteMemory(id) => store
+                            .delete_memory(id)
+                            .map(|id| WriteResult::CommandId(id.0))
+                            .map_err(|e| e.to_string()),
+                        WriteCommand::AddEdge { from, to, relation } => store
+                            .add_edge(from, to, relation)
+                            .map(|id| WriteResult::CommandId(id.0))
+                            .map_err(|e| e.to_string()),
+                        WriteCommand::RemoveEdge { from, to } => store
+                            .remove_edge(from, to)
+                            .map(|id| WriteResult::CommandId(id.0))
+                            .map_err(|e| e.to_string()),
+                        WriteCommand::EnforceCapacity(policy) => store
+                            .enforce_capacity(policy)
+                            .map(WriteResult::Capacity)
+                            .map_err(|e| e.to_string()),
+                        WriteCommand::CompactSegments => store
+                            .compact_segments()
+                            .map(WriteResult::Compact)
+                            .map_err(|e| e.to_string()),
+                    }
+                };
+
+                let _ = req.reply.send(result);
+            }
+        });
+
+        Self { store, writer_tx }
     }
+
+    async fn send_write(&self, command: WriteCommand) -> Result<WriteResult, Status> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.writer_tx
+            .send(WriteRequest {
+                command,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| Status::unavailable("writer queue is closed"))?;
+
+        let out = reply_rx
+            .await
+            .map_err(|_| Status::internal("writer task dropped reply"))?;
+        out.map_err(Status::internal)
+    }
+}
+
+struct WriteRequest {
+    command: WriteCommand,
+    reply: oneshot::Sender<Result<WriteResult, String>>,
+}
+
+enum WriteCommand {
+    InsertMemory(MemoryEntry),
+    DeleteMemory(MemoryId),
+    AddEdge {
+        from: MemoryId,
+        to: MemoryId,
+        relation: String,
+    },
+    RemoveEdge {
+        from: MemoryId,
+        to: MemoryId,
+    },
+    EnforceCapacity(CapacityPolicy),
+    CompactSegments,
+}
+
+enum WriteResult {
+    CommandId(u64),
+    Capacity(crate::engine::EvictionReport),
+    Compact(crate::storage::compaction::CompactionReport),
 }
 
 struct StaticEmbedder {
@@ -62,15 +145,12 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         }
         entry.metadata = metadata;
 
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| Status::internal("store lock poisoned"))?;
-        let cmd_id = store
-            .insert_memory(entry)
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let cmd_id = match self.send_write(WriteCommand::InsertMemory(entry)).await? {
+            WriteResult::CommandId(id) => id,
+            _ => return Err(Status::internal("unexpected writer response for insert")),
+        };
         Ok(Response::new(proto::InsertMemoryResponse {
-            command_id: cmd_id.0,
+            command_id: cmd_id,
         }))
     }
 
@@ -79,15 +159,15 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         request: Request<proto::DeleteMemoryRequest>,
     ) -> Result<Response<proto::DeleteMemoryResponse>, Status> {
         let req = request.into_inner();
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| Status::internal("store lock poisoned"))?;
-        let cmd_id = store
-            .delete_memory(MemoryId(req.id))
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let cmd_id = match self
+            .send_write(WriteCommand::DeleteMemory(MemoryId(req.id)))
+            .await?
+        {
+            WriteResult::CommandId(id) => id,
+            _ => return Err(Status::internal("unexpected writer response for delete")),
+        };
         Ok(Response::new(proto::DeleteMemoryResponse {
-            command_id: cmd_id.0,
+            command_id: cmd_id,
         }))
     }
 
@@ -96,16 +176,18 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         request: Request<proto::AddEdgeRequest>,
     ) -> Result<Response<proto::AddEdgeResponse>, Status> {
         let req = request.into_inner();
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| Status::internal("store lock poisoned"))?;
-        let cmd_id = store
-            .add_edge(MemoryId(req.from), MemoryId(req.to), req.relation)
-            .map_err(|e| Status::internal(e.to_string()))?;
-        Ok(Response::new(proto::AddEdgeResponse {
-            command_id: cmd_id.0,
-        }))
+        let cmd_id = match self
+            .send_write(WriteCommand::AddEdge {
+                from: MemoryId(req.from),
+                to: MemoryId(req.to),
+                relation: req.relation,
+            })
+            .await?
+        {
+            WriteResult::CommandId(id) => id,
+            _ => return Err(Status::internal("unexpected writer response for add_edge")),
+        };
+        Ok(Response::new(proto::AddEdgeResponse { command_id: cmd_id }))
     }
 
     async fn remove_edge(
@@ -113,15 +195,22 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         request: Request<proto::RemoveEdgeRequest>,
     ) -> Result<Response<proto::RemoveEdgeResponse>, Status> {
         let req = request.into_inner();
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| Status::internal("store lock poisoned"))?;
-        let cmd_id = store
-            .remove_edge(MemoryId(req.from), MemoryId(req.to))
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let cmd_id = match self
+            .send_write(WriteCommand::RemoveEdge {
+                from: MemoryId(req.from),
+                to: MemoryId(req.to),
+            })
+            .await?
+        {
+            WriteResult::CommandId(id) => id,
+            _ => {
+                return Err(Status::internal(
+                    "unexpected writer response for remove_edge",
+                ));
+            }
+        };
         Ok(Response::new(proto::RemoveEdgeResponse {
-            command_id: cmd_id.0,
+            command_id: cmd_id,
         }))
     }
 
@@ -162,10 +251,7 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
             embedding: req.query_embedding,
         };
 
-        let store = self
-            .store
-            .lock()
-            .map_err(|_| Status::internal("store lock poisoned"))?;
+        let store = self.store.read().await;
         let out = store
             .query("grpc_query", options, &embedder)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -174,22 +260,26 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
             .hits
             .into_iter()
             .map(|h| {
-                let memory = store.state_machine().get_memory(h.id).ok().map(|m| proto::Memory {
-                    id: m.id.0,
-                    namespace: m.namespace.clone(),
-                    content: m.content.clone(),
-                    embedding: m.embedding.clone().unwrap_or_default(),
-                    created_at: m.created_at,
-                    importance: m.importance,
-                    metadata: m
-                        .metadata
-                        .iter()
-                        .map(|(k, v)| proto::MetadataPair {
-                            key: k.clone(),
-                            value: v.clone(),
-                        })
-                        .collect(),
-                });
+                let memory = store
+                    .state_machine()
+                    .get_memory(h.id)
+                    .ok()
+                    .map(|m| proto::Memory {
+                        id: m.id.0,
+                        namespace: m.namespace.clone(),
+                        content: m.content.clone(),
+                        embedding: m.embedding.clone().unwrap_or_default(),
+                        created_at: m.created_at,
+                        importance: m.importance,
+                        metadata: m
+                            .metadata
+                            .iter()
+                            .map(|(k, v)| proto::MetadataPair {
+                                key: k.clone(),
+                                value: v.clone(),
+                            })
+                            .collect(),
+                    });
                 proto::QueryHit {
                     id: h.id.0,
                     final_score: h.final_score,
@@ -222,13 +312,17 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
             req.max_bytes,
         );
 
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| Status::internal("store lock poisoned"))?;
-        let report = store
-            .enforce_capacity(policy)
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let report = match self
+            .send_write(WriteCommand::EnforceCapacity(policy))
+            .await?
+        {
+            WriteResult::Capacity(report) => report,
+            _ => {
+                return Err(Status::internal(
+                    "unexpected writer response for enforce_capacity",
+                ));
+            }
+        };
 
         Ok(Response::new(proto::EnforceCapacityResponse {
             evicted_ids: report.evicted_ids.into_iter().map(|id| id.0).collect(),
@@ -243,13 +337,14 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         &self,
         _request: Request<proto::CompactSegmentsRequest>,
     ) -> Result<Response<proto::CompactSegmentsResponse>, Status> {
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| Status::internal("store lock poisoned"))?;
-        let report = store
-            .compact_segments()
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let report = match self.send_write(WriteCommand::CompactSegments).await? {
+            WriteResult::Compact(report) => report,
+            _ => {
+                return Err(Status::internal(
+                    "unexpected writer response for compact_segments",
+                ));
+            }
+        };
         Ok(Response::new(proto::CompactSegmentsResponse {
             compacted_segments: report.compacted_segments,
             live_entries_rewritten: u64::try_from(report.live_entries_rewritten)
@@ -261,10 +356,7 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         &self,
         _request: Request<proto::StatsRequest>,
     ) -> Result<Response<proto::StatsResponse>, Status> {
-        let store = self
-            .store
-            .lock()
-            .map_err(|_| Status::internal("store lock poisoned"))?;
+        let store = self.store.read().await;
         Ok(Response::new(proto::StatsResponse {
             wal_len: store.wal_len(),
             state_entries: u64::try_from(store.state_machine().len()).unwrap_or(u64::MAX),
