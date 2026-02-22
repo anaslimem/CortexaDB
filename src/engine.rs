@@ -4,6 +4,7 @@ use thiserror::Error;
 use crate::core::command::Command;
 use crate::core::state_machine::StateMachine;
 use crate::storage::wal::{WriteAheadLog, CommandId};
+use crate::storage::segment::SegmentStorage;
 
 #[derive(Error, Debug)]
 pub enum EngineError {
@@ -11,56 +12,69 @@ pub enum EngineError {
     WalError(#[from] crate::storage::wal::WalError),
     #[error("State machine error: {0}")]
     StateMachineError(#[from] crate::core::state_machine::StateMachineError),
+    #[error("Segment error: {0}")]
+    SegmentError(#[from] crate::storage::segment::SegmentError),
     #[error("Engine not recovered properly")]
     NotRecovered,
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
-/// Main engine coordinating WAL + StateMachine
+/// Main engine coordinating WAL + SegmentStorage + StateMachine
 /// 
-/// Ensures durability by:
-/// 1. Writing command to WAL first (disk)
-/// 2. Applying command to StateMachine (memory)
-/// 3. Only returning success after both complete
+/// Ensures durability and efficient replication by:
+/// 1. Writing command to WAL first (command durability)
+/// 2. Writing entry to SegmentStorage (data durability)
+/// 3. Applying command to StateMachine (in-memory state)
+/// 4. Only returning success after all steps complete
 pub struct Engine {
     wal: WriteAheadLog,
+    segments: SegmentStorage,
     state_machine: StateMachine,
     last_applied_id: CommandId,
 }
 
 impl Engine {
-    /// Create a new engine or recover from existing WAL
-    pub fn new<P: AsRef<Path>>(wal_path: P) -> Result<Self> {
-        let path = wal_path.as_ref();
+    /// Create a new engine or recover from existing WAL and segments
+    pub fn new<P: AsRef<Path>>(wal_path: P, segments_dir: P) -> Result<Self> {
+        let wal_path = wal_path.as_ref();
+        let segments_dir = segments_dir.as_ref();
         
         // Check if we need to recover from existing WAL
-        if path.exists() {
-            Self::recover(path)
+        if wal_path.exists() {
+            Self::recover(wal_path, segments_dir)
         } else {
             // Fresh start
-            let wal = WriteAheadLog::new(path)?;
+            let wal = WriteAheadLog::new(wal_path)?;
+            let segments = SegmentStorage::new(segments_dir)?;
             let state_machine = StateMachine::new();
             
             Ok(Engine {
                 wal,
+                segments,
                 state_machine,
                 last_applied_id: CommandId(0),
             })
         }
     }
 
-    /// Recover state from existing WAL
+    /// Recover state from existing WAL and segments
     /// 
-    /// This rebuilds the entire state machine by replaying all commands
-    /// from the WAL. This ensures crash recovery works perfectly.
-    pub fn recover<P: AsRef<Path>>(wal_path: P) -> Result<Self> {
-        let path = wal_path.as_ref();
+    /// Recovery in order:
+    /// 1. Load all entries from segment files (builds index)
+    /// 2. Replay WAL commands to get latest state
+    /// 3. This ensures consistency between disk and memory
+    pub fn recover<P: AsRef<Path>>(wal_path: P, segments_dir: P) -> Result<Self> {
+        let wal_path = wal_path.as_ref();
+        let segments_dir = segments_dir.as_ref();
+        
+        // Load segments (this rebuilds the index from segment files)
+        let segments = SegmentStorage::new(segments_dir)?;
         
         // Read all commands from WAL
-        let commands = WriteAheadLog::read_all(path)?;
+        let commands = WriteAheadLog::read_all(wal_path)?;
 
-        // Create fresh state machine
+        // Create fresh state machine and replay commands
         let mut state_machine = StateMachine::new();
 
         // Replay all commands in order
@@ -71,10 +85,11 @@ impl Engine {
         }
 
         // Open WAL for appending new commands
-        let wal = WriteAheadLog::new(path)?;
+        let wal = WriteAheadLog::new(wal_path)?;
 
         Ok(Engine {
             wal,
+            segments,
             state_machine,
             last_applied_id: last_id,
         })
@@ -82,23 +97,50 @@ impl Engine {
 
     /// Execute a command with durability guarantees
     /// 
-    /// CRITICAL: WAL is written BEFORE StateMachine is modified
-    /// This ensures that if crash happens, WAL has the command
-    /// and recovery can replay it.
+    /// Critical order for crash safety:
+    /// 1. Write command to WAL
+    /// 2. Write data to segments (if applicable)
+    /// 3. Sync to disk
+    /// 4. Apply to state machine
+    /// 
+    /// This ensures WAL + segments always have the data before it's in memory
     pub fn execute_command(&mut self, cmd: Command) -> Result<CommandId> {
-        // 1. Write to WAL first (must succeed before we apply)
+        // 1. Write to WAL first (command logging)
         let cmd_id = self.wal.append(&cmd)?;
         
-        // 2. Sync to disk (durability guarantee)
+        // 2. Handle data persistence based on command type
+        match &cmd {
+            Command::InsertMemory(entry) => {
+                // Write entry to segment storage
+                self._write_entry_to_segments(entry)?;
+            }
+            Command::DeleteMemory(id) => {
+                // Mark as deleted in segments
+                self.segments.delete_entry(*id)?;
+            }
+            _ => {
+                // AddEdge and RemoveEdge don't need segment writes
+                // They're stored in StateMachine's graph
+            }
+        }
+        
+        // 3. Sync to disk (durability guarantee)
         self.wal.fsync()?;
+        self.segments.fsync()?;
 
-        // 3. Apply to state machine (if crash after this, WAL has it)
+        // 4. Apply to state machine (if crash after this, WAL + segments have it)
         self.state_machine.apply_command(cmd)?;
 
-        // 4. Update tracking
+        // 5. Update tracking
         self.last_applied_id = cmd_id;
 
         Ok(cmd_id)
+    }
+
+    /// Helper: Write entry to segments
+    fn _write_entry_to_segments(&mut self, entry: &crate::core::memory_entry::MemoryEntry) -> Result<()> {
+        self.segments.write_entry(entry)?;
+        Ok(())
     }
 
     /// Get reference to the state machine (read-only)
@@ -111,6 +153,11 @@ impl Engine {
     /// you bypass WAL durability! Use execute_command() instead.
     pub fn get_state_machine_mut(&mut self) -> &mut StateMachine {
         &mut self.state_machine
+    }
+
+    /// Get reference to segments
+    pub fn get_segments(&self) -> &SegmentStorage {
+        &self.segments
     }
 
     /// Get last applied command ID
@@ -139,8 +186,10 @@ mod tests {
     fn test_engine_creation() {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
+        let seg_dir = temp_dir.path().join("segments");
 
-        let engine = Engine::new(&wal_path).unwrap();
+        let engine = Engine::new(&wal_path, &seg_dir).unwrap();
         assert!(engine.is_empty());
         assert_eq!(engine.wal_len(), 0);
     }
@@ -149,8 +198,9 @@ mod tests {
     fn test_engine_execute_command() {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
 
-        let mut engine = Engine::new(&wal_path).unwrap();
+        let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
         let entry = MemoryEntry::new(
             MemoryId(1),
@@ -171,8 +221,9 @@ mod tests {
     fn test_engine_multiple_commands() {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
 
-        let mut engine = Engine::new(&wal_path).unwrap();
+        let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
         // Insert 10 memories
         for i in 0..10 {
@@ -206,10 +257,11 @@ mod tests {
     fn test_recovery_from_crash() {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
 
         // Execute commands
         {
-            let mut engine = Engine::new(&wal_path).unwrap();
+            let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
             for i in 0..5 {
                 let entry = MemoryEntry::new(
@@ -226,7 +278,7 @@ mod tests {
         }
 
         // Recover from WAL
-        let engine = Engine::recover(&wal_path).unwrap();
+        let engine = Engine::recover(&wal_path, &seg_dir).unwrap();
 
         assert_eq!(engine.wal_len(), 5);
         assert_eq!(engine.get_state_machine().len(), 5);
@@ -244,10 +296,11 @@ mod tests {
     fn test_recovery_preserves_order() {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
 
         // Create initial state
         {
-            let mut engine = Engine::new(&wal_path).unwrap();
+            let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
             // Insert 3 memories
             for i in 0..3 {
@@ -279,7 +332,7 @@ mod tests {
         }
 
         // Recover and verify edges are in order
-        let recovered = Engine::recover(&wal_path).unwrap();
+        let recovered = Engine::recover(&wal_path, &seg_dir).unwrap();
 
         let neighbors_0 = recovered
             .get_state_machine()
@@ -300,10 +353,11 @@ mod tests {
     fn test_recovery_100_commands() {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
 
         // Execute 100 commands
         {
-            let mut engine = Engine::new(&wal_path).unwrap();
+            let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
             for i in 0..100 {
                 let entry = MemoryEntry::new(
@@ -321,7 +375,7 @@ mod tests {
         }
 
         // Recover - should rebuild entire state
-        let recovered = Engine::recover(&wal_path).unwrap();
+        let recovered = Engine::recover(&wal_path, &seg_dir).unwrap();
 
         assert_eq!(recovered.wal_len(), 100);
         assert_eq!(recovered.get_state_machine().len(), 100);
@@ -340,10 +394,11 @@ mod tests {
     fn test_recovery_with_mixed_commands() {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
 
         // Create state with mixed operations
         {
-            let mut engine = Engine::new(&wal_path).unwrap();
+            let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
             // Insert memories
             for i in 0..5 {
@@ -371,7 +426,7 @@ mod tests {
         }
 
         // Recover
-        let recovered = Engine::recover(&wal_path).unwrap();
+        let recovered = Engine::recover(&wal_path, &seg_dir).unwrap();
 
         assert_eq!(recovered.get_state_machine().len(), 4);
         assert!(recovered
