@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+package mnemos;
+
+service MnemosService {
+  rpc InsertMemory(InsertMemoryRequest) returns (InsertMemoryResponse);
+  rpc DeleteMemory(DeleteMemoryRequest) returns (DeleteMemoryResponse);
+  rpc AddEdge(AddEdgeRequest) returns (AddEdgeResponse);
+  rpc RemoveEdge(RemoveEdgeRequest) returns (RemoveEdgeResponse);
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc EnforceCapacity(EnforceCapacityRequest) returns (EnforceCapacityResponse);
+  rpc CompactSegments(CompactSegmentsRequest) returns (CompactSegmentsResponse);
+  rpc Stats(StatsRequest) returns (StatsResponse);
+}
+
+message MetadataPair {
+  string key = 1;
+  string value = 2;
+}
+
+message Memory {
+  uint64 id = 1;
+  string namespace = 2;
+  bytes content = 3;
+  repeated float embedding = 4;
+  uint64 created_at = 5;
+  float importance = 6;
+  repeated MetadataPair metadata = 7;
+}
+
+message InsertMemoryRequest {
+  Memory memory = 1;
+}
+
+message InsertMemoryResponse {
+  uint64 command_id = 1;
+}
+
+message DeleteMemoryRequest {
+  uint64 id = 1;
+}
+
+message DeleteMemoryResponse {
+  uint64 command_id = 1;
+}
+
+message AddEdgeRequest {
+  uint64 from = 1;
+  uint64 to = 2;
+  string relation = 3;
+}
+
+message AddEdgeResponse {
+  uint64 command_id = 1;
+}
+
+message RemoveEdgeRequest {
+  uint64 from = 1;
+  uint64 to = 2;
+}
+
+message RemoveEdgeResponse {
+  uint64 command_id = 1;
+}
+
+message QueryRequest {
+  repeated float query_embedding = 1;
+  uint32 top_k = 2;
+  optional string namespace = 3;
+  optional uint64 time_start = 4;
+  optional uint64 time_end = 5;
+  optional uint32 graph_hops = 6;
+  uint32 candidate_multiplier = 7;
+  uint32 similarity_pct = 8;
+  uint32 importance_pct = 9;
+  uint32 recency_pct = 10;
+}
+
+message QueryHit {
+  uint64 id = 1;
+  float final_score = 2;
+  float similarity_score = 3;
+  float importance_score = 4;
+  float recency_score = 5;
+}
+
+message QueryResponse {
+  repeated QueryHit hits = 1;
+  string execution_path = 2;
+  bool used_parallel = 3;
+  uint32 vector_candidates = 4;
+  uint32 filtered_candidates = 5;
+  uint32 final_results = 6;
+  uint64 elapsed_ms = 7;
+}
+
+message EnforceCapacityRequest {
+  optional uint64 max_entries = 1;
+  optional uint64 max_bytes = 2;
+}
+
+message EnforceCapacityResponse {
+  repeated uint64 evicted_ids = 1;
+  uint64 entries_before = 2;
+  uint64 entries_after = 3;
+  uint64 bytes_before = 4;
+  uint64 bytes_after = 5;
+}
+
+message CompactSegmentsRequest {}
+
+message CompactSegmentsResponse {
+  repeated uint32 compacted_segments = 1;
+  uint64 live_entries_rewritten = 2;
+}
+
+message StatsRequest {}
+
+message StatsResponse {
+  uint64 wal_len = 1;
+  uint64 state_entries = 2;
+  uint64 indexed_embeddings = 3;
+}

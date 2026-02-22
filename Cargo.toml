@@ -11,7 +11,13 @@ rayon = "1.7"
 thiserror = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 crc = "3.0"
+tonic = { version = "0.12", features = ["transport"] }
+prost = "0.13"
 
 [dev-dependencies]
 proptest = "1.4"
 tempfile = "3.8"
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
