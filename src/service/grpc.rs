@@ -173,12 +173,31 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         let hits = out
             .hits
             .into_iter()
-            .map(|h| proto::QueryHit {
-                id: h.id.0,
-                final_score: h.final_score,
-                similarity_score: h.similarity_score,
-                importance_score: h.importance_score,
-                recency_score: h.recency_score,
+            .map(|h| {
+                let memory = store.state_machine().get_memory(h.id).ok().map(|m| proto::Memory {
+                    id: m.id.0,
+                    namespace: m.namespace.clone(),
+                    content: m.content.clone(),
+                    embedding: m.embedding.clone().unwrap_or_default(),
+                    created_at: m.created_at,
+                    importance: m.importance,
+                    metadata: m
+                        .metadata
+                        .iter()
+                        .map(|(k, v)| proto::MetadataPair {
+                            key: k.clone(),
+                            value: v.clone(),
+                        })
+                        .collect(),
+                });
+                proto::QueryHit {
+                    id: h.id.0,
+                    final_score: h.final_score,
+                    similarity_score: h.similarity_score,
+                    importance_score: h.importance_score,
+                    recency_score: h.recency_score,
+                    memory,
+                }
             })
             .collect();
 

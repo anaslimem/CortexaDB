@@ -82,6 +82,7 @@ message QueryHit {
   float similarity_score = 3;
   float importance_score = 4;
   float recency_score = 5;
+  Memory memory = 6;
 }
 
 message QueryResponse {
