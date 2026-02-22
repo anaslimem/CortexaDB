@@ -17,13 +17,13 @@ pub enum GraphError {
 pub type Result<T> = std::result::Result<T, GraphError>;
 
 /// Graph index for navigating memory relationships
-/// 
+///
 /// Provides traversal methods: BFS, DFS, pathfinding
 pub struct GraphIndex;
 
 impl GraphIndex {
     /// Breadth-first search: find all memories reachable within N hops
-    /// 
+    ///
     /// Returns HashMap of MemoryId → distance (hop count)
     pub fn bfs(
         state_machine: &StateMachine,
@@ -35,9 +35,9 @@ impl GraphIndex {
         }
 
         // Verify start memory exists
-        state_machine.get_memory(start).map_err(|_| {
-            GraphError::MemoryNotFound(start)
-        })?;
+        state_machine
+            .get_memory(start)
+            .map_err(|_| GraphError::MemoryNotFound(start))?;
 
         let mut visited = HashMap::new();
         let mut queue = VecDeque::new();
@@ -67,7 +67,7 @@ impl GraphIndex {
     }
 
     /// Depth-first search: find all paths from start
-    /// 
+    ///
     /// Returns list of paths (each path is Vec<MemoryId>)
     pub fn dfs(
         state_machine: &StateMachine,
@@ -79,12 +79,13 @@ impl GraphIndex {
         }
 
         // Verify start memory exists
-        state_machine.get_memory(start).map_err(|_| {
-            GraphError::MemoryNotFound(start)
-        })?;
+        state_machine
+            .get_memory(start)
+            .map_err(|_| GraphError::MemoryNotFound(start))?;
 
         let mut paths = Vec::new();
         let mut visited = std::collections::HashSet::new();
+        visited.insert(start);
 
         Self::dfs_recursive(
             state_machine,
@@ -143,7 +144,7 @@ impl GraphIndex {
     }
 
     /// Find shortest path between two memories using BFS
-    /// 
+    ///
     /// Returns path as Vec<MemoryId> or None if unreachable
     pub fn find_path(
         state_machine: &StateMachine,
@@ -151,12 +152,12 @@ impl GraphIndex {
         to: MemoryId,
     ) -> Result<Option<Vec<MemoryId>>> {
         // Verify both memories exist
-        state_machine.get_memory(from).map_err(|_| {
-            GraphError::MemoryNotFound(from)
-        })?;
-        state_machine.get_memory(to).map_err(|_| {
-            GraphError::MemoryNotFound(to)
-        })?;
+        state_machine
+            .get_memory(from)
+            .map_err(|_| GraphError::MemoryNotFound(from))?;
+        state_machine
+            .get_memory(to)
+            .map_err(|_| GraphError::MemoryNotFound(to))?;
 
         if from == to {
             return Ok(Some(vec![from]));
@@ -379,7 +380,7 @@ mod tests {
 
         // Should have multiple paths
         assert!(paths.len() > 0);
-        
+
         // All paths should start with 0
         for path in &paths {
             assert_eq!(path[0], MemoryId(0));
@@ -398,5 +399,23 @@ mod tests {
         let sm = setup_graph();
         let result = GraphIndex::dfs(&sm, MemoryId(0), 0);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dfs_does_not_revisit_start_in_cycle() {
+        let mut sm = StateMachine::new();
+        sm.insert_memory(create_entry(0)).unwrap();
+        sm.insert_memory(create_entry(1)).unwrap();
+        sm.add_edge(MemoryId(0), MemoryId(1), "to".to_string())
+            .unwrap();
+        sm.add_edge(MemoryId(1), MemoryId(0), "back".to_string())
+            .unwrap();
+
+        let paths = GraphIndex::dfs(&sm, MemoryId(0), 3).unwrap();
+        assert!(
+            paths
+                .iter()
+                .all(|path| path.iter().filter(|&&id| id == MemoryId(0)).count() == 1)
+        );
     }
 }

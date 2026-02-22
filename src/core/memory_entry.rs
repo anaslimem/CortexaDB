@@ -18,12 +18,7 @@ pub struct MemoryEntry {
 }
 
 impl MemoryEntry {
-    pub fn new(
-        id: MemoryId,
-        namespace: String,
-        content: Vec<u8>,
-        created_at: u64,
-    ) -> Self {
+    pub fn new(id: MemoryId, namespace: String, content: Vec<u8>, created_at: u64) -> Self {
         Self {
             id,
             namespace,
@@ -66,14 +61,9 @@ mod tests {
 
     #[test]
     fn test_memory_entry_builder() {
-        let entry = MemoryEntry::new(
-            MemoryId(1),
-            "default".to_string(),
-            b"test".to_vec(),
-            1000,
-        )
-        .with_importance(0.8)
-        .with_embedding(vec![0.1, 0.2, 0.3]);
+        let entry = MemoryEntry::new(MemoryId(1), "default".to_string(), b"test".to_vec(), 1000)
+            .with_importance(0.8)
+            .with_embedding(vec![0.1, 0.2, 0.3]);
 
         assert_eq!(entry.importance, 0.8);
         assert_eq!(entry.embedding, Some(vec![0.1, 0.2, 0.3]));

@@ -1,3 +1,3 @@
-pub mod wal;
-pub mod segment;
 pub mod compaction;
+pub mod segment;
+pub mod wal;

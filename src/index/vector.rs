@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use thiserror::Error;
 use rayon::prelude::*;
+use std::collections::{HashMap, HashSet};
+use thiserror::Error;
 
 use crate::core::memory_entry::MemoryId;
 
@@ -21,7 +21,7 @@ pub enum VectorError {
 pub type Result<T> = std::result::Result<T, VectorError>;
 
 /// Vector index for semantic search via embeddings
-/// 
+///
 /// Stores embeddings (vectors) and enables fast similarity search
 /// using cosine similarity with parallel computation via Rayon
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ impl VectorIndex {
     }
 
     /// Serial search: find top K similar embeddings
-    /// 
+    ///
     /// Returns list of (MemoryId, cosine_similarity_score) sorted by score descending
     pub fn search(&self, query: &[f32], top_k: usize) -> Result<Vec<(MemoryId, f32)>> {
         if query.is_empty() {
@@ -118,7 +118,7 @@ impl VectorIndex {
     }
 
     /// Parallel search: find top K similar embeddings using Rayon
-    /// 
+    ///
     /// Same as search() but uses thread pool for parallelization
     /// Faster for large datasets (>10k embeddings)
     pub fn search_parallel(&self, query: &[f32], top_k: usize) -> Result<Vec<(MemoryId, f32)>> {
@@ -146,7 +146,7 @@ impl VectorIndex {
         // Parallel computation using Rayon
         let mut results: Vec<(MemoryId, f32)> = self
             .embeddings
-            .par_iter()  // ← Rayon parallel iterator
+            .par_iter() // ← Rayon parallel iterator
             .map(|(id, embedding)| {
                 let similarity = cosine_similarity(query, embedding, query_magnitude);
                 (*id, similarity)
@@ -157,6 +157,53 @@ impl VectorIndex {
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Return top K
+        results.truncate(top_k);
+        Ok(results)
+    }
+
+    /// Search similarity only within a restricted set of memory IDs.
+    pub fn search_in_ids(
+        &self,
+        query: &[f32],
+        candidate_ids: &HashSet<MemoryId>,
+        top_k: usize,
+    ) -> Result<Vec<(MemoryId, f32)>> {
+        if query.is_empty() {
+            return Err(VectorError::EmptyQuery);
+        }
+
+        if query.len() != self.vector_dimension {
+            return Err(VectorError::DimensionMismatch {
+                expected: self.vector_dimension,
+                actual: query.len(),
+            });
+        }
+
+        if self.embeddings.is_empty() {
+            return Err(VectorError::NoEmbeddings);
+        }
+
+        if top_k == 0 {
+            return Err(VectorError::InvalidTopK(top_k));
+        }
+
+        if candidate_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let query_magnitude = magnitude(query)?;
+
+        let mut results: Vec<(MemoryId, f32)> = candidate_ids
+            .iter()
+            .filter_map(|id| {
+                self.embeddings.get(id).map(|embedding| {
+                    let similarity = cosine_similarity(query, embedding, query_magnitude);
+                    (*id, similarity)
+                })
+            })
+            .collect();
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         results.truncate(top_k);
         Ok(results)
     }
@@ -173,10 +220,10 @@ impl VectorIndex {
 }
 
 /// Calculate cosine similarity between two vectors
-/// 
+///
 /// Formula: (a · b) / (|a| * |b|)
 /// where · is dot product and | | is magnitude
-/// 
+///
 /// Returns value in range [-1, 1], typically [0, 1] for embeddings
 fn cosine_similarity(a: &[f32], b: &[f32], a_magnitude: f32) -> f32 {
     if a.len() != b.len() {
@@ -198,7 +245,7 @@ fn cosine_similarity(a: &[f32], b: &[f32], a_magnitude: f32) -> f32 {
 }
 
 /// Calculate vector magnitude (L2 norm)
-/// 
+///
 /// Formula: sqrt(sum of squares)
 fn magnitude(vec: &[f32]) -> Result<f32> {
     if vec.is_empty() {
@@ -206,7 +253,7 @@ fn magnitude(vec: &[f32]) -> Result<f32> {
     }
 
     let sum_of_squares: f32 = vec.iter().map(|x| x * x).sum();
-    
+
     if sum_of_squares == 0.0 {
         return Err(VectorError::ZeroVector);
     }
@@ -289,8 +336,12 @@ mod tests {
     #[test]
     fn test_vector_search_single_match() {
         let mut index = VectorIndex::new(3);
-        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
-        index.index(MemoryId(2), create_embedding(&[0.5, 0.6, 0.7])).unwrap();
+        index
+            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
+            .unwrap();
+        index
+            .index(MemoryId(2), create_embedding(&[0.5, 0.6, 0.7]))
+            .unwrap();
 
         let results = index.search(&[0.1, 0.2, 0.3], 1).unwrap();
 
@@ -302,9 +353,15 @@ mod tests {
     #[test]
     fn test_vector_search_top_k() {
         let mut index = VectorIndex::new(2);
-        index.index(MemoryId(1), create_embedding(&[1.0, 0.0])).unwrap();
-        index.index(MemoryId(2), create_embedding(&[0.9, 0.1])).unwrap();
-        index.index(MemoryId(3), create_embedding(&[0.0, 1.0])).unwrap();
+        index
+            .index(MemoryId(1), create_embedding(&[1.0, 0.0]))
+            .unwrap();
+        index
+            .index(MemoryId(2), create_embedding(&[0.9, 0.1]))
+            .unwrap();
+        index
+            .index(MemoryId(3), create_embedding(&[0.0, 1.0]))
+            .unwrap();
 
         let results = index.search(&[1.0, 0.0], 2).unwrap();
 
@@ -317,9 +374,15 @@ mod tests {
     #[test]
     fn test_vector_search_sorted_by_similarity() {
         let mut index = VectorIndex::new(2);
-        index.index(MemoryId(1), create_embedding(&[0.0, 1.0])).unwrap();
-        index.index(MemoryId(2), create_embedding(&[0.5, 0.5])).unwrap();
-        index.index(MemoryId(3), create_embedding(&[1.0, 0.0])).unwrap();
+        index
+            .index(MemoryId(1), create_embedding(&[0.0, 1.0]))
+            .unwrap();
+        index
+            .index(MemoryId(2), create_embedding(&[0.5, 0.5]))
+            .unwrap();
+        index
+            .index(MemoryId(3), create_embedding(&[1.0, 0.0]))
+            .unwrap();
 
         let results = index.search(&[1.0, 0.0], 3).unwrap();
 
@@ -356,7 +419,9 @@ mod tests {
     #[test]
     fn test_vector_remove() {
         let mut index = VectorIndex::new(3);
-        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
+        index
+            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
+            .unwrap();
         assert_eq!(index.len(), 1);
 
         index.remove(MemoryId(1)).unwrap();
@@ -381,7 +446,9 @@ mod tests {
     #[test]
     fn test_vector_search_invalid_top_k() {
         let mut index = VectorIndex::new(3);
-        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
+        index
+            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
+            .unwrap();
 
         let result = index.search(&[0.1, 0.2, 0.3], 0);
         assert!(result.is_err());
@@ -390,8 +457,12 @@ mod tests {
     #[test]
     fn test_vector_search_top_k_larger_than_embeddings() {
         let mut index = VectorIndex::new(3);
-        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
-        index.index(MemoryId(2), create_embedding(&[0.4, 0.5, 0.6])).unwrap();
+        index
+            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
+            .unwrap();
+        index
+            .index(MemoryId(2), create_embedding(&[0.4, 0.5, 0.6]))
+            .unwrap();
 
         // Request top 10 but only 2 embeddings
         let results = index.search(&[0.1, 0.2, 0.3], 10).unwrap();
@@ -401,9 +472,15 @@ mod tests {
     #[test]
     fn test_vector_indexed_ids() {
         let mut index = VectorIndex::new(3);
-        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
-        index.index(MemoryId(5), create_embedding(&[0.4, 0.5, 0.6])).unwrap();
-        index.index(MemoryId(3), create_embedding(&[0.7, 0.8, 0.9])).unwrap();
+        index
+            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
+            .unwrap();
+        index
+            .index(MemoryId(5), create_embedding(&[0.4, 0.5, 0.6]))
+            .unwrap();
+        index
+            .index(MemoryId(3), create_embedding(&[0.7, 0.8, 0.9]))
+            .unwrap();
 
         let ids = index.indexed_ids();
         assert_eq!(ids.len(), 3);
@@ -429,7 +506,7 @@ mod tests {
     #[test]
     fn test_vector_parallel_with_large_dataset() {
         let mut index = VectorIndex::new(100);
-        
+
         // Create 1000 embeddings
         for i in 0..1000 {
             let embedding: Vec<f32> = (0..100)
@@ -439,13 +516,30 @@ mod tests {
         }
 
         let query: Vec<f32> = (0..100).map(|i| (i as f32).sin().abs()).collect();
-        
+
         let results = index.search_parallel(&query, 10).unwrap();
         assert_eq!(results.len(), 10);
-        
+
         // Verify results are sorted
         for i in 0..9 {
             assert!(results[i].1 >= results[i + 1].1);
         }
+    }
+
+    #[test]
+    fn test_vector_search_in_ids() {
+        let mut index = VectorIndex::new(3);
+        index.index(MemoryId(1), vec![1.0, 0.0, 0.0]).unwrap();
+        index.index(MemoryId(2), vec![0.0, 1.0, 0.0]).unwrap();
+        index.index(MemoryId(3), vec![0.0, 0.0, 1.0]).unwrap();
+
+        let candidates: HashSet<MemoryId> = [MemoryId(1), MemoryId(3)].into_iter().collect();
+        let results = index
+            .search_in_ids(&[1.0, 0.0, 0.0], &candidates, 5)
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, MemoryId(1));
+        assert!(results.iter().all(|(id, _)| *id != MemoryId(2)));
     }
 }

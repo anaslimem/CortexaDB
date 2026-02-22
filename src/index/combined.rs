@@ -1,10 +1,11 @@
+use std::collections::HashSet;
 use thiserror::Error;
 
 use crate::core::memory_entry::MemoryId;
 use crate::core::state_machine::StateMachine;
-use crate::index::vector::VectorIndex;
 use crate::index::graph::GraphIndex;
 use crate::index::temporal::TemporalIndex;
+use crate::index::vector::VectorIndex;
 
 #[derive(Error, Debug)]
 pub enum CombinedError {
@@ -19,7 +20,7 @@ pub enum CombinedError {
 pub type Result<T> = std::result::Result<T, CombinedError>;
 
 /// Combined index layer for multi-criteria queries
-/// 
+///
 /// Combines Vector + Graph + Temporal indexes for rich contextual search
 pub struct IndexLayer {
     pub vector: VectorIndex,
@@ -34,7 +35,7 @@ impl IndexLayer {
     }
 
     /// Search similar embeddings within a time range
-    /// 
+    ///
     /// Returns: [(MemoryId, similarity_score)]
     pub fn search_similar_in_range(
         &self,
@@ -46,22 +47,16 @@ impl IndexLayer {
     ) -> Result<Vec<(MemoryId, f32)>> {
         // Step 1: Get memories in time range
         let temporal_results = TemporalIndex::get_range(state_machine, time_start, time_end)?;
+        let candidates: HashSet<MemoryId> = temporal_results.into_iter().collect();
 
-        // Step 2: Search similarity among those
-        let all_results = self.vector.search(query, top_k * 2)?; // Get more to filter
-
-        // Step 3: Filter to only those in time range
-        let filtered: Vec<(MemoryId, f32)> = all_results
-            .into_iter()
-            .filter(|(id, _)| temporal_results.contains(id))
-            .take(top_k)
-            .collect();
-
-        Ok(filtered)
+        // Step 2: Search similarity only among candidates
+        self.vector
+            .search_in_ids(query, &candidates, top_k)
+            .map_err(Into::into)
     }
 
     /// Search similar embeddings connected to a specific memory
-    /// 
+    ///
     /// Returns: [(MemoryId, similarity_score)]
     pub fn search_similar_connected_to(
         &self,
@@ -73,22 +68,16 @@ impl IndexLayer {
     ) -> Result<Vec<(MemoryId, f32)>> {
         // Step 1: Get all reachable memories
         let graph_results = GraphIndex::get_reachable(state_machine, origin, max_hops)?;
+        let candidates: HashSet<MemoryId> = graph_results.into_iter().collect();
 
-        // Step 2: Search similarity
-        let all_results = self.vector.search(query, top_k * 2)?;
-
-        // Step 3: Filter to only connected ones
-        let filtered: Vec<(MemoryId, f32)> = all_results
-            .into_iter()
-            .filter(|(id, _)| graph_results.contains(id))
-            .take(top_k)
-            .collect();
-
-        Ok(filtered)
+        // Step 2: Search similarity only among connected memories
+        self.vector
+            .search_in_ids(query, &candidates, top_k)
+            .map_err(Into::into)
     }
 
     /// Search similar embeddings within time range AND connected to a memory
-    /// 
+    ///
     /// Three-way intersection: Vector + Graph + Temporal
     /// Returns: [(MemoryId, similarity_score)]
     pub fn search_similar_in_range_connected_to(
@@ -108,21 +97,14 @@ impl IndexLayer {
         let graph_results = GraphIndex::get_reachable(state_machine, origin, max_hops)?;
 
         // Step 3: Find intersection of temporal AND graph
-        let mut combined: std::collections::HashSet<MemoryId> = 
-            temporal_results.into_iter().collect();
-        combined.retain(|id| graph_results.contains(id));
+        let temporal_set: HashSet<MemoryId> = temporal_results.into_iter().collect();
+        let graph_set: HashSet<MemoryId> = graph_results.into_iter().collect();
+        let combined: HashSet<MemoryId> = temporal_set.intersection(&graph_set).copied().collect();
 
-        // Step 4: Search similarity
-        let all_results = self.vector.search(query, top_k * 2)?;
-
-        // Step 5: Filter to only those in intersection
-        let filtered: Vec<(MemoryId, f32)> = all_results
-            .into_iter()
-            .filter(|(id, _)| combined.contains(id))
-            .take(top_k)
-            .collect();
-
-        Ok(filtered)
+        // Step 4: Search similarity in intersection only
+        self.vector
+            .search_in_ids(query, &combined, top_k)
+            .map_err(Into::into)
     }
 
     /// Get vector index
@@ -163,7 +145,7 @@ mod tests {
         for i in 0..5 {
             let timestamp = 1000 + (i as u64) * 1000;
             let entry = create_entry(i as u64, timestamp);
-            
+
             // Index the embedding
             layer
                 .vector_index_mut()
@@ -244,5 +226,44 @@ mod tests {
     fn test_index_layer_creation() {
         let layer = IndexLayer::new(768);
         assert_eq!(layer.vector_index().dimension(), 768);
+    }
+
+    #[test]
+    fn test_search_similar_in_range_does_not_miss_valid_candidates() {
+        let mut sm = StateMachine::new();
+        let mut layer = IndexLayer::new(2);
+
+        // In-range candidate (should be returned even if globally lower-ranked)
+        let in_range = MemoryEntry::new(MemoryId(1), "test".to_string(), b"a".to_vec(), 1000)
+            .with_embedding(vec![0.5, 0.5]);
+        layer
+            .vector_index_mut()
+            .index(MemoryId(1), in_range.embedding.clone().unwrap())
+            .unwrap();
+        sm.insert_memory(in_range).unwrap();
+
+        // Out-of-range but highly similar vectors
+        let out_1 = MemoryEntry::new(MemoryId(2), "test".to_string(), b"b".to_vec(), 9000)
+            .with_embedding(vec![1.0, 0.0]);
+        layer
+            .vector_index_mut()
+            .index(MemoryId(2), out_1.embedding.clone().unwrap())
+            .unwrap();
+        sm.insert_memory(out_1).unwrap();
+
+        let out_2 = MemoryEntry::new(MemoryId(3), "test".to_string(), b"c".to_vec(), 9000)
+            .with_embedding(vec![0.99, 0.01]);
+        layer
+            .vector_index_mut()
+            .index(MemoryId(3), out_2.embedding.clone().unwrap())
+            .unwrap();
+        sm.insert_memory(out_2).unwrap();
+
+        let results = layer
+            .search_similar_in_range(&sm, &[1.0, 0.0], 1000, 1000, 1)
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, MemoryId(1));
     }
 }

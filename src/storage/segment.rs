@@ -1,9 +1,9 @@
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write, BufWriter, BufReader, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
-use thiserror::Error;
 use crc::Crc;
+use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
 
@@ -45,21 +45,21 @@ struct SegmentEntryMeta {
 }
 
 /// Segment storage manager
-/// 
+///
 /// Stores MemoryEntry objects in append-only segment files
 /// Maintains in-memory index for O(1) lookups
-/// 
+///
 /// File format:
 /// [u32: entry_len][u32: checksum][N bytes: bincode(MemoryEntry)]
 pub struct SegmentStorage {
     data_dir: PathBuf,
     current_segment_id: u32,
     current_segment_size: u64,
-    max_segment_size: u64,  // 10MB by default
-    
+    max_segment_size: u64, // 10MB by default
+
     // In-memory index: MemoryId → SegmentLocation
     index: HashMap<MemoryId, SegmentEntryMeta>,
-    
+
     // Current segment file handle
     current_file: Option<BufWriter<File>>,
 }
@@ -68,7 +68,7 @@ impl SegmentStorage {
     /// Create new segment storage or recover existing
     pub fn new<P: AsRef<Path>>(data_dir: P) -> Result<Self> {
         let data_dir = data_dir.as_ref().to_path_buf();
-        
+
         // Create directory if not exists
         std::fs::create_dir_all(&data_dir)?;
 
@@ -76,7 +76,7 @@ impl SegmentStorage {
             data_dir,
             current_segment_id: 0,
             current_segment_size: 0,
-            max_segment_size: 10 * 1024 * 1024,  // 10MB
+            max_segment_size: 10 * 1024 * 1024, // 10MB
             index: HashMap::new(),
             current_file: None,
         };
@@ -104,12 +104,7 @@ impl SegmentStorage {
             .collect::<Vec<_>>();
 
         // Sort by segment ID to process in order
-        entries.sort_by_key(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .parse::<u32>()
-                .unwrap_or(0)
-        });
+        entries.sort_by_key(|e| e.file_name().to_string_lossy().parse::<u32>().unwrap_or(0));
 
         for entry in entries {
             let path = entry.path();
@@ -174,7 +169,7 @@ impl SegmentStorage {
                         },
                     );
 
-                    offset += 4 + 4 + len as u64;  // len + checksum + data
+                    offset += 4 + 4 + len as u64; // len + checksum + data
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e.into()),
@@ -187,11 +182,8 @@ impl SegmentStorage {
     /// Open current segment file for appending
     fn open_current_segment(&mut self) -> Result<()> {
         let path = self.segment_path(self.current_segment_id);
-        
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
+
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
 
         // Get current file size
         self.current_segment_size = file.metadata()?.len();
@@ -278,10 +270,7 @@ impl SegmentStorage {
 
     /// Read entry from segment
     pub fn read_entry(&self, id: MemoryId) -> Result<MemoryEntry> {
-        let meta = self
-            .index
-            .get(&id)
-            .ok_or(SegmentError::EntryNotFound(id))?;
+        let meta = self.index.get(&id).ok_or(SegmentError::EntryNotFound(id))?;
 
         if meta.deleted {
             return Err(SegmentError::EntryNotFound(id));
@@ -342,10 +331,7 @@ impl SegmentStorage {
 
     /// Check if entry exists and is not deleted
     pub fn exists(&self, id: MemoryId) -> bool {
-        self.index
-            .get(&id)
-            .map(|m| !m.deleted)
-            .unwrap_or(false)
+        self.index.get(&id).map(|m| !m.deleted).unwrap_or(false)
     }
 
     /// Get number of live entries (not deleted)
@@ -372,7 +358,9 @@ impl SegmentStorage {
 
         // Count live and deleted entries per segment
         for meta in self.index.values() {
-            let entry = segments_state.entry(meta.location.segment_id).or_insert((0, 0));
+            let entry = segments_state
+                .entry(meta.location.segment_id)
+                .or_insert((0, 0));
             if meta.deleted {
                 entry.1 += 1;
             } else {
@@ -396,7 +384,7 @@ impl SegmentStorage {
     /// Get all entries (for compaction)
     pub fn get_all_live_entries(&self) -> Result<Vec<(MemoryId, MemoryEntry)>> {
         let mut entries = Vec::new();
-        
+
         for (id, meta) in &self.index {
             if !meta.deleted {
                 let entry = self.read_entry(*id)?;
@@ -516,13 +504,13 @@ mod tests {
         {
             let seg_path = path.join("000000.seg");
             let mut file = OpenOptions::new().write(true).open(&seg_path).unwrap();
-            file.seek(SeekFrom::Start(4)).unwrap();  // Skip length
-            file.write_all(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap();  // Bad checksum
+            file.seek(SeekFrom::Start(4)).unwrap(); // Skip length
+            file.write_all(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap(); // Bad checksum
         }
 
         // Try to create new storage - should fail on recovery because checksum is bad
         let result = SegmentStorage::new(path);
-        assert!(result.is_err());  // Should fail on recovery due to checksum mismatch
+        assert!(result.is_err()); // Should fail on recovery due to checksum mismatch
     }
 
     #[test]
@@ -590,6 +578,6 @@ mod tests {
 
         // Check compactable (should be none since we have one segment)
         let compactable = storage.get_compactable_segments();
-        assert_eq!(compactable.len(), 0);  // Current segment not compacted
+        assert_eq!(compactable.len(), 0); // Current segment not compacted
     }
 }

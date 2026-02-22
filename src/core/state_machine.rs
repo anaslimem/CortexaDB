@@ -156,7 +156,10 @@ impl StateMachine {
 
     /// Get neighbors of a memory (memories it points to)
     pub fn get_neighbors(&self, id: MemoryId) -> Result<Vec<(MemoryId, String)>> {
-        let edges = self.graph.get(&id).ok_or(StateMachineError::MemoryNotFound(id))?;
+        let edges = self
+            .graph
+            .get(&id)
+            .ok_or(StateMachineError::MemoryNotFound(id))?;
         let mut neighbors: Vec<_> = edges.iter().map(|e| (e.to, e.relation.clone())).collect();
         neighbors.sort_by_key(|n| (n.0, n.1.clone()));
         Ok(neighbors)
@@ -262,12 +265,9 @@ mod tests {
     #[test]
     fn test_namespace_filtering() {
         let mut sm = StateMachine::new();
-        sm.insert_memory(create_test_entry(1, "ns1", 1000))
-            .unwrap();
-        sm.insert_memory(create_test_entry(2, "ns2", 1000))
-            .unwrap();
-        sm.insert_memory(create_test_entry(3, "ns1", 1000))
-            .unwrap();
+        sm.insert_memory(create_test_entry(1, "ns1", 1000)).unwrap();
+        sm.insert_memory(create_test_entry(2, "ns2", 1000)).unwrap();
+        sm.insert_memory(create_test_entry(3, "ns1", 1000)).unwrap();
 
         let ns1_entries = sm.get_memories_in_namespace("ns1");
         assert_eq!(ns1_entries.len(), 2);

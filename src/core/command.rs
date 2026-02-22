@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 use super::memory_entry::MemoryEntry;
 use crate::core::memory_entry::MemoryId;
+use serde::{Deserialize, Serialize};
 
 /// State-mutating commands for the state machine
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,12 +43,7 @@ mod tests {
 
     #[test]
     fn test_insert_command() {
-        let entry = MemoryEntry::new(
-            MemoryId(1),
-            "test".to_string(),
-            b"data".to_vec(),
-            1000,
-        );
+        let entry = MemoryEntry::new(MemoryId(1), "test".to_string(), b"data".to_vec(), 1000);
         let cmd = Command::insert_memory(entry.clone());
         match cmd {
             Command::InsertMemory(e) => assert_eq!(e.id, MemoryId(1)),
@@ -90,16 +85,12 @@ mod tests {
 
     #[test]
     fn test_command_serialization() {
-        let entry = MemoryEntry::new(
-            MemoryId(42),
-            "ns".to_string(),
-            b"content".to_vec(),
-            5000,
-        );
+        let entry = MemoryEntry::new(MemoryId(42), "ns".to_string(), b"content".to_vec(), 5000);
         let cmd = Command::insert_memory(entry);
 
         let serialized = bincode::serialize(&cmd).expect("serialization failed");
-        let deserialized: Command = bincode::deserialize(&serialized).expect("deserialization failed");
+        let deserialized: Command =
+            bincode::deserialize(&serialized).expect("deserialization failed");
 
         match deserialized {
             Command::InsertMemory(e) => assert_eq!(e.id, MemoryId(42)),

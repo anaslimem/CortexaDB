@@ -14,23 +14,19 @@ pub enum TemporalError {
 pub type Result<T> = std::result::Result<T, TemporalError>;
 
 /// Temporal index for time-based queries and eviction
-/// 
+///
 /// Provides range queries and memory cleanup operations
 pub struct TemporalIndex;
 
 impl TemporalIndex {
     /// Get all memories created within time range (inclusive)
-    pub fn get_range(
-        state_machine: &StateMachine,
-        start: u64,
-        end: u64,
-    ) -> Result<Vec<MemoryId>> {
+    pub fn get_range(state_machine: &StateMachine, start: u64, end: u64) -> Result<Vec<MemoryId>> {
         if start > end {
             return Err(TemporalError::InvalidTimeRange { start, end });
         }
 
         let entries = state_machine.get_memories_in_time_range(start, end);
-        
+
         if entries.is_empty() {
             return Err(TemporalError::NoMemoriesInRange);
         }
@@ -97,28 +93,29 @@ impl TemporalIndex {
     /// Get latest timestamp with memories
     pub fn get_latest_timestamp(state_machine: &StateMachine) -> Option<u64> {
         // Find last memory in the system
-        let mut latest = 0u64;
+        let mut latest: Option<u64> = None;
         for entry in state_machine.get_memories_in_time_range(0, u64::MAX) {
-            if entry.created_at > latest {
-                latest = entry.created_at;
-            }
+            latest = Some(match latest {
+                Some(current) => current.max(entry.created_at),
+                None => entry.created_at,
+            });
         }
 
-        if latest == 0 {
-            None
-        } else {
-            Some(latest)
-        }
+        latest
     }
 
     /// Mark memories for eviction: all older than timestamp (for later deletion)
-    /// 
+    ///
     /// Returns list of MemoryIds marked for eviction
     /// Caller is responsible for actually deleting them
     pub fn mark_evict_before(
         state_machine: &StateMachine,
         timestamp: u64,
     ) -> Result<Vec<MemoryId>> {
+        if timestamp == 0 {
+            return Ok(Vec::new());
+        }
+
         let entries = state_machine.get_memories_in_time_range(0, timestamp.saturating_sub(1));
 
         if entries.is_empty() {
@@ -131,10 +128,7 @@ impl TemporalIndex {
     }
 
     /// Get memories to keep: all newer than or equal to timestamp
-    pub fn get_recent(
-        state_machine: &StateMachine,
-        keep_after: u64,
-    ) -> Result<Vec<MemoryId>> {
+    pub fn get_recent(state_machine: &StateMachine, keep_after: u64) -> Result<Vec<MemoryId>> {
         let entries = state_machine.get_memories_in_time_range(keep_after, u64::MAX);
 
         if entries.is_empty() {
@@ -258,6 +252,20 @@ mod tests {
         let count = TemporalIndex::count_in_range(&sm, 1000, 4000).unwrap();
 
         assert_eq!(count, 4); // 1000, 2000, 3000, 4000
+    }
+
+    #[test]
+    fn test_mark_evict_before_zero_timestamp() {
+        let sm = setup_temporal();
+        let ids = TemporalIndex::mark_evict_before(&sm, 0).unwrap();
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn test_get_latest_timestamp_zero_is_valid() {
+        let mut sm = StateMachine::new();
+        sm.insert_memory(create_entry(1, 0)).unwrap();
+        assert_eq!(TemporalIndex::get_latest_timestamp(&sm), Some(0));
     }
 
     #[test]

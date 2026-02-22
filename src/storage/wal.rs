@@ -1,8 +1,8 @@
+use crc::Crc;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write, BufWriter, BufReader};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use crc::Crc;
 
 use crate::core::command::Command;
 
@@ -35,7 +35,7 @@ impl CommandId {
 }
 
 /// Write-Ahead Log for durability and recovery
-/// 
+///
 /// Format:
 /// [u32: command_len][u32: crc32_checksum][N bytes: bincode(Command)]
 /// [u32: command_len][u32: crc32_checksum][N bytes: bincode(Command)]
@@ -52,10 +52,7 @@ impl WriteAheadLog {
         let path = path.as_ref().to_path_buf();
 
         // Open file in append mode (create if not exists)
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
 
         // Count existing entries
         let entries_count = Self::count_entries(&path)?;
@@ -83,7 +80,7 @@ impl WriteAheadLog {
             match reader.read_exact(&mut len_bytes) {
                 Ok(()) => {
                     let len = u32::from_le_bytes(len_bytes) as usize;
-                    
+
                     // Skip checksum
                     let mut checksum_bytes = [0u8; 4];
                     reader.read_exact(&mut checksum_bytes)?;
@@ -289,7 +286,7 @@ mod tests {
         let result = WriteAheadLog::read_all(&wal_path);
         assert!(result.is_err());
         match result.unwrap_err() {
-            WalError::ChecksumMismatch { .. } => {}, // Expected
+            WalError::ChecksumMismatch { .. } => {} // Expected
             e => panic!("Expected ChecksumMismatch, got {:?}", e),
         }
     }

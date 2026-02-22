@@ -1,9 +1,9 @@
-pub mod vector;
+pub mod combined;
 pub mod graph;
 pub mod temporal;
-pub mod combined;
+pub mod vector;
 
-pub use vector::VectorIndex;
+pub use combined::IndexLayer;
 pub use graph::GraphIndex;
 pub use temporal::TemporalIndex;
-pub use combined::IndexLayer;
+pub use vector::VectorIndex;

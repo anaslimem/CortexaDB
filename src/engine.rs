@@ -3,8 +3,8 @@ use thiserror::Error;
 
 use crate::core::command::Command;
 use crate::core::state_machine::StateMachine;
-use crate::storage::wal::{WriteAheadLog, CommandId};
 use crate::storage::segment::SegmentStorage;
+use crate::storage::wal::{CommandId, WriteAheadLog};
 
 #[derive(Error, Debug)]
 pub enum EngineError {
@@ -21,7 +21,7 @@ pub enum EngineError {
 pub type Result<T> = std::result::Result<T, EngineError>;
 
 /// Main engine coordinating WAL + SegmentStorage + StateMachine
-/// 
+///
 /// Ensures durability and efficient replication by:
 /// 1. Writing command to WAL first (command durability)
 /// 2. Writing entry to SegmentStorage (data durability)
@@ -39,7 +39,7 @@ impl Engine {
     pub fn new<P: AsRef<Path>>(wal_path: P, segments_dir: P) -> Result<Self> {
         let wal_path = wal_path.as_ref();
         let segments_dir = segments_dir.as_ref();
-        
+
         // Check if we need to recover from existing WAL
         if wal_path.exists() {
             Self::recover(wal_path, segments_dir)
@@ -48,7 +48,7 @@ impl Engine {
             let wal = WriteAheadLog::new(wal_path)?;
             let segments = SegmentStorage::new(segments_dir)?;
             let state_machine = StateMachine::new();
-            
+
             Ok(Engine {
                 wal,
                 segments,
@@ -59,7 +59,7 @@ impl Engine {
     }
 
     /// Recover state from existing WAL and segments
-    /// 
+    ///
     /// Recovery in order:
     /// 1. Load all entries from segment files (builds index)
     /// 2. Replay WAL commands to get latest state
@@ -67,10 +67,10 @@ impl Engine {
     pub fn recover<P: AsRef<Path>>(wal_path: P, segments_dir: P) -> Result<Self> {
         let wal_path = wal_path.as_ref();
         let segments_dir = segments_dir.as_ref();
-        
+
         // Load segments (this rebuilds the index from segment files)
         let segments = SegmentStorage::new(segments_dir)?;
-        
+
         // Read all commands from WAL
         let commands = WriteAheadLog::read_all(wal_path)?;
 
@@ -96,18 +96,18 @@ impl Engine {
     }
 
     /// Execute a command with durability guarantees
-    /// 
+    ///
     /// Critical order for crash safety:
     /// 1. Write command to WAL
     /// 2. Write data to segments (if applicable)
     /// 3. Sync to disk
     /// 4. Apply to state machine
-    /// 
+    ///
     /// This ensures WAL + segments always have the data before it's in memory
     pub fn execute_command(&mut self, cmd: Command) -> Result<CommandId> {
         // 1. Write to WAL first (command logging)
         let cmd_id = self.wal.append(&cmd)?;
-        
+
         // 2. Handle data persistence based on command type
         match &cmd {
             Command::InsertMemory(entry) => {
@@ -123,7 +123,7 @@ impl Engine {
                 // They're stored in StateMachine's graph
             }
         }
-        
+
         // 3. Sync to disk (durability guarantee)
         self.wal.fsync()?;
         self.segments.fsync()?;
@@ -138,7 +138,10 @@ impl Engine {
     }
 
     /// Helper: Write entry to segments
-    fn _write_entry_to_segments(&mut self, entry: &crate::core::memory_entry::MemoryEntry) -> Result<()> {
+    fn _write_entry_to_segments(
+        &mut self,
+        entry: &crate::core::memory_entry::MemoryEntry,
+    ) -> Result<()> {
         self.segments.write_entry(entry)?;
         Ok(())
     }
@@ -179,7 +182,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::memory_entry::{MemoryId, MemoryEntry};
+    use crate::core::memory_entry::{MemoryEntry, MemoryId};
     use tempfile::TempDir;
 
     #[test]
@@ -202,12 +205,7 @@ mod tests {
 
         let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
-        let entry = MemoryEntry::new(
-            MemoryId(1),
-            "test".to_string(),
-            b"content".to_vec(),
-            1000,
-        );
+        let entry = MemoryEntry::new(MemoryId(1), "test".to_string(), b"content".to_vec(), 1000);
 
         let cmd = Command::InsertMemory(entry);
         let cmd_id = engine.execute_command(cmd).unwrap();
@@ -284,10 +282,7 @@ mod tests {
         assert_eq!(engine.get_state_machine().len(), 5);
 
         // Verify data is intact
-        let memory = engine
-            .get_state_machine()
-            .get_memory(MemoryId(0))
-            .unwrap();
+        let memory = engine.get_state_machine().get_memory(MemoryId(0)).unwrap();
         assert_eq!(memory.id, MemoryId(0));
         assert_eq!(memory.namespace, "namespace");
     }
@@ -310,7 +305,9 @@ mod tests {
                     b"data".to_vec(),
                     1000 + i as u64,
                 );
-                engine.execute_command(Command::InsertMemory(entry)).unwrap();
+                engine
+                    .execute_command(Command::InsertMemory(entry))
+                    .unwrap();
             }
 
             // Add edges in specific order
@@ -402,8 +399,11 @@ mod tests {
 
             // Insert memories
             for i in 0..5 {
-                let entry = MemoryEntry::new(MemoryId(i as u64), "ns".to_string(), b"data".to_vec(), 1000);
-                engine.execute_command(Command::InsertMemory(entry)).unwrap();
+                let entry =
+                    MemoryEntry::new(MemoryId(i as u64), "ns".to_string(), b"data".to_vec(), 1000);
+                engine
+                    .execute_command(Command::InsertMemory(entry))
+                    .unwrap();
             }
 
             // Add edges
@@ -429,13 +429,17 @@ mod tests {
         let recovered = Engine::recover(&wal_path, &seg_dir).unwrap();
 
         assert_eq!(recovered.get_state_machine().len(), 4);
-        assert!(recovered
-            .get_state_machine()
-            .get_memory(MemoryId(2))
-            .is_err()); // Should be deleted
-        assert!(recovered
-            .get_state_machine()
-            .get_memory(MemoryId(0))
-            .is_ok()); // Should exist
+        assert!(
+            recovered
+                .get_state_machine()
+                .get_memory(MemoryId(2))
+                .is_err()
+        ); // Should be deleted
+        assert!(
+            recovered
+                .get_state_machine()
+                .get_memory(MemoryId(0))
+                .is_ok()
+        ); // Should exist
     }
 }
