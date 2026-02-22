@@ -2,6 +2,7 @@ use std::path::Path;
 use thiserror::Error;
 
 use crate::core::command::Command;
+use crate::core::memory_entry::{MemoryEntry, MemoryId};
 use crate::core::state_machine::StateMachine;
 use crate::storage::segment::SegmentStorage;
 use crate::storage::wal::{CommandId, WriteAheadLog};
@@ -19,6 +20,32 @@ pub enum EngineError {
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
+
+/// Capacity limits for automatic eviction.
+#[derive(Debug, Clone, Copy)]
+pub struct CapacityPolicy {
+    pub max_entries: Option<usize>,
+    pub max_bytes: Option<u64>,
+}
+
+impl CapacityPolicy {
+    pub const fn new(max_entries: Option<usize>, max_bytes: Option<u64>) -> Self {
+        Self {
+            max_entries,
+            max_bytes,
+        }
+    }
+}
+
+/// Summary of a capacity enforcement pass.
+#[derive(Debug, Clone)]
+pub struct EvictionReport {
+    pub evicted_ids: Vec<MemoryId>,
+    pub entries_before: usize,
+    pub entries_after: usize,
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+}
 
 /// Main engine coordinating WAL + SegmentStorage + StateMachine
 ///
@@ -137,6 +164,117 @@ impl Engine {
         Ok(cmd_id)
     }
 
+    /// Execute a command, then enforce capacity in the same deterministic command pipeline.
+    pub fn execute_command_with_capacity(
+        &mut self,
+        cmd: Command,
+        policy: CapacityPolicy,
+    ) -> Result<(CommandId, EvictionReport)> {
+        let cmd_id = self.execute_command(cmd)?;
+        let report = self.enforce_capacity(policy)?;
+        Ok((cmd_id, report))
+    }
+
+    /// Enforce configured capacity by deterministically evicting memories.
+    ///
+    /// Evictions are always executed through `Command::DeleteMemory`, which ensures:
+    /// - WAL is appended for every eviction
+    /// - segment tombstones are updated
+    /// - deterministic replay behavior after recovery
+    pub fn enforce_capacity(&mut self, policy: CapacityPolicy) -> Result<EvictionReport> {
+        let (entries_before, bytes_before) = self.current_usage();
+        let mut evicted_ids = Vec::new();
+
+        if !self.exceeds_capacity(entries_before, bytes_before, policy) {
+            return Ok(EvictionReport {
+                evicted_ids,
+                entries_before,
+                entries_after: entries_before,
+                bytes_before,
+                bytes_after: bytes_before,
+            });
+        }
+
+        // Deterministic ordering:
+        // 1) older first (created_at asc)
+        // 2) less important first (importance asc)
+        // 3) lower id first
+        let mut unique_ids = std::collections::HashSet::new();
+        let mut candidates: Vec<(MemoryId, u64, f32)> = self
+            .state_machine
+            .get_memories_in_time_range(0, u64::MAX)
+            .into_iter()
+            .filter(|entry| unique_ids.insert(entry.id))
+            .map(|entry| (entry.id, entry.created_at, entry.importance))
+            .collect();
+        candidates.sort_by(|a, b| {
+            a.1.cmp(&b.1)
+                .then_with(|| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+
+        for (id, _, _) in candidates {
+            let (entries_now, bytes_now) = self.current_usage();
+            if !self.exceeds_capacity(entries_now, bytes_now, policy) {
+                break;
+            }
+
+            self.execute_command(Command::DeleteMemory(id))?;
+            evicted_ids.push(id);
+        }
+
+        let (entries_after, bytes_after) = self.current_usage();
+        Ok(EvictionReport {
+            evicted_ids,
+            entries_before,
+            entries_after,
+            bytes_before,
+            bytes_after,
+        })
+    }
+
+    /// Return current live memory count and deterministic byte estimate.
+    pub fn current_usage(&self) -> (usize, u64) {
+        let entries = self.state_machine.len();
+        let bytes = self
+            .state_machine
+            .get_memories_in_time_range(0, u64::MAX)
+            .into_iter()
+            .map(Self::estimate_memory_bytes)
+            .sum();
+        (entries, bytes)
+    }
+
+    fn exceeds_capacity(&self, entries: usize, bytes: u64, policy: CapacityPolicy) -> bool {
+        if let Some(max_entries) = policy.max_entries {
+            if entries > max_entries {
+                return true;
+            }
+        }
+        if let Some(max_bytes) = policy.max_bytes {
+            if bytes > max_bytes {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn estimate_memory_bytes(entry: &MemoryEntry) -> u64 {
+        let namespace_bytes = entry.namespace.len() as u64;
+        let content_bytes = entry.content.len() as u64;
+        let embedding_bytes = entry
+            .embedding
+            .as_ref()
+            .map(|v| (v.len() as u64) * 4)
+            .unwrap_or(0);
+        let metadata_bytes: u64 = entry
+            .metadata
+            .iter()
+            .map(|(k, v)| (k.len() + v.len()) as u64)
+            .sum();
+        namespace_bytes + content_bytes + embedding_bytes + metadata_bytes
+    }
+
     /// Helper: Write entry to segments
     fn _write_entry_to_segments(
         &mut self,
@@ -190,7 +328,6 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine.wal");
         let seg_dir = temp_dir.path().join("segments");
-        let seg_dir = temp_dir.path().join("segments");
 
         let engine = Engine::new(&wal_path, &seg_dir).unwrap();
         assert!(engine.is_empty());
@@ -213,6 +350,158 @@ mod tests {
         assert_eq!(cmd_id, CommandId(0));
         assert_eq!(engine.wal_len(), 1);
         assert_eq!(engine.get_state_machine().len(), 1);
+    }
+
+    #[test]
+    fn test_capacity_eviction_by_max_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
+
+        let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
+
+        // Lower importance + older entries should be evicted first.
+        let entries = vec![
+            MemoryEntry::new(MemoryId(1), "ns".to_string(), b"a".to_vec(), 1000)
+                .with_importance(0.1),
+            MemoryEntry::new(MemoryId(2), "ns".to_string(), b"b".to_vec(), 2000)
+                .with_importance(0.9),
+            MemoryEntry::new(MemoryId(3), "ns".to_string(), b"c".to_vec(), 3000)
+                .with_importance(0.2),
+        ];
+        for entry in entries {
+            engine
+                .execute_command(Command::InsertMemory(entry))
+                .unwrap();
+        }
+        let wal_before = engine.wal_len();
+
+        let report = engine
+            .enforce_capacity(CapacityPolicy::new(Some(2), None))
+            .unwrap();
+
+        assert_eq!(report.entries_before, 3);
+        assert_eq!(report.entries_after, 2);
+        assert_eq!(report.evicted_ids, vec![MemoryId(1)]);
+        assert_eq!(engine.wal_len(), wal_before + 1);
+        assert!(engine.get_state_machine().get_memory(MemoryId(1)).is_err());
+        assert!(engine.get_state_machine().get_memory(MemoryId(2)).is_ok());
+        assert!(engine.get_state_machine().get_memory(MemoryId(3)).is_ok());
+    }
+
+    #[test]
+    fn test_capacity_eviction_by_max_bytes() {
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
+
+        let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
+
+        engine
+            .execute_command(Command::InsertMemory(
+                MemoryEntry::new(MemoryId(1), "ns".to_string(), vec![1; 40], 1000)
+                    .with_importance(0.1),
+            ))
+            .unwrap();
+        engine
+            .execute_command(Command::InsertMemory(
+                MemoryEntry::new(MemoryId(2), "ns".to_string(), vec![2; 40], 2000)
+                    .with_importance(0.9),
+            ))
+            .unwrap();
+
+        let (_, bytes_before) = engine.current_usage();
+        let report = engine
+            .enforce_capacity(CapacityPolicy::new(None, Some(50)))
+            .unwrap();
+
+        assert!(bytes_before > 50);
+        assert!(report.bytes_after <= 50);
+        assert_eq!(report.evicted_ids, vec![MemoryId(1)]);
+        assert!(engine.get_state_machine().get_memory(MemoryId(1)).is_err());
+        assert!(engine.get_state_machine().get_memory(MemoryId(2)).is_ok());
+    }
+
+    #[test]
+    fn test_capacity_eviction_persists_via_wal_recovery() {
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
+
+        {
+            let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
+            for i in 0..3 {
+                let entry = MemoryEntry::new(
+                    MemoryId(i as u64),
+                    "ns".to_string(),
+                    format!("payload_{}", i).into_bytes(),
+                    1000 + i as u64,
+                )
+                .with_importance(i as f32);
+                engine
+                    .execute_command(Command::InsertMemory(entry))
+                    .unwrap();
+            }
+
+            let report = engine
+                .enforce_capacity(CapacityPolicy::new(Some(1), None))
+                .unwrap();
+            assert_eq!(report.entries_after, 1);
+            assert_eq!(report.evicted_ids.len(), 2);
+        }
+
+        let recovered = Engine::recover(&wal_path, &seg_dir).unwrap();
+        assert_eq!(recovered.get_state_machine().len(), 1);
+        assert!(
+            recovered
+                .get_state_machine()
+                .get_memory(MemoryId(2))
+                .is_ok()
+        );
+        assert!(
+            recovered
+                .get_state_machine()
+                .get_memory(MemoryId(0))
+                .is_err()
+        );
+        assert!(
+            recovered
+                .get_state_machine()
+                .get_memory(MemoryId(1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_execute_command_with_capacity() {
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
+        let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
+
+        engine
+            .execute_command(Command::InsertMemory(MemoryEntry::new(
+                MemoryId(1),
+                "ns".to_string(),
+                b"a".to_vec(),
+                1000,
+            )))
+            .unwrap();
+
+        let (_cmd_id, report) = engine
+            .execute_command_with_capacity(
+                Command::InsertMemory(MemoryEntry::new(
+                    MemoryId(2),
+                    "ns".to_string(),
+                    b"b".to_vec(),
+                    2000,
+                )),
+                CapacityPolicy::new(Some(1), None),
+            )
+            .unwrap();
+
+        assert_eq!(engine.get_state_machine().len(), 1);
+        assert_eq!(report.evicted_ids, vec![MemoryId(1)]);
     }
 
     #[test]
