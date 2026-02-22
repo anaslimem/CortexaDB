@@ -198,6 +198,20 @@ impl SegmentStorage {
         self.data_dir.join(format!("{:06}.seg", segment_id))
     }
 
+    /// Data directory backing this segment storage.
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    /// Flush and close current writer handle for maintenance operations (e.g. compaction).
+    pub fn prepare_for_maintenance(&mut self) -> Result<()> {
+        if let Some(mut file) = self.current_file.take() {
+            file.flush()?;
+            file.get_mut().sync_all()?;
+        }
+        Ok(())
+    }
+
     /// Check if we need to rotate to new segment
     fn should_rotate(&self) -> bool {
         self.current_segment_size >= self.max_segment_size

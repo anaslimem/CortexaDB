@@ -150,7 +150,7 @@ impl<'a> HybridQueryEngine<'a> {
         }
     }
 
-    /// Convenience API 
+    /// Convenience API
     pub fn query(
         &self,
         query_text: &str,

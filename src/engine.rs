@@ -15,6 +15,8 @@ pub enum EngineError {
     StateMachineError(#[from] crate::core::state_machine::StateMachineError),
     #[error("Segment error: {0}")]
     SegmentError(#[from] crate::storage::segment::SegmentError),
+    #[error("Compaction error: {0}")]
+    CompactionError(#[from] crate::storage::compaction::CompactionError),
     #[error("Engine not recovered properly")]
     NotRecovered,
 }
@@ -315,6 +317,15 @@ impl Engine {
     pub fn is_empty(&self) -> bool {
         self.wal.is_empty()
     }
+
+    /// Compact segments on disk and rebuild segment index.
+    pub fn compact_segments(&mut self) -> Result<crate::storage::compaction::CompactionReport> {
+        self.segments.prepare_for_maintenance()?;
+        let dir = self.segments.data_dir().to_path_buf();
+        let report = crate::storage::compaction::compact_segment_dir(&dir)?;
+        self.segments = SegmentStorage::new(&dir)?;
+        Ok(report)
+    }
 }
 
 #[cfg(test)]
@@ -502,6 +513,38 @@ mod tests {
 
         assert_eq!(engine.get_state_machine().len(), 1);
         assert_eq!(report.evicted_ids, vec![MemoryId(1)]);
+    }
+
+    #[test]
+    fn test_engine_compact_segments() {
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
+        let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
+
+        for i in 0..10 {
+            let entry = MemoryEntry::new(
+                MemoryId(i as u64),
+                "ns".to_string(),
+                format!("content_{}", i).into_bytes(),
+                1000 + i as u64,
+            );
+            engine
+                .execute_command(Command::InsertMemory(entry))
+                .unwrap();
+        }
+        for id in [0_u64, 1, 2, 3] {
+            engine
+                .execute_command(Command::DeleteMemory(MemoryId(id)))
+                .unwrap();
+        }
+
+        let report = engine.compact_segments().unwrap();
+        // We only assert compaction ran safely; eligibility depends on segment rotation history.
+        assert_eq!(engine.get_state_machine().len(), 6);
+        if report.live_entries_rewritten > 0 {
+            assert!(!report.compacted_segments.is_empty());
+        }
     }
 
     #[test]
