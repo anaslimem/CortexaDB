@@ -180,6 +180,8 @@ Environment variables:
 - `MNEMOS_CHECKPOINT_ENABLED` (`true`/`false`, default `false`)
 - `MNEMOS_CHECKPOINT_EVERY_OPS` (default `10000`)
 - `MNEMOS_CHECKPOINT_EVERY_MS` (default `30000`)
+- `MNEMOS_AUTH_MODE` (`none` | `api_key`, default `none`)
+- `MNEMOS_API_KEY` (required when `MNEMOS_AUTH_MODE=api_key`)
 - `MNEMOS_INTENT_ANCHOR_SEMANTIC` (default semantic anchor text)
 - `MNEMOS_INTENT_ANCHOR_RECENCY` (default recency anchor text)
 - `MNEMOS_INTENT_ANCHOR_GRAPH` (default graph anchor text)

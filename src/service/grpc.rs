@@ -31,6 +31,37 @@ impl AuthProvider for AllowAllAuthProvider {
     }
 }
 
+pub struct ApiKeyAuthProvider {
+    api_key: String,
+}
+
+impl ApiKeyAuthProvider {
+    pub fn new(api_key: impl Into<String>) -> Self {
+        Self {
+            api_key: api_key.into(),
+        }
+    }
+}
+
+impl AuthProvider for ApiKeyAuthProvider {
+    fn authorize(&self, metadata: &tonic::metadata::MetadataMap) -> Result<(), Status> {
+        // Accept either `x-api-key: <key>` or `authorization: Bearer <key>`.
+        if let Some(v) = metadata.get("x-api-key").and_then(|v| v.to_str().ok()) {
+            if v == self.api_key {
+                return Ok(());
+            }
+        }
+        if let Some(v) = metadata.get("authorization").and_then(|v| v.to_str().ok()) {
+            if let Some(token) = v.strip_prefix("Bearer ") {
+                if token == self.api_key {
+                    return Ok(());
+                }
+            }
+        }
+        Err(Status::unauthenticated("missing/invalid API key"))
+    }
+}
+
 #[derive(Default)]
 struct ServiceMetrics {
     rpc_total: AtomicU64,
@@ -792,5 +823,34 @@ mod tests {
         .await
         .expect_err("cross-namespace edge must fail");
         assert_eq!(err.code(), Code::FailedPrecondition);
+    }
+
+    #[test]
+    fn api_key_auth_provider_accepts_expected_headers() {
+        let auth = ApiKeyAuthProvider::new("secret-key");
+        let mut meta = tonic::metadata::MetadataMap::new();
+
+        meta.insert(
+            "x-api-key",
+            MetadataValue::try_from("secret-key").expect("valid metadata"),
+        );
+        assert!(auth.authorize(&meta).is_ok());
+
+        let mut bearer = tonic::metadata::MetadataMap::new();
+        bearer.insert(
+            "authorization",
+            MetadataValue::try_from("Bearer secret-key").expect("valid metadata"),
+        );
+        assert!(auth.authorize(&bearer).is_ok());
+
+        let mut bad = tonic::metadata::MetadataMap::new();
+        bad.insert(
+            "x-api-key",
+            MetadataValue::try_from("wrong").expect("valid metadata"),
+        );
+        assert_eq!(
+            auth.authorize(&bad).expect_err("must fail").code(),
+            Code::Unauthenticated
+        );
     }
 }

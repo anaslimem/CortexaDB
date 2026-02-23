@@ -1,9 +1,12 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use mnemos::engine::SyncPolicy;
 use mnemos::query::{IntentPolicy, set_intent_policy};
-use mnemos::service::grpc::{MnemosGrpcService, MnemosServiceServer};
+use mnemos::service::grpc::{
+    AllowAllAuthProvider, ApiKeyAuthProvider, AuthProvider, MnemosGrpcService, MnemosServiceServer,
+};
 use mnemos::store::CheckpointPolicy;
 use mnemos::store::MnemosStore;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -28,6 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sync_policy = parse_sync_policy_from_env();
     let checkpoint_policy = parse_checkpoint_policy_from_env();
     let intent_policy = parse_intent_policy_from_env();
+    let auth_provider = parse_auth_provider_from_env();
     set_intent_policy(intent_policy.clone());
 
     std::fs::create_dir_all(&data_dir)?;
@@ -40,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         MnemosStore::new_with_policies(&wal, &seg, vector_dim, sync_policy, checkpoint_policy)?
     };
 
-    let service = MnemosGrpcService::new(store);
+    let service = MnemosGrpcService::new_with_auth(store, auth_provider);
 
     println!("Mnemos gRPC listening on {}", addr);
     println!("Mnemos status HTTP listening on {}", status_addr);
@@ -49,6 +53,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Sync policy: {:?}", sync_policy);
     println!("Checkpoint policy: {:?}", checkpoint_policy);
     println!("Intent policy: {:?}", intent_policy);
+    println!(
+        "Auth mode: {}",
+        std::env::var("MNEMOS_AUTH_MODE").unwrap_or_else(|_| "none".to_string())
+    );
 
     tokio::spawn(async move {
         if let Err(e) = run_status_server(status_addr).await {
@@ -154,6 +162,24 @@ fn parse_intent_policy_from_env() -> IntentPolicy {
     }
 
     policy
+}
+
+fn parse_auth_provider_from_env() -> Arc<dyn AuthProvider> {
+    let mode = std::env::var("MNEMOS_AUTH_MODE").unwrap_or_else(|_| "none".to_string());
+    match mode.to_ascii_lowercase().as_str() {
+        "api_key" => {
+            let key = std::env::var("MNEMOS_API_KEY").unwrap_or_default();
+            if key.trim().is_empty() {
+                eprintln!(
+                    "MNEMOS_AUTH_MODE=api_key but MNEMOS_API_KEY is empty; falling back to no auth"
+                );
+                Arc::new(AllowAllAuthProvider)
+            } else {
+                Arc::new(ApiKeyAuthProvider::new(key))
+            }
+        }
+        _ => Arc::new(AllowAllAuthProvider),
+    }
 }
 
 async fn run_status_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
