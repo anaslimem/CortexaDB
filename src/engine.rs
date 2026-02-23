@@ -23,6 +23,13 @@ pub enum EngineError {
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncPolicy {
+    Strict,
+    Batch { max_ops: usize, max_delay_ms: u64 },
+    Async { interval_ms: u64 },
+}
+
 /// Capacity limits for automatic eviction.
 #[derive(Debug, Clone, Copy)]
 pub struct CapacityPolicy {
@@ -157,6 +164,13 @@ impl Engine {
     ///
     /// This ensures WAL + segments always have the data before it's in memory
     pub fn execute_command(&mut self, cmd: Command) -> Result<CommandId> {
+        let cmd_id = self.execute_command_unsynced(cmd)?;
+        self.flush()?;
+        Ok(cmd_id)
+    }
+
+    /// Execute a command without forcing fsync. Caller must invoke `flush` based on policy.
+    pub fn execute_command_unsynced(&mut self, cmd: Command) -> Result<CommandId> {
         // 1. Write to WAL first (command logging)
         let cmd_id = self.wal.append(&cmd)?;
 
@@ -176,17 +190,22 @@ impl Engine {
             }
         }
 
-        // 3. Sync to disk (durability guarantee)
-        self.wal.fsync()?;
-        self.segments.fsync()?;
-
-        // 4. Apply to state machine (if crash after this, WAL + segments have it)
+        // 3. Apply to state machine.
+        // In strict mode this is followed by immediate `flush()`.
+        // In relaxed modes caller flushes later via sync policy.
         self.state_machine.apply_command(cmd)?;
 
         // 5. Update tracking
         self.last_applied_id = cmd_id;
 
         Ok(cmd_id)
+    }
+
+    /// Force WAL + segment data to durable storage.
+    pub fn flush(&mut self) -> Result<()> {
+        self.wal.fsync()?;
+        self.segments.fsync()?;
+        Ok(())
     }
 
     /// Execute a command, then enforce capacity in the same deterministic command pipeline.
@@ -207,6 +226,20 @@ impl Engine {
     /// - segment tombstones are updated
     /// - deterministic replay behavior after recovery
     pub fn enforce_capacity(&mut self, policy: CapacityPolicy) -> Result<EvictionReport> {
+        self.enforce_capacity_with_sync(policy, true)
+    }
+
+    /// Capacity enforcement without immediate fsync.
+    /// Caller must call `flush()` according to sync policy.
+    pub fn enforce_capacity_unsynced(&mut self, policy: CapacityPolicy) -> Result<EvictionReport> {
+        self.enforce_capacity_with_sync(policy, false)
+    }
+
+    fn enforce_capacity_with_sync(
+        &mut self,
+        policy: CapacityPolicy,
+        sync_immediately: bool,
+    ) -> Result<EvictionReport> {
         let (entries_before, bytes_before) = self.current_usage();
         let mut evicted_ids = Vec::new();
 
@@ -244,7 +277,11 @@ impl Engine {
                 break;
             }
 
-            self.execute_command(Command::DeleteMemory(id))?;
+            if sync_immediately {
+                self.execute_command(Command::DeleteMemory(id))?;
+            } else {
+                self.execute_command_unsynced(Command::DeleteMemory(id))?;
+            }
             evicted_ids.push(id);
         }
 

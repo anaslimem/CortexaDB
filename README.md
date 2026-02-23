@@ -173,6 +173,10 @@ Environment variables:
 - `MNEMOS_STATUS_ADDR` (default `127.0.0.1:50052`)
 - `MNEMOS_DATA_DIR` (default `/tmp/mnemos_grpc`)
 - `MNEMOS_VECTOR_DIM` (default `3`)
+- `MNEMOS_SYNC_POLICY` (`strict` | `batch` | `async`, default `strict`)
+- `MNEMOS_SYNC_BATCH_MAX_OPS` (default `64`)
+- `MNEMOS_SYNC_BATCH_MAX_DELAY_MS` (default `25`)
+- `MNEMOS_SYNC_ASYNC_INTERVAL_MS` (default `25`)
 
 Run server:
 
@@ -223,6 +227,29 @@ This demonstrates:
 - inserts,
 - edge creation,
 - query and score outputs.
+
+## Sync Policy Benchmark
+
+Quick local throughput comparison between durability modes:
+
+```bash
+cargo run --bin sync_bench -- --mode strict --ops 20000
+cargo run --bin sync_bench -- --mode batch --ops 20000 --batch-max-ops 128 --batch-max-delay-ms 20
+cargo run --bin sync_bench -- --mode async --ops 20000 --async-interval-ms 20
+```
+
+Each run prints ingest/flush/total timing, ops/sec, and a recovery durability check.
+
+Sample local result (`ops=500`, same machine, debug build):
+
+```text
+Strict: ops_per_sec=75.59, total_ms=6614
+Batch(max_ops=64,max_delay_ms=10): ops_per_sec=156.32, total_ms=3198
+Async(interval_ms=10): ops_per_sec=160.98, total_ms=3105
+```
+
+These numbers are workload and hardware dependent, but show the expected pattern:
+`batch`/`async` improve write throughput compared with `strict`.
 
 ## Test
 

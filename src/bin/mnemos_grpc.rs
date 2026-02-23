@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use mnemos::engine::SyncPolicy;
 use mnemos::service::grpc::{MnemosGrpcService, MnemosServiceServer};
 use mnemos::store::MnemosStore;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -22,15 +23,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(3);
+    let sync_policy = parse_sync_policy_from_env();
 
     std::fs::create_dir_all(&data_dir)?;
     let wal = data_dir.join("mnemos.wal");
     let seg = data_dir.join("segments");
 
     let store = if wal.exists() {
-        MnemosStore::recover(&wal, &seg, vector_dim)?
+        MnemosStore::recover_with_policy(&wal, &seg, vector_dim, sync_policy)?
     } else {
-        MnemosStore::new(&wal, &seg, vector_dim)?
+        MnemosStore::new_with_policy(&wal, &seg, vector_dim, sync_policy)?
     };
 
     let service = MnemosGrpcService::new(store);
@@ -39,6 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Mnemos status HTTP listening on {}", status_addr);
     println!("Data dir: {}", data_dir.display());
     println!("Vector dimension: {}", vector_dim);
+    println!("Sync policy: {:?}", sync_policy);
 
     tokio::spawn(async move {
         if let Err(e) = run_status_server(status_addr).await {
@@ -52,6 +55,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+fn parse_sync_policy_from_env() -> SyncPolicy {
+    let mode = std::env::var("MNEMOS_SYNC_POLICY").unwrap_or_else(|_| "strict".to_string());
+    match mode.to_ascii_lowercase().as_str() {
+        "batch" => SyncPolicy::Batch {
+            max_ops: std::env::var("MNEMOS_SYNC_BATCH_MAX_OPS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(64),
+            max_delay_ms: std::env::var("MNEMOS_SYNC_BATCH_MAX_DELAY_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(25),
+        },
+        "async" => SyncPolicy::Async {
+            interval_ms: std::env::var("MNEMOS_SYNC_ASYNC_INTERVAL_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(25),
+        },
+        _ => SyncPolicy::Strict,
+    }
 }
 
 async fn run_status_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {

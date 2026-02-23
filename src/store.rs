@@ -1,13 +1,15 @@
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
 use crate::core::command::Command;
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
 use crate::core::state_machine::StateMachine;
-use crate::engine::{CapacityPolicy, Engine, EvictionReport};
+use crate::engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy};
 use crate::index::IndexLayer;
 use crate::query::{
     QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan, QueryPlanner, StageTrace,
@@ -59,6 +61,12 @@ struct WriteState {
     indexes: IndexLayer,
 }
 
+struct SyncRuntime {
+    pending_ops: usize,
+    dirty_since: Option<Instant>,
+    shutdown: bool,
+}
+
 /// Library-facing facade for storing and querying agent memory.
 ///
 /// Wraps:
@@ -70,8 +78,11 @@ struct WriteState {
 /// - single writer (`Mutex<WriteState>`) for deterministic write ordering
 /// - snapshot reads (`Arc<ReadSnapshot>`) for isolated concurrent queries
 pub struct MnemosStore {
-    writer: Mutex<WriteState>,
-    snapshot: RwLock<Arc<ReadSnapshot>>,
+    writer: Arc<Mutex<WriteState>>,
+    snapshot: Arc<RwLock<Arc<ReadSnapshot>>>,
+    sync_policy: SyncPolicy,
+    sync_control: Arc<(Mutex<SyncRuntime>, Condvar)>,
+    sync_thread: Option<JoinHandle<()>>,
 }
 
 impl MnemosStore {
@@ -80,8 +91,17 @@ impl MnemosStore {
         segments_dir: P,
         vector_dimension: usize,
     ) -> Result<Self> {
+        Self::new_with_policy(wal_path, segments_dir, vector_dimension, SyncPolicy::Strict)
+    }
+
+    pub fn new_with_policy<P: AsRef<Path>>(
+        wal_path: P,
+        segments_dir: P,
+        vector_dimension: usize,
+        sync_policy: SyncPolicy,
+    ) -> Result<Self> {
         let engine = Engine::new(wal_path, segments_dir)?;
-        Self::from_engine(engine, vector_dimension)
+        Self::from_engine(engine, vector_dimension, sync_policy)
     }
 
     pub fn recover<P: AsRef<Path>>(
@@ -89,11 +109,24 @@ impl MnemosStore {
         segments_dir: P,
         vector_dimension: usize,
     ) -> Result<Self> {
-        let engine = Engine::recover(wal_path, segments_dir)?;
-        Self::from_engine(engine, vector_dimension)
+        Self::recover_with_policy(wal_path, segments_dir, vector_dimension, SyncPolicy::Strict)
     }
 
-    fn from_engine(engine: Engine, vector_dimension: usize) -> Result<Self> {
+    pub fn recover_with_policy<P: AsRef<Path>>(
+        wal_path: P,
+        segments_dir: P,
+        vector_dimension: usize,
+        sync_policy: SyncPolicy,
+    ) -> Result<Self> {
+        let engine = Engine::recover(wal_path, segments_dir)?;
+        Self::from_engine(engine, vector_dimension, sync_policy)
+    }
+
+    fn from_engine(
+        engine: Engine,
+        vector_dimension: usize,
+        sync_policy: SyncPolicy,
+    ) -> Result<Self> {
         let indexes = Self::build_vector_index(engine.get_state_machine(), vector_dimension)?;
         Self::assert_vector_index_in_sync_inner(engine.get_state_machine(), &indexes)?;
 
@@ -102,9 +135,32 @@ impl MnemosStore {
             indexes.clone(),
         ));
 
+        let writer = Arc::new(Mutex::new(WriteState { engine, indexes }));
+        let snapshot = Arc::new(RwLock::new(snapshot));
+        let sync_control = Arc::new((
+            Mutex::new(SyncRuntime {
+                pending_ops: 0,
+                dirty_since: None,
+                shutdown: false,
+            }),
+            Condvar::new(),
+        ));
+
+        let sync_thread = match sync_policy {
+            SyncPolicy::Strict => None,
+            SyncPolicy::Batch { .. } | SyncPolicy::Async { .. } => Some(Self::spawn_sync_thread(
+                Arc::clone(&writer),
+                Arc::clone(&sync_control),
+                sync_policy,
+            )),
+        };
+
         Ok(Self {
-            writer: Mutex::new(WriteState { engine, indexes }),
-            snapshot: RwLock::new(snapshot),
+            writer,
+            snapshot,
+            sync_policy,
+            sync_control,
+            sync_thread,
         })
     }
 
@@ -113,6 +169,80 @@ impl MnemosStore {
             .read()
             .expect("snapshot lock poisoned")
             .clone()
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        writer.engine.flush()?;
+        self.clear_pending_sync_state();
+        Ok(())
+    }
+
+    fn spawn_sync_thread(
+        writer: Arc<Mutex<WriteState>>,
+        sync_control: Arc<(Mutex<SyncRuntime>, Condvar)>,
+        policy: SyncPolicy,
+    ) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            let (lock, cvar) = &*sync_control;
+            loop {
+                let mut runtime = lock.lock().expect("sync runtime lock poisoned");
+                if runtime.shutdown {
+                    break;
+                }
+
+                match policy {
+                    SyncPolicy::Strict => break,
+                    SyncPolicy::Batch {
+                        max_ops,
+                        max_delay_ms,
+                    } => {
+                        let max_ops = max_ops.max(1);
+                        let max_delay = Duration::from_millis(max_delay_ms.max(1));
+
+                        if runtime.pending_ops < max_ops {
+                            if let Some(dirty_since) = runtime.dirty_since {
+                                let elapsed = dirty_since.elapsed();
+                                if elapsed < max_delay {
+                                    let timeout = max_delay - elapsed;
+                                    let (guard, _) = cvar
+                                        .wait_timeout(runtime, timeout)
+                                        .expect("sync runtime wait poisoned");
+                                    runtime = guard;
+                                }
+                            } else {
+                                runtime = cvar.wait(runtime).expect("sync runtime wait poisoned");
+                            }
+                        }
+                    }
+                    SyncPolicy::Async { interval_ms } => {
+                        let wait = Duration::from_millis(interval_ms.max(1));
+                        let (guard, _) = cvar
+                            .wait_timeout(runtime, wait)
+                            .expect("sync runtime wait poisoned");
+                        runtime = guard;
+                    }
+                }
+
+                if runtime.shutdown {
+                    break;
+                }
+
+                let should_flush = runtime.pending_ops > 0;
+                if should_flush {
+                    runtime.pending_ops = 0;
+                    runtime.dirty_since = None;
+                }
+                drop(runtime);
+
+                if should_flush {
+                    let mut write_state = writer.lock().expect("writer lock poisoned");
+                    if let Err(err) = write_state.engine.flush() {
+                        eprintln!("mnemos sync manager flush error: {err}");
+                    }
+                }
+            }
+        })
     }
 
     pub fn insert_memory(&self, entry: MemoryEntry) -> Result<CommandId> {
@@ -232,7 +362,12 @@ impl MnemosStore {
 
     pub fn enforce_capacity(&self, policy: CapacityPolicy) -> Result<EvictionReport> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
-        let report = writer.engine.enforce_capacity(policy)?;
+        let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
+        let report = if sync_now {
+            writer.engine.enforce_capacity(policy)?
+        } else {
+            writer.engine.enforce_capacity_unsynced(policy)?
+        };
         for id in &report.evicted_ids {
             let _ = writer.indexes.vector_index_mut().remove(*id);
         }
@@ -242,6 +377,11 @@ impl MnemosStore {
             &writer.indexes,
         )?;
         self.publish_snapshot_from_write_state(&writer);
+        if !sync_now {
+            self.mark_pending_write(report.evicted_ids.len());
+        } else {
+            self.clear_pending_sync_state();
+        }
         Ok(report)
     }
 
@@ -270,11 +410,32 @@ impl MnemosStore {
             .wal_len()
     }
 
+    fn mark_pending_write(&self, ops: usize) {
+        if ops == 0 {
+            return;
+        }
+        let (lock, cvar) = &*self.sync_control;
+        let mut runtime = lock.lock().expect("sync runtime lock poisoned");
+        runtime.pending_ops = runtime.pending_ops.saturating_add(ops);
+        if runtime.dirty_since.is_none() {
+            runtime.dirty_since = Some(Instant::now());
+        }
+        cvar.notify_one();
+    }
+
+    fn clear_pending_sync_state(&self) {
+        let (lock, _) = &*self.sync_control;
+        let mut runtime = lock.lock().expect("sync runtime lock poisoned");
+        runtime.pending_ops = 0;
+        runtime.dirty_since = None;
+    }
+
     fn execute_write_transaction_locked(
         &self,
         writer: &mut WriteState,
         op: WriteOp,
     ) -> Result<CommandId> {
+        let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
         let cmd_id = match op {
             WriteOp::InsertMemory(entry) => {
                 if let Some(embedding) = entry.embedding.as_ref() {
@@ -286,9 +447,15 @@ impl MnemosStore {
                         .into());
                     }
                 }
-                let id = writer
-                    .engine
-                    .execute_command(Command::InsertMemory(entry.clone()))?;
+                let id = if sync_now {
+                    writer
+                        .engine
+                        .execute_command(Command::InsertMemory(entry.clone()))?
+                } else {
+                    writer
+                        .engine
+                        .execute_command_unsynced(Command::InsertMemory(entry.clone()))?
+                };
                 match entry.embedding {
                     Some(embedding) => writer
                         .indexes
@@ -301,16 +468,40 @@ impl MnemosStore {
                 id
             }
             WriteOp::DeleteMemory(id) => {
-                let cmd_id = writer.engine.execute_command(Command::DeleteMemory(id))?;
+                let cmd_id = if sync_now {
+                    writer.engine.execute_command(Command::DeleteMemory(id))?
+                } else {
+                    writer
+                        .engine
+                        .execute_command_unsynced(Command::DeleteMemory(id))?
+                };
                 let _ = writer.indexes.vector_index_mut().remove(id);
                 cmd_id
             }
-            WriteOp::AddEdge { from, to, relation } => writer
-                .engine
-                .execute_command(Command::AddEdge { from, to, relation })?,
-            WriteOp::RemoveEdge { from, to } => writer
-                .engine
-                .execute_command(Command::RemoveEdge { from, to })?,
+            WriteOp::AddEdge { from, to, relation } => {
+                if sync_now {
+                    writer
+                        .engine
+                        .execute_command(Command::AddEdge { from, to, relation })?
+                } else {
+                    writer.engine.execute_command_unsynced(Command::AddEdge {
+                        from,
+                        to,
+                        relation,
+                    })?
+                }
+            }
+            WriteOp::RemoveEdge { from, to } => {
+                if sync_now {
+                    writer
+                        .engine
+                        .execute_command(Command::RemoveEdge { from, to })?
+                } else {
+                    writer
+                        .engine
+                        .execute_command_unsynced(Command::RemoveEdge { from, to })?
+                }
+            }
         };
 
         Self::assert_vector_index_in_sync_inner(
@@ -318,6 +509,11 @@ impl MnemosStore {
             &writer.indexes,
         )?;
         self.publish_snapshot_from_write_state(writer);
+        if !sync_now {
+            self.mark_pending_write(1);
+        } else {
+            self.clear_pending_sync_state();
+        }
         Ok(cmd_id)
     }
 
@@ -362,6 +558,21 @@ impl MnemosStore {
             )));
         }
         Ok(())
+    }
+}
+
+impl Drop for MnemosStore {
+    fn drop(&mut self) {
+        let _ = self.flush();
+        let (lock, cvar) = &*self.sync_control;
+        {
+            let mut runtime = lock.lock().expect("sync runtime lock poisoned");
+            runtime.shutdown = true;
+            cvar.notify_all();
+        }
+        if let Some(handle) = self.sync_thread.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -620,5 +831,62 @@ mod tests {
         // Latest snapshot sees post-write state.
         let latest = store.snapshot();
         assert_eq!(latest.state_machine().len(), 11);
+    }
+
+    #[test]
+    fn test_batch_policy_flushes_on_threshold() {
+        let temp = TempDir::new().unwrap();
+        let wal = temp.path().join("store_batch.wal");
+        let seg = temp.path().join("segments_batch");
+        let store = MnemosStore::new_with_policy(
+            &wal,
+            &seg,
+            3,
+            SyncPolicy::Batch {
+                max_ops: 2,
+                max_delay_ms: 10_000,
+            },
+        )
+        .unwrap();
+
+        store
+            .insert_memory(
+                MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"one".to_vec(), 1000)
+                    .with_embedding(vec![1.0, 0.0, 0.0]),
+            )
+            .unwrap();
+        store
+            .insert_memory(
+                MemoryEntry::new(MemoryId(2), "agent1".to_string(), b"two".to_vec(), 1001)
+                    .with_embedding(vec![1.0, 0.0, 0.0]),
+            )
+            .unwrap();
+
+        thread::sleep(Duration::from_millis(120));
+
+        let recovered = MnemosStore::recover(&wal, &seg, 3).unwrap();
+        assert_eq!(recovered.state_machine().len(), 2);
+    }
+
+    #[test]
+    fn test_async_policy_flushes_by_interval() {
+        let temp = TempDir::new().unwrap();
+        let wal = temp.path().join("store_async.wal");
+        let seg = temp.path().join("segments_async");
+        let store =
+            MnemosStore::new_with_policy(&wal, &seg, 3, SyncPolicy::Async { interval_ms: 25 })
+                .unwrap();
+
+        store
+            .insert_memory(
+                MemoryEntry::new(MemoryId(10), "agent1".to_string(), b"ten".to_vec(), 1010)
+                    .with_embedding(vec![1.0, 0.0, 0.0]),
+            )
+            .unwrap();
+
+        thread::sleep(Duration::from_millis(120));
+
+        let recovered = MnemosStore::recover(&wal, &seg, 3).unwrap();
+        assert_eq!(recovered.state_machine().len(), 1);
     }
 }
