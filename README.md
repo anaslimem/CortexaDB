@@ -300,6 +300,50 @@ Sample local result (`ops=500`, same machine, debug build):
 These numbers are workload and hardware dependent, but show the expected pattern:
 `batch`/`async` improve write throughput compared with `strict`.
 
+## gRPC Throughput Benchmark (DB-Style)
+
+For p50/p95/p99 and throughput under concurrent load:
+
+```bash
+cargo run --bin bench_grpc -- \
+  --addr 127.0.0.1:50051 \
+  --namespace bench \
+  --vector-dim 3 \
+  --insert-ops 5000 \
+  --query-ops 5000 \
+  --concurrency 32 \
+  --top-k 10
+```
+
+Output includes:
+
+- insert/query throughput (ops/s),
+- average latency,
+- p50/p95/p99/max latency.
+
+For observability during benchmark, scrape:
+
+```bash
+curl -s http://127.0.0.1:50052/metrics
+```
+
+### Comparison Protocol (Mnemos vs Qdrant vs Pinecone)
+
+To compare fairly, keep identical workload shape across all systems:
+
+1. same embedding model + vector dimension,
+2. same dataset and namespace cardinality,
+3. same write count / query count / concurrency,
+4. same top-k and filter conditions,
+5. same warmup period and measurement window.
+
+Use `bench_grpc` numbers from Mnemos as baseline, then run equivalent load for Qdrant/Pinecone and compare:
+
+- ingest ops/s,
+- query ops/s,
+- p95 and p99 query latency,
+- resource usage/cost for same workload.
+
 ## Test
 
 Run all tests:

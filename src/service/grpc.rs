@@ -170,7 +170,7 @@ impl ServiceMetrics {
 
         out.push_str("# HELP mnemos_rpc_method_calls_total Calls per method\n");
         out.push_str("# TYPE mnemos_rpc_method_calls_total counter\n");
-        for (method, value) in calls {
+        for (method, value) in &calls {
             out.push_str(&format!(
                 "mnemos_rpc_method_calls_total{{method=\"{}\"}} {}\n",
                 method, value
@@ -178,30 +178,34 @@ impl ServiceMetrics {
         }
         out.push_str("# HELP mnemos_rpc_method_errors_total Errors per method\n");
         out.push_str("# TYPE mnemos_rpc_method_errors_total counter\n");
-        for (method, value) in errors {
+        for (method, value) in &errors {
             out.push_str(&format!(
                 "mnemos_rpc_method_errors_total{{method=\"{}\"}} {}\n",
                 method, value
             ));
         }
-        out.push_str("# HELP mnemos_rpc_method_latency_ms_sum Summed method latencies in ms\n");
-        out.push_str("# TYPE mnemos_rpc_method_latency_ms_sum counter\n");
-        for (method, value) in sums {
-            out.push_str(&format!(
-                "mnemos_rpc_method_latency_ms_sum{{method=\"{}\"}} {}\n",
-                method, value
-            ));
-        }
-        out.push_str("# HELP mnemos_rpc_method_latency_bucket Latency bucket counts\n");
-        out.push_str("# TYPE mnemos_rpc_method_latency_bucket counter\n");
+        out.push_str("# HELP mnemos_rpc_method_latency_bucket RPC latency histogram buckets (ms)\n");
+        out.push_str("# TYPE mnemos_rpc_method_latency_bucket histogram\n");
         let bounds = ["5", "10", "25", "50", "100", "+Inf"];
-        for (method, vals) in buckets {
+        for (method, vals) in &buckets {
+            let total_calls = calls.get(method).copied().unwrap_or(0);
+            let mut cumulative = 0usize;
             for (i, bound) in bounds.iter().enumerate() {
+                cumulative += vals[i];
                 out.push_str(&format!(
                     "mnemos_rpc_method_latency_bucket{{method=\"{}\",le=\"{}\"}} {}\n",
-                    method, bound, vals[i]
+                    method, bound, cumulative
                 ));
             }
+            out.push_str(&format!(
+                "mnemos_rpc_method_latency_ms_count{{method=\"{}\"}} {}\n",
+                method, total_calls
+            ));
+            out.push_str(&format!(
+                "mnemos_rpc_method_latency_ms_sum{{method=\"{}\"}} {}\n",
+                method,
+                sums.get(method).copied().unwrap_or(0)
+            ));
         }
 
         out.push_str("# HELP mnemos_query_vector_candidates_sum Sum of query vector candidates\n");
