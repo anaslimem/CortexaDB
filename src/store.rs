@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use thiserror::Error;
@@ -21,6 +22,10 @@ pub enum MnemosStoreError {
     Vector(#[from] crate::index::vector::VectorError),
     #[error("Query error: {0}")]
     Query(#[from] crate::query::HybridQueryError),
+    #[error("Invariant violation: {0}")]
+    InvariantViolation(String),
+    #[error("Embedding required when content changes for memory id {0:?}")]
+    MissingEmbeddingOnContentChange(MemoryId),
 }
 
 pub type Result<T> = std::result::Result<T, MnemosStoreError>;
@@ -60,33 +65,30 @@ impl MnemosStore {
             indexes: IndexLayer::new(vector_dimension),
         };
         let _ = store.rebuild_vector_index()?;
+        store.assert_vector_index_in_sync()?;
         Ok(store)
     }
 
     pub fn insert_memory(&mut self, entry: MemoryEntry) -> Result<CommandId> {
-        if let Some(embedding) = entry.embedding.as_ref() {
-            if embedding.len() != self.indexes.vector.dimension() {
-                return Err(crate::index::vector::VectorError::DimensionMismatch {
-                    expected: self.indexes.vector.dimension(),
-                    actual: embedding.len(),
-                }
-                .into());
+        let mut effective = entry;
+        if let Ok(prev) = self.engine.get_state_machine().get_memory(effective.id) {
+            let content_changed = prev.content != effective.content;
+            if content_changed && effective.embedding.is_none() {
+                return Err(MnemosStoreError::MissingEmbeddingOnContentChange(
+                    effective.id,
+                ));
+            }
+
+            // Preserve embedding on metadata-only updates when caller omits embedding.
+            if !content_changed && effective.embedding.is_none() {
+                effective.embedding = prev.embedding.clone();
             }
         }
-
-        let cmd_id = self
-            .engine
-            .execute_command(Command::InsertMemory(entry.clone()))?;
-        if let Some(embedding) = entry.embedding {
-            self.indexes.vector_index_mut().index(entry.id, embedding)?;
-        }
-        Ok(cmd_id)
+        self.execute_write_transaction(WriteOp::InsertMemory(effective))
     }
 
     pub fn delete_memory(&mut self, id: MemoryId) -> Result<CommandId> {
-        let cmd_id = self.engine.execute_command(Command::DeleteMemory(id))?;
-        let _ = self.indexes.vector_index_mut().remove(id);
-        Ok(cmd_id)
+        self.execute_write_transaction(WriteOp::DeleteMemory(id))
     }
 
     pub fn add_edge(
@@ -95,15 +97,11 @@ impl MnemosStore {
         to: MemoryId,
         relation: String,
     ) -> Result<CommandId> {
-        Ok(self
-            .engine
-            .execute_command(Command::AddEdge { from, to, relation })?)
+        self.execute_write_transaction(WriteOp::AddEdge { from, to, relation })
     }
 
     pub fn remove_edge(&mut self, from: MemoryId, to: MemoryId) -> Result<CommandId> {
-        Ok(self
-            .engine
-            .execute_command(Command::RemoveEdge { from, to })?)
+        self.execute_write_transaction(WriteOp::RemoveEdge { from, to })
     }
 
     /// Rebuild in-memory vector index from current state machine entries.
@@ -116,6 +114,7 @@ impl MnemosStore {
                 indexed += 1;
             }
         }
+        self.assert_vector_index_in_sync()?;
         Ok(indexed)
     }
 
@@ -173,6 +172,7 @@ impl MnemosStore {
         for id in &report.evicted_ids {
             let _ = self.indexes.vector_index_mut().remove(*id);
         }
+        self.assert_vector_index_in_sync()?;
         Ok(report)
     }
 
@@ -195,6 +195,83 @@ impl MnemosStore {
     pub fn wal_len(&self) -> u64 {
         self.engine.wal_len()
     }
+
+    fn execute_write_transaction(&mut self, op: WriteOp) -> Result<CommandId> {
+        let cmd_id = match op {
+            WriteOp::InsertMemory(entry) => {
+                if let Some(embedding) = entry.embedding.as_ref() {
+                    if embedding.len() != self.indexes.vector.dimension() {
+                        return Err(crate::index::vector::VectorError::DimensionMismatch {
+                            expected: self.indexes.vector.dimension(),
+                            actual: embedding.len(),
+                        }
+                        .into());
+                    }
+                }
+                let id = self
+                    .engine
+                    .execute_command(Command::InsertMemory(entry.clone()))?;
+                match entry.embedding {
+                    Some(embedding) => {
+                        self.indexes.vector_index_mut().index(entry.id, embedding)?
+                    }
+                    None => {
+                        let _ = self.indexes.vector_index_mut().remove(entry.id);
+                    }
+                }
+                id
+            }
+            WriteOp::DeleteMemory(id) => {
+                let cmd_id = self.engine.execute_command(Command::DeleteMemory(id))?;
+                let _ = self.indexes.vector_index_mut().remove(id);
+                cmd_id
+            }
+            WriteOp::AddEdge { from, to, relation } => self
+                .engine
+                .execute_command(Command::AddEdge { from, to, relation })?,
+            WriteOp::RemoveEdge { from, to } => self
+                .engine
+                .execute_command(Command::RemoveEdge { from, to })?,
+        };
+
+        self.assert_vector_index_in_sync()?;
+        Ok(cmd_id)
+    }
+
+    fn assert_vector_index_in_sync(&self) -> Result<()> {
+        let state_ids: HashSet<MemoryId> = self
+            .engine
+            .get_state_machine()
+            .all_memories()
+            .into_iter()
+            .filter(|e| e.embedding.is_some())
+            .map(|e| e.id)
+            .collect();
+        let index_ids: HashSet<MemoryId> = self.indexes.vector.indexed_ids().into_iter().collect();
+
+        if state_ids != index_ids {
+            return Err(MnemosStoreError::InvariantViolation(format!(
+                "vector index mismatch: state={} index={}",
+                state_ids.len(),
+                index_ids.len()
+            )));
+        }
+        Ok(())
+    }
+}
+
+enum WriteOp {
+    InsertMemory(MemoryEntry),
+    DeleteMemory(MemoryId),
+    AddEdge {
+        from: MemoryId,
+        to: MemoryId,
+        relation: String,
+    },
+    RemoveEdge {
+        from: MemoryId,
+        to: MemoryId,
+    },
 }
 
 #[cfg(test)]
@@ -269,5 +346,62 @@ mod tests {
         let out = recovered.query("hello", options, &TestEmbedder).unwrap();
         assert_eq!(out.hits.len(), 1);
         assert_eq!(out.hits[0].id, MemoryId(77));
+    }
+
+    #[test]
+    fn test_content_change_requires_embedding() {
+        let temp = TempDir::new().unwrap();
+        let wal = temp.path().join("store.wal");
+        let seg = temp.path().join("segments");
+        let mut store = MnemosStore::new(&wal, &seg, 3).unwrap();
+
+        let original = MemoryEntry::new(MemoryId(90), "agent1".to_string(), b"old".to_vec(), 1000)
+            .with_embedding(vec![1.0, 0.0, 0.0]);
+        store.insert_memory(original).unwrap();
+
+        let changed_content =
+            MemoryEntry::new(MemoryId(90), "agent1".to_string(), b"new".to_vec(), 1001);
+        let err = store.insert_memory(changed_content).unwrap_err();
+        assert!(matches!(
+            err,
+            MnemosStoreError::MissingEmbeddingOnContentChange(MemoryId(90))
+        ));
+    }
+
+    #[test]
+    fn test_unchanged_content_preserves_embedding_when_omitted() {
+        let temp = TempDir::new().unwrap();
+        let wal = temp.path().join("store.wal");
+        let seg = temp.path().join("segments");
+        let mut store = MnemosStore::new(&wal, &seg, 3).unwrap();
+
+        let original = MemoryEntry::new(MemoryId(91), "agent1".to_string(), b"same".to_vec(), 1000)
+            .with_embedding(vec![1.0, 0.0, 0.0])
+            .with_importance(0.2);
+        store.insert_memory(original).unwrap();
+
+        let updated = MemoryEntry::new(MemoryId(91), "agent1".to_string(), b"same".to_vec(), 1001)
+            .with_importance(0.9);
+        store.insert_memory(updated).unwrap();
+
+        assert_eq!(store.indexed_embeddings(), 1);
+    }
+
+    #[test]
+    fn test_content_change_with_embedding_replaces_vector() {
+        let temp = TempDir::new().unwrap();
+        let wal = temp.path().join("store.wal");
+        let seg = temp.path().join("segments");
+        let mut store = MnemosStore::new(&wal, &seg, 3).unwrap();
+
+        let original = MemoryEntry::new(MemoryId(92), "agent1".to_string(), b"old".to_vec(), 1000)
+            .with_embedding(vec![1.0, 0.0, 0.0]);
+        store.insert_memory(original).unwrap();
+
+        let changed = MemoryEntry::new(MemoryId(92), "agent1".to_string(), b"new".to_vec(), 1001)
+            .with_embedding(vec![0.0, 1.0, 0.0]);
+        store.insert_memory(changed).unwrap();
+
+        assert_eq!(store.indexed_embeddings(), 1);
     }
 }
