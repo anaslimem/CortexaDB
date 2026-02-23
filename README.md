@@ -1,13 +1,19 @@
 # Mnemos
 
-Mnemos is a Rust-first memory engine for agent systems.  
+[![Build](https://github.com/anaslimem/Mnemos/actions/workflows/rust.yml/badge.svg)](https://github.com/anaslimem/Mnemos/actions/workflows/rust.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![Status: Experimental](https://img.shields.io/badge/Status-Experimental-orange.svg)](#current-status)
+
+> ** Experimental** — Mnemos is under active development (v0.1). APIs may change. See [Known Limitations](KNOWN_LIMITATIONS.md).
+
+Mnemos is a simple, fast, and reliable vector + graph database for AI agents — like SQLite, but for agent memory.  
 It provides durable memory storage, deterministic replay, and hybrid retrieval across:
 
 - vector similarity (semantic search),
 - graph relationships (connected memories),
 - temporal constraints (time-aware recall).
 
-Mnemos is built as a library and now includes a gRPC service layer for multi-agent usage from Python and other languages.
+Mnemos is built as a library and includes a gRPC service layer for multi-agent usage from Python and other languages.
 
 ## Why Mnemos
 
@@ -38,17 +44,18 @@ Mnemos is designed specifically for that shape of problem.
 
 One clear path from zero to first retrieval:
 
-1. Start server.
+1. Clone and start server.
 
 ```bash
-cd /Users/limemanas/Desktop/projects/Mnemos
+git clone https://github.com/anaslimem/Mnemos.git
+cd Mnemos
 scripts/run_grpc.sh
 ```
 
 2. In another terminal, run Python quickstart.
 
 ```bash
-cd /Users/limemanas/Desktop/projects/Mnemos/python/mnemos-client
+cd python/mnemos-client
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -411,3 +418,8 @@ Areas still evolving toward full production multi-agent scale:
 - concurrency/snapshot strategy for high write contention,
 - optional ANN backends for larger vector scale,
 - operational tooling and deployment templates.
+
+## Documentation
+
+- [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) — current constraints and caveats
+- [Python Client README](python/mnemos-client/README.md) — API reference and quickstart
