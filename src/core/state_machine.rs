@@ -55,6 +55,19 @@ impl StateMachine {
         let id = entry.id;
         let timestamp = entry.created_at;
 
+        // If this ID already exists, remove its previous temporal index entry first.
+        if let Some(previous) = self.memories.get(&id) {
+            let old_ts = previous.created_at;
+            let mut remove_old_bucket = false;
+            if let Some(ids) = self.temporal_index.get_mut(&old_ts) {
+                ids.retain(|&mid| mid != id);
+                remove_old_bucket = ids.is_empty();
+            }
+            if remove_old_bucket {
+                self.temporal_index.remove(&old_ts);
+            }
+        }
+
         self.memories.insert(id, entry);
 
         // Add to temporal index
@@ -170,6 +183,13 @@ impl StateMachine {
         self.memories.len()
     }
 
+    /// Get all memories in deterministic ID order.
+    pub fn all_memories(&self) -> Vec<&MemoryEntry> {
+        let mut entries: Vec<&MemoryEntry> = self.memories.values().collect();
+        entries.sort_by_key(|e| e.id);
+        entries
+    }
+
     pub fn is_empty(&self) -> bool {
         self.memories.is_empty()
     }
@@ -260,6 +280,38 @@ mod tests {
         // Check deterministic ordering
         assert_eq!(range[0].id, MemoryId(1));
         assert_eq!(range[1].id, MemoryId(3));
+    }
+
+    #[test]
+    fn test_insert_update_replaces_old_temporal_timestamp() {
+        let mut sm = StateMachine::new();
+        sm.insert_memory(create_test_entry(1, "default", 1000))
+            .unwrap();
+        sm.insert_memory(create_test_entry(1, "default", 3000))
+            .unwrap();
+
+        assert_eq!(sm.len(), 1);
+        assert!(sm.get_memories_in_time_range(1000, 1000).is_empty());
+        let new_range = sm.get_memories_in_time_range(3000, 3000);
+        assert_eq!(new_range.len(), 1);
+        assert_eq!(new_range[0].id, MemoryId(1));
+    }
+
+    #[test]
+    fn test_all_memories_deterministic_order() {
+        let mut sm = StateMachine::new();
+        sm.insert_memory(create_test_entry(3, "default", 1000))
+            .unwrap();
+        sm.insert_memory(create_test_entry(1, "default", 1000))
+            .unwrap();
+        sm.insert_memory(create_test_entry(2, "default", 1000))
+            .unwrap();
+
+        let all = sm.all_memories();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].id, MemoryId(1));
+        assert_eq!(all[1].id, MemoryId(2));
+        assert_eq!(all[2].id, MemoryId(3));
     }
 
     #[test]

@@ -77,7 +77,7 @@ impl TemporalIndex {
     pub fn get_earliest_timestamp(state_machine: &StateMachine) -> Option<u64> {
         // Find first memory in the system (brute force for now)
         let mut earliest = u64::MAX;
-        for entry in state_machine.get_memories_in_time_range(0, u64::MAX) {
+        for entry in state_machine.all_memories() {
             if entry.created_at < earliest {
                 earliest = entry.created_at;
             }
@@ -94,7 +94,7 @@ impl TemporalIndex {
     pub fn get_latest_timestamp(state_machine: &StateMachine) -> Option<u64> {
         // Find last memory in the system
         let mut latest: Option<u64> = None;
-        for entry in state_machine.get_memories_in_time_range(0, u64::MAX) {
+        for entry in state_machine.all_memories() {
             latest = Some(match latest {
                 Some(current) => current.max(entry.created_at),
                 None => entry.created_at,
@@ -144,7 +144,7 @@ impl TemporalIndex {
     pub fn get_oldest(state_machine: &StateMachine, count: usize) -> Result<Vec<MemoryId>> {
         // Get all memories and sort by timestamp
         let mut all = Vec::new();
-        for entry in state_machine.get_memories_in_time_range(0, u64::MAX) {
+        for entry in state_machine.all_memories() {
             all.push((entry.id, entry.created_at));
         }
 
@@ -165,7 +165,7 @@ impl TemporalIndex {
     pub fn get_newest(state_machine: &StateMachine, count: usize) -> Result<Vec<MemoryId>> {
         // Get all memories and sort by timestamp
         let mut all = Vec::new();
-        for entry in state_machine.get_memories_in_time_range(0, u64::MAX) {
+        for entry in state_machine.all_memories() {
             all.push((entry.id, entry.created_at));
         }
 

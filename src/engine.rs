@@ -204,7 +204,7 @@ impl Engine {
         let mut unique_ids = std::collections::HashSet::new();
         let mut candidates: Vec<(MemoryId, u64, f32)> = self
             .state_machine
-            .get_memories_in_time_range(0, u64::MAX)
+            .all_memories()
             .into_iter()
             .filter(|entry| unique_ids.insert(entry.id))
             .map(|entry| (entry.id, entry.created_at, entry.importance))
@@ -240,7 +240,7 @@ impl Engine {
         let entries = self.state_machine.len();
         let bytes = self
             .state_machine
-            .get_memories_in_time_range(0, u64::MAX)
+            .all_memories()
             .into_iter()
             .map(Self::estimate_memory_bytes)
             .sum();

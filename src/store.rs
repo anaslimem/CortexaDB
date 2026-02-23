@@ -110,11 +110,7 @@ impl MnemosStore {
     pub fn rebuild_vector_index(&mut self) -> Result<usize> {
         self.indexes = IndexLayer::new(self.indexes.vector.dimension());
         let mut indexed = 0usize;
-        for entry in self
-            .engine
-            .get_state_machine()
-            .get_memories_in_time_range(0, u64::MAX)
-        {
+        for entry in self.engine.get_state_machine().all_memories() {
             if let Some(embedding) = entry.embedding.clone() {
                 self.indexes.vector_index_mut().index(entry.id, embedding)?;
                 indexed += 1;
