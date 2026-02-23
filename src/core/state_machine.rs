@@ -11,6 +11,13 @@ pub enum StateMachineError {
     MemoryNotFound(MemoryId),
     #[error("Invalid state: {0}")]
     InvalidState(String),
+    #[error("Cross-namespace edge is not allowed: from={from:?} ({from_ns}) to={to:?} ({to_ns})")]
+    CrossNamespaceEdge {
+        from: MemoryId,
+        from_ns: String,
+        to: MemoryId,
+        to_ns: String,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, StateMachineError>;
@@ -111,11 +118,22 @@ impl StateMachine {
 
     /// Add an edge between two memories
     pub fn add_edge(&mut self, from: MemoryId, to: MemoryId, relation: String) -> Result<()> {
-        if !self.memories.contains_key(&from) {
-            return Err(StateMachineError::MemoryNotFound(from));
-        }
-        if !self.memories.contains_key(&to) {
-            return Err(StateMachineError::MemoryNotFound(to));
+        let from_entry = self
+            .memories
+            .get(&from)
+            .ok_or(StateMachineError::MemoryNotFound(from))?;
+        let to_entry = self
+            .memories
+            .get(&to)
+            .ok_or(StateMachineError::MemoryNotFound(to))?;
+
+        if from_entry.namespace != to_entry.namespace {
+            return Err(StateMachineError::CrossNamespaceEdge {
+                from,
+                from_ns: from_entry.namespace.clone(),
+                to,
+                to_ns: to_entry.namespace.clone(),
+            });
         }
 
         let edges = self.graph.entry(from).or_insert_with(Vec::new);
@@ -127,6 +145,13 @@ impl StateMachine {
         }
 
         Ok(())
+    }
+
+    pub fn namespace_of(&self, id: MemoryId) -> Result<&str> {
+        self.memories
+            .get(&id)
+            .map(|e| e.namespace.as_str())
+            .ok_or(StateMachineError::MemoryNotFound(id))
     }
 
     /// Remove an edge between two memories
@@ -387,5 +412,18 @@ mod tests {
         // Edge should be cleaned up
         let neighbors = sm.get_neighbors(MemoryId(1)).unwrap();
         assert!(neighbors.is_empty());
+    }
+
+    #[test]
+    fn test_cross_namespace_edge_rejected() {
+        let mut sm = StateMachine::new();
+        sm.insert_memory(create_test_entry(1, "ns1", 1000)).unwrap();
+        sm.insert_memory(create_test_entry(2, "ns2", 1000)).unwrap();
+
+        let result = sm.add_edge(MemoryId(1), MemoryId(2), "bad".to_string());
+        assert!(matches!(
+            result,
+            Err(StateMachineError::CrossNamespaceEdge { .. })
+        ));
     }
 }

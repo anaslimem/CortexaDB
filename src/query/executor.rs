@@ -134,7 +134,11 @@ impl QueryExecutor {
                 if expansion.hops > 0 {
                     let mut expanded_ids = HashSet::new();
                     for id in candidate_scores.keys().copied() {
-                        let reachable = GraphIndex::bfs(state_machine, id, expansion.hops)?;
+                        let reachable = if let Some(ns) = options.namespace.as_deref() {
+                            GraphIndex::bfs_in_namespace(state_machine, id, expansion.hops, ns)?
+                        } else {
+                            GraphIndex::bfs(state_machine, id, expansion.hops)?
+                        };
                         for neighbor in reachable.keys().copied() {
                             if matches_filters(
                                 state_machine,

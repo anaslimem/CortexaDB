@@ -30,14 +30,37 @@ impl GraphIndex {
         start: MemoryId,
         max_hops: usize,
     ) -> Result<HashMap<MemoryId, usize>> {
+        Self::bfs_internal(state_machine, start, max_hops, None)
+    }
+
+    pub fn bfs_in_namespace(
+        state_machine: &StateMachine,
+        start: MemoryId,
+        max_hops: usize,
+        namespace: &str,
+    ) -> Result<HashMap<MemoryId, usize>> {
+        Self::bfs_internal(state_machine, start, max_hops, Some(namespace))
+    }
+
+    fn bfs_internal(
+        state_machine: &StateMachine,
+        start: MemoryId,
+        max_hops: usize,
+        namespace: Option<&str>,
+    ) -> Result<HashMap<MemoryId, usize>> {
         if max_hops == 0 {
             return Err(GraphError::InvalidMaxHops(max_hops));
         }
 
         // Verify start memory exists
-        state_machine
+        let start_entry = state_machine
             .get_memory(start)
             .map_err(|_| GraphError::MemoryNotFound(start))?;
+        if let Some(ns) = namespace {
+            if start_entry.namespace != ns {
+                return Ok(HashMap::new());
+            }
+        }
 
         let mut visited = HashMap::new();
         let mut queue = VecDeque::new();
@@ -54,6 +77,15 @@ impl GraphIndex {
             // Get neighbors of current memory
             if let Ok(neighbors) = state_machine.get_neighbors(current) {
                 for (neighbor_id, _relation) in neighbors {
+                    if let Some(ns) = namespace {
+                        let in_namespace = state_machine
+                            .namespace_of(neighbor_id)
+                            .map(|v| v == ns)
+                            .unwrap_or(false);
+                        if !in_namespace {
+                            continue;
+                        }
+                    }
                     if !visited.contains_key(&neighbor_id) {
                         let new_distance = distance + 1;
                         visited.insert(neighbor_id, new_distance);
@@ -221,6 +253,18 @@ impl GraphIndex {
         max_hops: usize,
     ) -> Result<Vec<MemoryId>> {
         let visited = Self::bfs(state_machine, start, max_hops)?;
+        let mut ids: Vec<MemoryId> = visited.keys().copied().collect();
+        ids.sort();
+        Ok(ids)
+    }
+
+    pub fn get_reachable_in_namespace(
+        state_machine: &StateMachine,
+        start: MemoryId,
+        max_hops: usize,
+        namespace: &str,
+    ) -> Result<Vec<MemoryId>> {
+        let visited = Self::bfs_in_namespace(state_machine, start, max_hops, namespace)?;
         let mut ids: Vec<MemoryId> = visited.keys().copied().collect();
         ids.sort();
         Ok(ids)
@@ -417,5 +461,44 @@ mod tests {
                 .iter()
                 .all(|path| path.iter().filter(|&&id| id == MemoryId(0)).count() == 1)
         );
+    }
+
+    #[test]
+    fn test_bfs_in_namespace_filters_neighbors() {
+        let mut sm = StateMachine::new();
+        sm.insert_memory(MemoryEntry::new(
+            MemoryId(1),
+            "agent1".to_string(),
+            b"a".to_vec(),
+            1000,
+        ))
+        .unwrap();
+        sm.insert_memory(MemoryEntry::new(
+            MemoryId(2),
+            "agent1".to_string(),
+            b"b".to_vec(),
+            1001,
+        ))
+        .unwrap();
+        sm.insert_memory(MemoryEntry::new(
+            MemoryId(3),
+            "agent2".to_string(),
+            b"c".to_vec(),
+            1002,
+        ))
+        .unwrap();
+
+        sm.add_edge(MemoryId(1), MemoryId(2), "ok".to_string())
+            .unwrap();
+        // Cross namespace should be rejected by state machine, so no leakage via edges.
+        assert!(
+            sm.add_edge(MemoryId(2), MemoryId(3), "bad".to_string())
+                .is_err()
+        );
+
+        let scoped = GraphIndex::bfs_in_namespace(&sm, MemoryId(1), 3, "agent1").unwrap();
+        assert!(scoped.contains_key(&MemoryId(1)));
+        assert!(scoped.contains_key(&MemoryId(2)));
+        assert!(!scoped.contains_key(&MemoryId(3)));
     }
 }

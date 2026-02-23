@@ -209,7 +209,11 @@ impl<'a> HybridQueryEngine<'a> {
                 let mut expanded_ids = HashSet::new();
                 let base_ids: Vec<MemoryId> = candidate_scores.keys().copied().collect();
                 for id in base_ids {
-                    let reachable = GraphIndex::bfs(self.state_machine, id, expansion.hops)?;
+                    let reachable = if let Some(ns) = options.namespace.as_deref() {
+                        GraphIndex::bfs_in_namespace(self.state_machine, id, expansion.hops, ns)?
+                    } else {
+                        GraphIndex::bfs(self.state_machine, id, expansion.hops)?
+                    };
                     for reachable_id in reachable.keys().copied() {
                         if self.matches_filters(reachable_id, options.namespace.as_deref(), None) {
                             expanded_ids.insert(reachable_id);
@@ -352,8 +356,6 @@ mod tests {
         sm.insert_memory(c).unwrap();
 
         sm.add_edge(MemoryId(1), MemoryId(2), "linked".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(2), MemoryId(3), "linked".to_string())
             .unwrap();
 
         (sm, layer, embedder)
