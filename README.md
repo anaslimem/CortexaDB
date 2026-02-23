@@ -180,6 +180,12 @@ Environment variables:
 - `MNEMOS_CHECKPOINT_ENABLED` (`true`/`false`, default `false`)
 - `MNEMOS_CHECKPOINT_EVERY_OPS` (default `10000`)
 - `MNEMOS_CHECKPOINT_EVERY_MS` (default `30000`)
+- `MNEMOS_INTENT_ANCHOR_SEMANTIC` (default semantic anchor text)
+- `MNEMOS_INTENT_ANCHOR_RECENCY` (default recency anchor text)
+- `MNEMOS_INTENT_ANCHOR_GRAPH` (default graph anchor text)
+- `MNEMOS_INTENT_GRAPH_HOPS_2_THRESHOLD` (default `0.55`)
+- `MNEMOS_INTENT_GRAPH_HOPS_3_THRESHOLD` (default `0.80`)
+- `MNEMOS_INTENT_IMPORTANCE_PCT` (default `20`)
 
 Run server:
 
@@ -190,6 +196,34 @@ scripts/run_grpc.sh
 Status check in browser:
 
 - [http://127.0.0.1:50052](http://127.0.0.1:50052)
+
+### Intent Tuning Guide
+
+Mnemos uses intent anchors to auto-balance retrieval between similarity, recency, and graph expansion.
+Tune this behavior with env vars depending on your goal.
+
+Preset: Hackathon (higher recall, more relationship exploration)
+
+```bash
+MNEMOS_INTENT_GRAPH_HOPS_2_THRESHOLD=0.45
+MNEMOS_INTENT_GRAPH_HOPS_3_THRESHOLD=0.70
+MNEMOS_INTENT_IMPORTANCE_PCT=15
+```
+
+Preset: Production-Latency (tighter graph expansion, steadier latency)
+
+```bash
+MNEMOS_INTENT_GRAPH_HOPS_2_THRESHOLD=0.65
+MNEMOS_INTENT_GRAPH_HOPS_3_THRESHOLD=0.88
+MNEMOS_INTENT_IMPORTANCE_PCT=25
+```
+
+Quick guidance:
+
+- Lower graph thresholds => more frequent 2-3 hop expansion => better recall, higher latency.
+- Higher graph thresholds => graph is used more conservatively => lower tail latency.
+- Lower importance percent => similarity/recency dominate ranking.
+- Higher importance percent => stable “important memory” ranking boost.
 
 ## Python Client
 
