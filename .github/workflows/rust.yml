@@ -47,6 +47,7 @@ jobs:
     - name: Run quickstart smoke test
       run: |
         set -euo pipefail
+        set -x
 
         MNEMOS_GRPC_ADDR=127.0.0.1:50051 \
         MNEMOS_STATUS_ADDR=127.0.0.1:50052 \
@@ -54,21 +55,58 @@ jobs:
         MNEMOS_VECTOR_DIM=3 \
         target/debug/mnemos_grpc > /tmp/mnemos-ci.log 2>&1 &
         SERVER_PID=$!
-        trap 'kill ${SERVER_PID} || true' EXIT
+        cleanup() {
+          kill ${SERVER_PID} >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
 
+        HEALTHY=0
         for _ in $(seq 1 40); do
           if curl -fsS http://127.0.0.1:50052 >/dev/null; then
+            HEALTHY=1
             break
           fi
           sleep 0.5
         done
+        if [ "${HEALTHY}" -ne 1 ]; then
+          echo "mnemos_grpc failed to become healthy"
+          tail -n 200 /tmp/mnemos-ci.log || true
+          exit 1
+        fi
 
         curl -fsS http://127.0.0.1:50052 | grep -q "Mnemos is running"
 
         source python/mnemos-client/.venv/bin/activate
         export MNEMOS_ADDR=127.0.0.1:50051
-        export MNEMOS_NAMESPACE=ci-quickstart
+        export MNEMOS_NAMESPACE=ci-quickstart-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+        export PYTHONWARNINGS=error::DeprecationWarning
+
+        # API contract check: stable surface must be importable and present.
+        python - <<'PY'
+        from mnemos_client import MnemosMemory
+
+        required = ["store", "store_many", "ask", "ask_raw", "ask_with_context", "close"]
+        for name in required:
+            assert hasattr(MnemosMemory, name), f"missing stable API method: {name}"
+        print("contract_ok")
+        PY
+
         python python/mnemos-client/examples/simple_memory.py | tee /tmp/quickstart.out
         grep -q "Answers:" /tmp/quickstart.out
+
+        # Deterministic retrieval assertion for quickstart quality.
+        python - <<'PY'
+        from mnemos_client import MnemosMemory
+
+        memory = MnemosMemory.from_env()
+        try:
+            memory.store("Alice owns release planning.")
+            memory.store("Release deadline is Friday at 5 PM.")
+            answers = memory.ask("When is the release deadline?", top_k=5)
+            assert any("Friday at 5 PM" in a for a in answers), answers
+            print("retrieval_ok")
+        finally:
+            memory.close()
+        PY
 
         curl -fsS http://127.0.0.1:50052/metrics | grep -q "mnemos_rpc_total"
