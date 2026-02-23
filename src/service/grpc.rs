@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tonic::{Request, Response, Status};
 
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
@@ -17,46 +17,43 @@ pub use proto::mnemos_service_server::MnemosServiceServer;
 
 #[derive(Clone)]
 pub struct MnemosGrpcService {
-    store: Arc<RwLock<MnemosStore>>,
+    store: Arc<MnemosStore>,
     writer_tx: mpsc::Sender<WriteRequest>,
 }
 
 impl MnemosGrpcService {
     pub fn new(store: MnemosStore) -> Self {
-        let store = Arc::new(RwLock::new(store));
+        let store = Arc::new(store);
         let (writer_tx, mut writer_rx) = mpsc::channel::<WriteRequest>(1024);
 
         let writer_store = Arc::clone(&store);
         tokio::spawn(async move {
             while let Some(req) = writer_rx.recv().await {
-                let result: Result<WriteResult, String> = {
-                    let mut store = writer_store.write().await;
-                    match req.command {
-                        WriteCommand::InsertMemory(entry) => store
-                            .insert_memory(entry)
-                            .map(|id| WriteResult::CommandId(id.0))
-                            .map_err(|e| e.to_string()),
-                        WriteCommand::DeleteMemory(id) => store
-                            .delete_memory(id)
-                            .map(|id| WriteResult::CommandId(id.0))
-                            .map_err(|e| e.to_string()),
-                        WriteCommand::AddEdge { from, to, relation } => store
-                            .add_edge(from, to, relation)
-                            .map(|id| WriteResult::CommandId(id.0))
-                            .map_err(|e| e.to_string()),
-                        WriteCommand::RemoveEdge { from, to } => store
-                            .remove_edge(from, to)
-                            .map(|id| WriteResult::CommandId(id.0))
-                            .map_err(|e| e.to_string()),
-                        WriteCommand::EnforceCapacity(policy) => store
-                            .enforce_capacity(policy)
-                            .map(WriteResult::Capacity)
-                            .map_err(|e| e.to_string()),
-                        WriteCommand::CompactSegments => store
-                            .compact_segments()
-                            .map(WriteResult::Compact)
-                            .map_err(|e| e.to_string()),
-                    }
+                let result: Result<WriteResult, String> = match req.command {
+                    WriteCommand::InsertMemory(entry) => writer_store
+                        .insert_memory(entry)
+                        .map(|id| WriteResult::CommandId(id.0))
+                        .map_err(|e| e.to_string()),
+                    WriteCommand::DeleteMemory(id) => writer_store
+                        .delete_memory(id)
+                        .map(|id| WriteResult::CommandId(id.0))
+                        .map_err(|e| e.to_string()),
+                    WriteCommand::AddEdge { from, to, relation } => writer_store
+                        .add_edge(from, to, relation)
+                        .map(|id| WriteResult::CommandId(id.0))
+                        .map_err(|e| e.to_string()),
+                    WriteCommand::RemoveEdge { from, to } => writer_store
+                        .remove_edge(from, to)
+                        .map(|id| WriteResult::CommandId(id.0))
+                        .map_err(|e| e.to_string()),
+                    WriteCommand::EnforceCapacity(policy) => writer_store
+                        .enforce_capacity(policy)
+                        .map(WriteResult::Capacity)
+                        .map_err(|e| e.to_string()),
+                    WriteCommand::CompactSegments => writer_store
+                        .compact_segments()
+                        .map(WriteResult::Compact)
+                        .map_err(|e| e.to_string()),
                 };
 
                 let _ = req.reply.send(result);
@@ -251,35 +248,36 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
             embedding: req.query_embedding,
         };
 
-        let store = self.store.read().await;
-        let out = store
-            .query("grpc_query", options, &embedder)
+        let (out, snapshot) = self
+            .store
+            .query_with_snapshot("grpc_query", options, &embedder)
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let hits = out
             .hits
             .into_iter()
             .map(|h| {
-                let memory = store
-                    .state_machine()
-                    .get_memory(h.id)
-                    .ok()
-                    .map(|m| proto::Memory {
-                        id: m.id.0,
-                        namespace: m.namespace.clone(),
-                        content: m.content.clone(),
-                        embedding: m.embedding.clone().unwrap_or_default(),
-                        created_at: m.created_at,
-                        importance: m.importance,
-                        metadata: m
-                            .metadata
-                            .iter()
-                            .map(|(k, v)| proto::MetadataPair {
-                                key: k.clone(),
-                                value: v.clone(),
-                            })
-                            .collect(),
-                    });
+                let memory =
+                    snapshot
+                        .state_machine()
+                        .get_memory(h.id)
+                        .ok()
+                        .map(|m| proto::Memory {
+                            id: m.id.0,
+                            namespace: m.namespace.clone(),
+                            content: m.content.clone(),
+                            embedding: m.embedding.clone().unwrap_or_default(),
+                            created_at: m.created_at,
+                            importance: m.importance,
+                            metadata: m
+                                .metadata
+                                .iter()
+                                .map(|(k, v)| proto::MetadataPair {
+                                    key: k.clone(),
+                                    value: v.clone(),
+                                })
+                                .collect(),
+                        });
                 proto::QueryHit {
                     id: h.id.0,
                     final_score: h.final_score,
@@ -356,11 +354,10 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         &self,
         _request: Request<proto::StatsRequest>,
     ) -> Result<Response<proto::StatsResponse>, Status> {
-        let store = self.store.read().await;
         Ok(Response::new(proto::StatsResponse {
-            wal_len: store.wal_len(),
-            state_entries: u64::try_from(store.state_machine().len()).unwrap_or(u64::MAX),
-            indexed_embeddings: u64::try_from(store.indexed_embeddings()).unwrap_or(u64::MAX),
+            wal_len: self.store.wal_len(),
+            state_entries: u64::try_from(self.store.state_machine().len()).unwrap_or(u64::MAX),
+            indexed_embeddings: u64::try_from(self.store.indexed_embeddings()).unwrap_or(u64::MAX),
         }))
     }
 }

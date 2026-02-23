@@ -22,6 +22,7 @@ pub struct Edge {
 }
 
 /// Deterministic state machine that applies commands and maintains memory state
+#[derive(Clone)]
 pub struct StateMachine {
     /// All memory entries indexed by ID
     memories: HashMap<MemoryId, MemoryEntry>,

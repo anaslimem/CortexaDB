@@ -74,6 +74,7 @@ impl Default for RankingWeights {
 /// Combined index layer for multi-criteria queries
 ///
 /// Combines Vector + Graph + Temporal indexes for rich contextual search
+#[derive(Debug, Clone)]
 pub struct IndexLayer {
     pub vector: VectorIndex,
 }

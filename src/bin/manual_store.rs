@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::remove_dir_all(&seg)?;
     }
 
-    let mut store = MnemosStore::new(&wal, &seg, 3)?;
+    let store = MnemosStore::new(&wal, &seg, 3)?;
 
     store.insert_memory(
         MemoryEntry::new(
