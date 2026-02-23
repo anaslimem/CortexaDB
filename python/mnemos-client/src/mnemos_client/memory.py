@@ -21,9 +21,13 @@ class MnemosMemory:
     """
     High-level helper API for agent developers.
 
-    Primary UX:
-    - store(text, ...)
-    - ask(query, ...) -> list[str]
+    0.1 stable contract:
+    - store
+    - store_many
+    - ask
+    - ask_raw
+    - ask_with_context
+    - close
     """
 
     def __init__(self, client: MnemosClient) -> None:
@@ -66,12 +70,17 @@ class MnemosMemory:
         metadata: Optional[Dict[str, str]] = None,
         memory_id: Optional[int] = None,
     ) -> int:
-        return self._client.remember(
-            text,
-            namespace=namespace,
+        ns = namespace or self._client._default_namespace  # pylint: disable=protected-access
+        if not ns:
+            raise ValueError(
+                "namespace is required. Set MNEMOS_NAMESPACE or pass namespace=..."
+            )
+        return self._client.insert_text(
+            namespace=ns,
+            text=text,
+            memory_id=memory_id,
             importance=importance,
             metadata=metadata,
-            memory_id=memory_id,
         )
 
     def store_many(self, items: Iterable[StoreItem]) -> List[int]:
@@ -98,14 +107,19 @@ class MnemosMemory:
         time_start: Optional[int] = None,
         time_end: Optional[int] = None,
     ) -> List[str]:
-        hits = self._client.recall(
+        ns = namespace or self._client._default_namespace  # pylint: disable=protected-access
+        if not ns:
+            raise ValueError(
+                "namespace is required. Set MNEMOS_NAMESPACE or pass namespace=..."
+            )
+        hits = self._client.query_text(
             query,
-            namespace=namespace,
             top_k=top_k,
+            namespace=ns,
             graph_hops=graph_hops,
             time_start=time_start,
             time_end=time_end,
-        )
+        ).hits
         return [h.text for h in hits if h.text]
 
     def ask_raw(
@@ -118,14 +132,19 @@ class MnemosMemory:
         time_start: Optional[int] = None,
         time_end: Optional[int] = None,
     ) -> List[QueryHit]:
-        return self._client.recall(
+        ns = namespace or self._client._default_namespace  # pylint: disable=protected-access
+        if not ns:
+            raise ValueError(
+                "namespace is required. Set MNEMOS_NAMESPACE or pass namespace=..."
+            )
+        return self._client.query_text(
             query,
-            namespace=namespace,
             top_k=top_k,
+            namespace=ns,
             graph_hops=graph_hops,
             time_start=time_start,
             time_end=time_end,
-        )
+        ).hits
 
     def ask_with_context(
         self,

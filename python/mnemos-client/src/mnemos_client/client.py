@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import time
 import uuid
+import warnings
 from contextlib import AbstractContextManager
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -82,6 +83,7 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
         """
         Store text memory and return the memory ID (not the command ID).
         """
+        _warn_shortcut_deprecated("remember", "MnemosMemory.store")
         ns = self._resolve_namespace(namespace)
         if memory_id is None:
             memory_id = _new_memory_id()
@@ -104,6 +106,7 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
         time_start: Optional[int] = None,
         time_end: Optional[int] = None,
     ) -> List[QueryHit]:
+        _warn_shortcut_deprecated("recall", "MnemosMemory.ask / MnemosMemory.ask_raw")
         ns = self._resolve_namespace(namespace)
         return self.query_text(
             text,
@@ -115,12 +118,15 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
         ).hits
 
     def forget(self, memory_id: int) -> int:
+        _warn_shortcut_deprecated("forget", "MnemosClient.delete_memory")
         return self.delete_memory(memory_id)
 
     def link(self, source_id: int, target_id: int, relation: str = "related_to") -> int:
+        _warn_shortcut_deprecated("link", "MnemosClient.add_edge")
         return self.add_edge(source_id, target_id, relation)
 
     def unlink(self, source_id: int, target_id: int) -> int:
+        _warn_shortcut_deprecated("unlink", "MnemosClient.remove_edge")
         return self.remove_edge(source_id, target_id)
 
     def insert_text(
@@ -381,3 +387,14 @@ def default_hash_embedder(text: str, dim: int = 3) -> List[float]:
 def _new_memory_id() -> int:
     # 64-bit ID from UUID4 to avoid collisions in typical client usage.
     return uuid.uuid4().int & ((1 << 64) - 1)
+
+
+def _warn_shortcut_deprecated(name: str, replacement: str) -> None:
+    warnings.warn(
+        (
+            f"MnemosClient.{name} is a convenience shortcut and is deprecated as a primary UX. "
+            f"Use {replacement} for the 0.1 stable path."
+        ),
+        DeprecationWarning,
+        stacklevel=2,
+    )

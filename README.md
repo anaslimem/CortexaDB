@@ -277,6 +277,15 @@ High-level developer API:
 - `MnemosMemory.store(...)`
 - `MnemosMemory.ask(...)`
 
+0.1 stable contract surface:
+
+- `store`
+- `store_many`
+- `ask`
+- `ask_raw`
+- `ask_with_context`
+- `close`
+
 Advanced typed API also available:
 
 - `MnemosClient.remember(...)`

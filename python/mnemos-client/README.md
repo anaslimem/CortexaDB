@@ -40,6 +40,19 @@ print(answers[0])
 memory.close()
 ```
 
+## 0.1 API Contract (Stable Surface)
+
+For this version line, treat the following `MnemosMemory` methods as the stable developer contract:
+
+- `store`
+- `store_many`
+- `ask`
+- `ask_raw`
+- `ask_with_context`
+- `close`
+
+Everything else is advanced/typed API.
+
 ## Environment variables
 
 - `MNEMOS_ADDR` default: `127.0.0.1:50051`
@@ -97,13 +110,15 @@ client = MnemosClient(
 )
 ```
 
-Core methods:
+Convenience shortcuts (deprecated as primary UX):
 
-- `remember(...) -> int` returns `memory_id`
-- `recall(...) -> List[QueryHit]`
-- `link(source_id, target_id, relation="related_to")`
-- `unlink(source_id, target_id)`
-- `forget(memory_id)`
+- `remember(...)`
+- `recall(...)`
+- `link(...)`
+- `unlink(...)`
+- `forget(...)`
+
+These still work for compatibility, but the recommended path is `MnemosMemory` for app-level usage.
 
 Typed/low-level methods:
 
