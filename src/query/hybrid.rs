@@ -115,7 +115,8 @@ impl Default for QueryOptions {
             top_k: 10,
             namespace: None,
             time_range: None,
-            graph_expansion: None,
+            // Hybrid-first default: expand one hop when graph signal exists.
+            graph_expansion: Some(GraphExpansionOptions::new(1)),
             candidate_multiplier: 5,
             score_weights: ScoreWeights::default(),
         }

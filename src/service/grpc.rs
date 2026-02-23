@@ -384,7 +384,11 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         if let Some(hops) = req.graph_hops {
             let hops = usize::try_from(hops)
                 .map_err(|_| Status::invalid_argument("invalid graph_hops"))?;
-            options.graph_expansion = Some(GraphExpansionOptions::new(hops));
+            options.graph_expansion = if hops == 0 {
+                None
+            } else {
+                Some(GraphExpansionOptions::new(hops))
+            };
         }
         if req.candidate_multiplier > 0 {
             options.candidate_multiplier = usize::try_from(req.candidate_multiplier)

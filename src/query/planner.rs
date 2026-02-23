@@ -34,7 +34,7 @@ impl QueryPlanner {
     ///   - enabled for larger indices and candidate sets
     pub fn plan(mut options: QueryOptions, indexed_embeddings: usize) -> QueryPlan {
         let has_temporal = options.time_range.is_some();
-        let has_graph = options.graph_expansion.is_some();
+        let has_graph = options.graph_expansion.map(|g| g.hops > 0).unwrap_or(false);
 
         let path = match (has_temporal, has_graph) {
             (false, false) => ExecutionPath::VectorOnly,
@@ -87,7 +87,9 @@ mod tests {
 
     #[test]
     fn test_plan_vector_only() {
-        let plan = QueryPlanner::plan(QueryOptions::with_top_k(10), 100);
+        let mut options = QueryOptions::with_top_k(10);
+        options.graph_expansion = None;
+        let plan = QueryPlanner::plan(options, 100);
         assert_eq!(plan.path, ExecutionPath::VectorOnly);
         assert!(!plan.use_parallel);
     }

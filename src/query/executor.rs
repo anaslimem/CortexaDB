@@ -324,6 +324,7 @@ mod tests {
         let (sm, layer, embedder) = setup();
         let mut opts = QueryOptions::with_top_k(5);
         opts.time_range = Some((1500, 2500));
+        opts.graph_expansion = None;
         let plan = QueryPlanner::plan(opts, layer.vector.len());
         assert_eq!(plan.path, ExecutionPath::VectorTemporal);
 
