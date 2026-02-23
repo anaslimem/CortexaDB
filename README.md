@@ -242,11 +242,11 @@ Each run prints ingest/flush/total timing, ops/sec, and a recovery durability ch
 
 Sample local result (`ops=500`, same machine, debug build):
 
-```text
-Strict: ops_per_sec=75.59, total_ms=6614
-Batch(max_ops=64,max_delay_ms=10): ops_per_sec=156.32, total_ms=3198
-Async(interval_ms=10): ops_per_sec=160.98, total_ms=3105
-```
+| Mode | Config | Total (ms) | Ops/sec |
+|---|---|---:|---:|
+| Strict | default | 6614 | 75.59 |
+| Batch | `max_ops=64`, `max_delay_ms=10` | 3198 | 156.32 |
+| Async | `interval_ms=10` | 3105 | 160.98 |
 
 These numbers are workload and hardware dependent, but show the expected pattern:
 `batch`/`async` improve write throughput compared with `strict`.
