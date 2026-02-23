@@ -98,19 +98,42 @@ impl Engine {
         let segments_dir = segments_dir.as_ref();
 
         // Load segments (this rebuilds the index from segment files)
-        let segments = SegmentStorage::new(segments_dir)?;
+        let mut segments = SegmentStorage::new(segments_dir)?;
 
-        // Read all commands from WAL
-        let commands = WriteAheadLog::read_all(wal_path)?;
+        // Read all commands from WAL, truncating incomplete/corrupt tail if needed.
+        let wal_outcome = WriteAheadLog::read_all_tolerant(wal_path)?;
+        let commands = wal_outcome.commands;
 
         // Create fresh state machine and replay commands
         let mut state_machine = StateMachine::new();
+        let mut repaired_segments = false;
 
         // Replay all commands in order
         let mut last_id = CommandId(0);
         for (cmd_id, cmd) in commands {
+            match &cmd {
+                Command::InsertMemory(entry) => {
+                    // Ensure segment view converges to WAL command stream.
+                    let needs_rewrite = match segments.read_entry(entry.id) {
+                        Ok(existing) => existing != *entry,
+                        Err(_) => true,
+                    };
+                    if needs_rewrite {
+                        segments.write_entry(entry)?;
+                        repaired_segments = true;
+                    }
+                }
+                Command::DeleteMemory(id) => {
+                    // Delete may refer to a missing segment entry in crash scenarios.
+                    let _ = segments.delete_entry(*id);
+                }
+                Command::AddEdge { .. } | Command::RemoveEdge { .. } => {}
+            }
             state_machine.apply_command(cmd)?;
             last_id = cmd_id;
+        }
+        if repaired_segments || wal_outcome.truncated {
+            segments.fsync()?;
         }
 
         // Open WAL for appending new commands

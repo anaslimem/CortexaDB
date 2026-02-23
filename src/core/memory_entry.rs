@@ -6,7 +6,7 @@ use std::collections::HashMap;
 pub struct MemoryId(pub u64);
 
 /// Core memory entry structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryEntry {
     pub id: MemoryId,
     pub namespace: String,

@@ -24,6 +24,13 @@ pub enum WalError {
 
 pub type Result<T> = std::result::Result<T, WalError>;
 
+#[derive(Debug, Clone)]
+pub struct WalReadOutcome {
+    pub commands: Vec<(CommandId, Command)>,
+    pub valid_bytes: u64,
+    pub truncated: bool,
+}
+
 /// Unique identifier for a command in the WAL
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CommandId(pub u64);
@@ -130,53 +137,103 @@ impl WriteAheadLog {
 
     /// Read all commands from WAL (used for recovery)
     pub fn read_all<P: AsRef<Path>>(path: P) -> Result<Vec<(CommandId, Command)>> {
+        Ok(Self::read_all_tolerant(path)?.commands)
+    }
+
+    /// Read all valid commands and stop at the first invalid/incomplete trailing record.
+    ///
+    /// Returns parsed commands plus the last known-good byte offset. Callers can truncate
+    /// the file to `valid_bytes` when `truncated == true` to heal corrupted tails.
+    pub fn read_all_tolerant<P: AsRef<Path>>(path: P) -> Result<WalReadOutcome> {
         let file = match OpenOptions::new().read(true).open(path.as_ref()) {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Ok(f) => (f, path.as_ref().to_path_buf()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(WalReadOutcome {
+                    commands: Vec::new(),
+                    valid_bytes: 0,
+                    truncated: false,
+                });
+            }
             Err(e) => return Err(e.into()),
         };
+        let (file, wal_path) = file;
+        let file_len = file.metadata()?.len();
 
         let mut reader = BufReader::new(file);
         let mut commands = Vec::new();
         let mut entry_id = 0u64;
+        let mut valid_bytes = 0u64;
+        let mut truncated = false;
         let crc = Crc::<u32>::new(&crc::CRC_32_CKSUM);
 
         loop {
+            let record_start = valid_bytes;
             let mut len_bytes = [0u8; 4];
             match reader.read_exact(&mut len_bytes) {
                 Ok(()) => {
                     let len = u32::from_le_bytes(len_bytes) as usize;
+                    let record_size = 8u64.saturating_add(len as u64);
+                    if record_start.saturating_add(record_size) > file_len {
+                        truncated = true;
+                        break;
+                    }
 
                     // Read checksum
                     let mut checksum_bytes = [0u8; 4];
-                    reader.read_exact(&mut checksum_bytes)?;
+                    if reader.read_exact(&mut checksum_bytes).is_err() {
+                        truncated = true;
+                        break;
+                    }
                     let expected_checksum = u32::from_le_bytes(checksum_bytes);
 
                     // Read command bytes
                     let mut command_bytes = vec![0u8; len];
-                    reader.read_exact(&mut command_bytes)?;
+                    if reader.read_exact(&mut command_bytes).is_err() {
+                        truncated = true;
+                        break;
+                    }
 
                     // Verify checksum
                     let actual_checksum = crc.checksum(&command_bytes);
                     if actual_checksum != expected_checksum {
-                        return Err(WalError::ChecksumMismatch {
-                            entry_id,
-                            expected: expected_checksum,
-                            actual: actual_checksum,
-                        });
+                        // Treat as tail corruption and stop at last known-good command.
+                        truncated = true;
+                        break;
                     }
 
                     // Deserialize command
-                    let cmd = bincode::deserialize(&command_bytes)?;
+                    let cmd = match bincode::deserialize(&command_bytes) {
+                        Ok(cmd) => cmd,
+                        Err(_) => {
+                            truncated = true;
+                            break;
+                        }
+                    };
                     commands.push((CommandId(entry_id), cmd));
                     entry_id += 1;
+                    valid_bytes = record_start + record_size;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e.into()),
             }
         }
 
-        Ok(commands)
+        if truncated {
+            Self::truncate_to(&wal_path, valid_bytes)?;
+        }
+
+        Ok(WalReadOutcome {
+            commands,
+            valid_bytes,
+            truncated,
+        })
+    }
+
+    pub fn truncate_to<P: AsRef<Path>>(path: P, valid_bytes: u64) -> Result<()> {
+        let file = OpenOptions::new().write(true).open(path)?;
+        file.set_len(valid_bytes)?;
+        file.sync_all()?;
+        Ok(())
     }
 
     /// Get number of entries in WAL
@@ -282,13 +339,11 @@ mod tests {
         file.write_all(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap(); // Bad checksum
         drop(file);
 
-        // Try to read - should fail with checksum error
-        let result = WriteAheadLog::read_all(&wal_path);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            WalError::ChecksumMismatch { .. } => {} // Expected
-            e => panic!("Expected ChecksumMismatch, got {:?}", e),
-        }
+        // Tail corruption should be truncated and recovered to last valid record.
+        let outcome = WriteAheadLog::read_all_tolerant(&wal_path).unwrap();
+        assert!(outcome.truncated);
+        assert_eq!(outcome.commands.len(), 0);
+        assert_eq!(std::fs::metadata(&wal_path).unwrap().len(), 0);
     }
 
     #[test]
@@ -331,6 +386,38 @@ mod tests {
         // Read all - should have 5
         let recovered = WriteAheadLog::read_all(&wal_path).unwrap();
         assert_eq!(recovered.len(), 5);
+    }
+
+    #[test]
+    fn test_wal_partial_tail_is_truncated() {
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("test.wal");
+
+        let mut wal = WriteAheadLog::new(&wal_path).unwrap();
+        for i in 0..3 {
+            let entry = MemoryEntry::new(
+                crate::core::memory_entry::MemoryId(i as u64),
+                "test".to_string(),
+                format!("data_{i}").into_bytes(),
+                1000 + i as u64,
+            );
+            wal.append(&Command::InsertMemory(entry)).unwrap();
+        }
+        wal.fsync().unwrap();
+        drop(wal);
+
+        let len = std::fs::metadata(&wal_path).unwrap().len();
+        let file = OpenOptions::new().write(true).open(&wal_path).unwrap();
+        file.set_len(len - 5).unwrap();
+        file.sync_all().unwrap();
+
+        let outcome = WriteAheadLog::read_all_tolerant(&wal_path).unwrap();
+        assert!(outcome.truncated);
+        assert_eq!(outcome.commands.len(), 2);
+        assert_eq!(
+            std::fs::metadata(&wal_path).unwrap().len(),
+            outcome.valid_bytes
+        );
     }
 
     #[test]

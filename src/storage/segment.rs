@@ -124,6 +124,7 @@ impl SegmentStorage {
     /// Read entire segment and rebuild index from it
     fn read_segment_into_index(&mut self, path: &Path, segment_id: u32) -> Result<()> {
         let file = OpenOptions::new().read(true).open(path)?;
+        let file_len = file.metadata()?.len();
         let mut reader = BufReader::new(file);
         let mut offset = 0u64;
         let crc = Crc::<u32>::new(&crc::CRC_32_CKSUM);
@@ -133,19 +134,35 @@ impl SegmentStorage {
             match reader.read_exact(&mut len_bytes) {
                 Ok(()) => {
                     let len = u32::from_le_bytes(len_bytes) as usize;
+                    let record_size = 8u64.saturating_add(len as u64);
+                    if offset.saturating_add(record_size) > file_len {
+                        Self::truncate_segment_tail(path, offset)?;
+                        break;
+                    }
 
                     // Read checksum
                     let mut checksum_bytes = [0u8; 4];
-                    reader.read_exact(&mut checksum_bytes)?;
+                    if reader.read_exact(&mut checksum_bytes).is_err() {
+                        Self::truncate_segment_tail(path, offset)?;
+                        break;
+                    }
                     let expected_checksum = u32::from_le_bytes(checksum_bytes);
 
                     // Read entry bytes
                     let mut entry_bytes = vec![0u8; len];
-                    reader.read_exact(&mut entry_bytes)?;
+                    if reader.read_exact(&mut entry_bytes).is_err() {
+                        Self::truncate_segment_tail(path, offset)?;
+                        break;
+                    }
 
                     // Verify checksum
                     let actual_checksum = crc.checksum(&entry_bytes);
                     if actual_checksum != expected_checksum {
+                        if offset.saturating_add(record_size) == file_len {
+                            // Corrupted last record; truncate tail and continue recovery.
+                            Self::truncate_segment_tail(path, offset)?;
+                            break;
+                        }
                         return Err(SegmentError::ChecksumMismatch {
                             offset,
                             expected: expected_checksum,
@@ -154,7 +171,14 @@ impl SegmentStorage {
                     }
 
                     // Deserialize to get memory ID
-                    let entry: MemoryEntry = bincode::deserialize(&entry_bytes)?;
+                    let entry: MemoryEntry = match bincode::deserialize(&entry_bytes) {
+                        Ok(entry) => entry,
+                        Err(_) if offset.saturating_add(record_size) == file_len => {
+                            Self::truncate_segment_tail(path, offset)?;
+                            break;
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
 
                     // Update index
                     self.index.insert(
@@ -171,11 +195,23 @@ impl SegmentStorage {
 
                     offset += 4 + 4 + len as u64; // len + checksum + data
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    if offset < file_len {
+                        Self::truncate_segment_tail(path, offset)?;
+                    }
+                    break;
+                }
                 Err(e) => return Err(e.into()),
             }
         }
 
+        Ok(())
+    }
+
+    fn truncate_segment_tail(path: &Path, valid_bytes: u64) -> Result<()> {
+        let file = OpenOptions::new().write(true).open(path)?;
+        file.set_len(valid_bytes)?;
+        file.sync_all()?;
         Ok(())
     }
 
@@ -522,9 +558,33 @@ mod tests {
             file.write_all(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap(); // Bad checksum
         }
 
-        // Try to create new storage - should fail on recovery because checksum is bad
-        let result = SegmentStorage::new(path);
-        assert!(result.is_err()); // Should fail on recovery due to checksum mismatch
+        // Corrupted last record should be truncated and recovery should succeed.
+        let recovered = SegmentStorage::new(path).unwrap();
+        assert_eq!(recovered.len(), 0);
+    }
+
+    #[test]
+    fn test_segment_partial_tail_is_truncated() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+
+        {
+            let mut storage = SegmentStorage::new(path).unwrap();
+            storage.write_entry(&create_test_entry(1)).unwrap();
+            storage.write_entry(&create_test_entry(2)).unwrap();
+            storage.fsync().unwrap();
+        }
+
+        let seg_path = path.join("000000.seg");
+        let len = std::fs::metadata(&seg_path).unwrap().len();
+        let file = OpenOptions::new().write(true).open(&seg_path).unwrap();
+        file.set_len(len - 5).unwrap();
+        file.sync_all().unwrap();
+
+        let recovered = SegmentStorage::new(path).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert!(recovered.read_entry(MemoryId(1)).is_ok());
+        assert!(recovered.read_entry(MemoryId(2)).is_err());
     }
 
     #[test]
