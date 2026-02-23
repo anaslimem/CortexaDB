@@ -32,7 +32,38 @@ Mnemos is designed specifically for that shape of problem.
 - Capacity/eviction engine (`max_entries`, `max_bytes`) using deterministic delete commands.
 - Segment compaction with atomic directory swap.
 - gRPC service endpoint for remote clients.
-- Python typed client package with high-level `insert_text` / `query_text` APIs.
+- Python client package with high-level `MnemosMemory` (`store` / `ask`) and advanced typed APIs.
+
+## Quickstart
+
+One clear path from zero to first retrieval:
+
+1. Start server.
+
+```bash
+cd /Users/limemanas/Desktop/projects/Mnemos
+scripts/run_grpc.sh
+```
+
+2. In another terminal, run Python quickstart.
+
+```bash
+cd /Users/limemanas/Desktop/projects/Mnemos/python/mnemos-client
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+./scripts/generate_proto.sh
+export MNEMOS_ADDR=127.0.0.1:50051
+export MNEMOS_NAMESPACE=quickstart-$(date +%s)
+python examples/simple_memory.py
+```
+
+3. Optional: check live metrics.
+
+```bash
+curl -s http://127.0.0.1:50052/metrics | head -n 40
+```
 
 ## Project Layout
 
@@ -243,13 +274,14 @@ Package: `python/mnemos-client`
 
 High-level developer API:
 
-- `insert_text(...)`
-- `query_text(...)`
+- `MnemosMemory.store(...)`
+- `MnemosMemory.ask(...)`
 
-Low-level API also available:
+Advanced typed API also available:
 
-- `insert_memory(...)`
-- `query(...)`
+- `MnemosClient.remember(...)`
+- `MnemosClient.recall(...)`
+- `MnemosClient.query(...)`
 
 Typical setup:
 
@@ -260,8 +292,12 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ./scripts/generate_proto.sh
-python examples/basic_usage.py
+python examples/simple_memory.py
 ```
+
+Function-by-function Python docs:
+
+- `python/mnemos-client/README.md`
 
 ## Local Manual Demo
 
