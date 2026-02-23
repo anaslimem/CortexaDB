@@ -20,3 +20,55 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  quickstart-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build gRPC server binary
+      run: cargo build --bin mnemos_grpc --verbose
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install Python client and regenerate stubs
+      working-directory: python/mnemos-client
+      run: |
+        python -m venv .venv
+        source .venv/bin/activate
+        python -m pip install --upgrade pip
+        python -m pip install -e ".[dev]"
+        ./scripts/generate_proto.sh
+
+    - name: Run quickstart smoke test
+      run: |
+        set -euo pipefail
+
+        MNEMOS_GRPC_ADDR=127.0.0.1:50051 \
+        MNEMOS_STATUS_ADDR=127.0.0.1:50052 \
+        MNEMOS_DATA_DIR=/tmp/mnemos-ci \
+        MNEMOS_VECTOR_DIM=3 \
+        target/debug/mnemos_grpc > /tmp/mnemos-ci.log 2>&1 &
+        SERVER_PID=$!
+        trap 'kill ${SERVER_PID} || true' EXIT
+
+        for _ in $(seq 1 40); do
+          if curl -fsS http://127.0.0.1:50052 >/dev/null; then
+            break
+          fi
+          sleep 0.5
+        done
+
+        curl -fsS http://127.0.0.1:50052 | grep -q "Mnemos is running"
+
+        source python/mnemos-client/.venv/bin/activate
+        export MNEMOS_ADDR=127.0.0.1:50051
+        export MNEMOS_NAMESPACE=ci-quickstart
+        python python/mnemos-client/examples/simple_memory.py | tee /tmp/quickstart.out
+        grep -q "Answers:" /tmp/quickstart.out
+
+        curl -fsS http://127.0.0.1:50052/metrics | grep -q "mnemos_rpc_total"
