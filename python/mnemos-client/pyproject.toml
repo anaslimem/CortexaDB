@@ -21,6 +21,10 @@ dev = [
   "grpcio-tools>=1.62.0",
   "mypy>=1.10.0",
 ]
+embeddings = [
+  "google-genai>=0.7.0",
+  "openai>=1.52.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

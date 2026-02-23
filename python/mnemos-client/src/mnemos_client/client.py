@@ -4,7 +4,7 @@ import hashlib
 import time
 import uuid
 from contextlib import AbstractContextManager
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import grpc
 
@@ -35,12 +35,18 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
         *,
         timeout_seconds: Optional[float] = None,
         embedder: Optional[Callable[[str], List[float]]] = None,
+        default_namespace: Optional[str] = None,
+        api_key: Optional[str] = None,
+        principal_id: Optional[str] = None,
     ) -> None:
         self._address = address
         self._timeout = timeout_seconds
         self._channel = grpc.insecure_channel(address)
         self._stub = mnemos_pb2_grpc.MnemosServiceStub(self._channel)
         self._embedder = embedder
+        self._default_namespace = default_namespace
+        self._api_key = api_key
+        self._principal_id = principal_id
 
     def close(self) -> None:
         self._channel.close()
@@ -52,6 +58,71 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
         """Set a text->embedding function used by high-level text APIs."""
         self._embedder = embedder
 
+    def set_default_namespace(self, namespace: str) -> None:
+        self._default_namespace = namespace
+
+    def set_identity(
+        self, *, api_key: Optional[str] = None, principal_id: Optional[str] = None
+    ) -> None:
+        if api_key is not None:
+            self._api_key = api_key
+        if principal_id is not None:
+            self._principal_id = principal_id
+
+    # Simpler UX aliases for agentic workflows.
+    def remember(
+        self,
+        text: str,
+        *,
+        namespace: Optional[str] = None,
+        importance: float = 0.0,
+        metadata: Optional[Dict[str, str]] = None,
+        memory_id: Optional[int] = None,
+    ) -> int:
+        """
+        Store text memory and return the memory ID (not the command ID).
+        """
+        ns = self._resolve_namespace(namespace)
+        if memory_id is None:
+            memory_id = _new_memory_id()
+        self.insert_text(
+            namespace=ns,
+            text=text,
+            importance=importance,
+            metadata=metadata,
+            memory_id=memory_id,
+        )
+        return memory_id
+
+    def recall(
+        self,
+        text: str,
+        *,
+        namespace: Optional[str] = None,
+        top_k: int = 10,
+        graph_hops: Optional[int] = None,
+        time_start: Optional[int] = None,
+        time_end: Optional[int] = None,
+    ) -> List[QueryHit]:
+        ns = self._resolve_namespace(namespace)
+        return self.query_text(
+            text,
+            top_k=top_k,
+            namespace=ns,
+            graph_hops=graph_hops,
+            time_start=time_start,
+            time_end=time_end,
+        ).hits
+
+    def forget(self, memory_id: int) -> int:
+        return self.delete_memory(memory_id)
+
+    def link(self, source_id: int, target_id: int, relation: str = "related_to") -> int:
+        return self.add_edge(source_id, target_id, relation)
+
+    def unlink(self, source_id: int, target_id: int) -> int:
+        return self.remove_edge(source_id, target_id)
+
     def insert_text(
         self,
         *,
@@ -61,6 +132,7 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
         created_at: Optional[int] = None,
         importance: float = 0.0,
         metadata: Optional[Dict[str, str]] = None,
+        request_id: Optional[str] = None,
     ) -> int:
         """High-level insert API: takes plain text and embeds automatically."""
         embedding = self._embed_text(text)
@@ -77,7 +149,8 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
                 created_at=created_at,
                 importance=importance,
                 metadata=metadata or {},
-            )
+            ),
+            request_id=request_id,
         )
 
     def query_text(
@@ -111,7 +184,7 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
             )
         )
 
-    def insert_memory(self, memory: Memory) -> int:
+    def insert_memory(self, memory: Memory, *, request_id: Optional[str] = None) -> int:
         req = mnemos_pb2.InsertMemoryRequest(
             memory=mnemos_pb2.Memory(
                 id=memory.id,
@@ -126,22 +199,43 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
                 ],
             )
         )
-        resp = self._stub.InsertMemory(req, timeout=self._timeout)
+        resp = self._stub.InsertMemory(
+            req,
+            timeout=self._timeout,
+            metadata=self._rpc_metadata(
+                request_id=request_id
+                or f"insert-{memory.id}-{memory.created_at}-{hashlib.sha1(memory.content).hexdigest()[:12]}"
+            ),
+        )
         return int(resp.command_id)
 
     def delete_memory(self, memory_id: int) -> int:
         req = mnemos_pb2.DeleteMemoryRequest(id=memory_id)
-        resp = self._stub.DeleteMemory(req, timeout=self._timeout)
+        resp = self._stub.DeleteMemory(
+            req,
+            timeout=self._timeout,
+            metadata=self._rpc_metadata(request_id=f"delete-{memory_id}-{time.time_ns()}"),
+        )
         return int(resp.command_id)
 
     def add_edge(self, from_id: int, to_id: int, relation: str) -> int:
         req = mnemos_pb2.AddEdgeRequest(**{"from": from_id, "to": to_id, "relation": relation})
-        resp = self._stub.AddEdge(req, timeout=self._timeout)
+        resp = self._stub.AddEdge(
+            req,
+            timeout=self._timeout,
+            metadata=self._rpc_metadata(
+                request_id=f"add-edge-{from_id}-{to_id}-{relation}-{time.time_ns()}"
+            ),
+        )
         return int(resp.command_id)
 
     def remove_edge(self, from_id: int, to_id: int) -> int:
         req = mnemos_pb2.RemoveEdgeRequest(**{"from": from_id, "to": to_id})
-        resp = self._stub.RemoveEdge(req, timeout=self._timeout)
+        resp = self._stub.RemoveEdge(
+            req,
+            timeout=self._timeout,
+            metadata=self._rpc_metadata(request_id=f"remove-edge-{from_id}-{to_id}-{time.time_ns()}"),
+        )
         return int(resp.command_id)
 
     def query(self, request: QueryRequest) -> QueryResult:
@@ -157,7 +251,11 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
             importance_pct=request.importance_pct,
             recency_pct=request.recency_pct,
         )
-        resp = self._stub.Query(req, timeout=self._timeout)
+        resp = self._stub.Query(
+            req,
+            timeout=self._timeout,
+            metadata=self._rpc_metadata(),
+        )
         hits = [
             QueryHit(
                 id=int(h.id),
@@ -192,7 +290,11 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
         )
 
     def stats(self) -> Stats:
-        resp = self._stub.Stats(mnemos_pb2.StatsRequest(), timeout=self._timeout)
+        resp = self._stub.Stats(
+            mnemos_pb2.StatsRequest(),
+            timeout=self._timeout,
+            metadata=self._rpc_metadata(),
+        )
         return Stats(
             wal_len=int(resp.wal_len),
             state_entries=int(resp.state_entries),
@@ -209,7 +311,11 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
             max_entries=max_entries,
             max_bytes=max_bytes,
         )
-        resp = self._stub.EnforceCapacity(req, timeout=self._timeout)
+        resp = self._stub.EnforceCapacity(
+            req,
+            timeout=self._timeout,
+            metadata=self._rpc_metadata(request_id=f"capacity-{time.time_ns()}"),
+        )
         return CapacityReport(
             evicted_ids=[int(v) for v in resp.evicted_ids],
             entries_before=int(resp.entries_before),
@@ -220,7 +326,9 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
 
     def compact_segments(self) -> CompactReport:
         resp = self._stub.CompactSegments(
-            mnemos_pb2.CompactSegmentsRequest(), timeout=self._timeout
+            mnemos_pb2.CompactSegmentsRequest(),
+            timeout=self._timeout,
+            metadata=self._rpc_metadata(request_id=f"compact-{time.time_ns()}"),
         )
         return CompactReport(
             compacted_segments=[int(v) for v in resp.compacted_segments],
@@ -234,6 +342,26 @@ class MnemosClient(AbstractContextManager["MnemosClient"]):
                 raise ValueError("embedder returned empty vector")
             return vec
         return default_hash_embedder(text)
+
+    def _resolve_namespace(self, namespace: Optional[str]) -> str:
+        if namespace:
+            return namespace
+        if self._default_namespace:
+            return self._default_namespace
+        raise ValueError(
+            "namespace is required. Pass namespace=... or set default_namespace in MnemosClient."
+        )
+
+    def _rpc_metadata(self, *, request_id: Optional[str] = None) -> Sequence[Tuple[str, str]]:
+        metadata: List[Tuple[str, str]] = []
+        if request_id:
+            metadata.append(("x-request-id", request_id))
+        if self._api_key:
+            metadata.append(("x-api-key", self._api_key))
+            metadata.append(("authorization", f"Bearer {self._api_key}"))
+        if self._principal_id:
+            metadata.append(("x-principal-id", self._principal_id))
+        return metadata
 
 
 def default_hash_embedder(text: str, dim: int = 3) -> List[float]:

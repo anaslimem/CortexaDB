@@ -1,11 +1,21 @@
 # mnemos-client
 
-Typed Python client for the Mnemos gRPC server.
+Python client for Mnemos with a simple developer UX:
+
+- store text memories,
+- retrieve plain text answers,
+- keep advanced typed APIs when needed.
 
 ## Install
 
 ```bash
 pip install -e .
+```
+
+Optional embedding providers:
+
+```bash
+pip install -e ".[embeddings]"
 ```
 
 ## Generate gRPC stubs
@@ -16,31 +26,121 @@ From this directory:
 ./scripts/generate_proto.sh
 ```
 
-This compiles `../../proto/mnemos.proto` into `src/mnemos_client/proto/`.
+## Quickstart (Recommended)
 
-## Usage
+```python
+from mnemos_client import MnemosMemory
+
+memory = MnemosMemory.from_env()
+memory.store("Alice prefers concise release notes.", importance=0.8)
+memory.store("Release deadline is Friday at 5 PM.", importance=0.9)
+
+answers = memory.ask("When is the release deadline?", top_k=5)
+print(answers[0])
+memory.close()
+```
+
+## Environment variables
+
+- `MNEMOS_ADDR` default: `127.0.0.1:50051`
+- `MNEMOS_NAMESPACE` default namespace used by the facade
+- `MNEMOS_API_KEY` optional service API key
+- `MNEMOS_PRINCIPAL_ID` optional principal id for RBAC/quota
+- `MNEMOS_EMBEDDER_PROVIDER` one of: `auto`, `gemini`, `openai`
+- `MNEMOS_EMBEDDER_MODEL` optional embedding model override
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY` used by Gemini embedder
+- `OPENAI_API_KEY` used by OpenAI embedder
+
+## API reference
+
+### `MnemosMemory` (high-level facade)
+
+Create:
+
+```python
+from mnemos_client import MnemosMemory
+memory = MnemosMemory.from_env()
+```
+
+Methods:
+
+- `store(text, namespace=None, importance=0.0, metadata=None, memory_id=None) -> int`
+- What it does: stores one text memory and returns `memory_id`.
+
+- `store_many(items: Iterable[StoreItem]) -> List[int]`
+- What it does: bulk helper for repeated `store`.
+
+- `ask(query, namespace=None, top_k=5, graph_hops=None, time_start=None, time_end=None) -> List[str]`
+- What it does: retrieves and returns plain text answers only.
+
+- `ask_raw(...) -> List[QueryHit]`
+- What it does: same retrieval but returns full score objects + memory payloads.
+
+- `ask_with_context(query, ..., max_chars=2000) -> str`
+- What it does: returns concatenated retrieved text for LLM prompt context.
+
+- `close()`
+
+### `MnemosClient` (advanced typed API)
+
+Use when you need explicit typed objects and full control.
+
+Create:
 
 ```python
 from mnemos_client import MnemosClient
-
-client = MnemosClient("127.0.0.1:50051")
-
-client.insert_text(
-    namespace="agent1",
-    text="hello from developer API",
-    importance=0.8,
-    metadata={"source": "demo"},
+client = MnemosClient(
+    "127.0.0.1:50051",
+    default_namespace="agent1",
+    api_key="...",
+    principal_id="agent-runtime-1",
 )
-
-result = client.query_text("hello", top_k=5, namespace="agent1")
-for hit in result.hits:
-    print(hit.text)
-    print(hit.memory.metadata if hit.memory else {})
 ```
 
-By default, `insert_text` / `query_text` use a deterministic local fallback embedder.
-For production, configure your own embedding model once:
+Core methods:
+
+- `remember(...) -> int` returns `memory_id`
+- `recall(...) -> List[QueryHit]`
+- `link(source_id, target_id, relation="related_to")`
+- `unlink(source_id, target_id)`
+- `forget(memory_id)`
+
+Typed/low-level methods:
+
+- `insert_text(...)`
+- `query_text(...)`
+- `insert_memory(Memory, request_id=None)`
+- `query(QueryRequest)`
+- `delete_memory(id)`
+- `add_edge(from_id, to_id, relation)`
+- `remove_edge(from_id, to_id)`
+- `stats()`
+- `enforce_capacity(...)`
+- `compact_segments()`
+
+## Embedding adapters
+
+Available helpers:
 
 ```python
-client.set_embedder(lambda text: your_embedding_model.embed(text))
+from mnemos_client import make_embedder_from_env, gemini_embedder, openai_embedder
 ```
+
+Examples:
+
+```python
+client.set_embedder(make_embedder_from_env(provider="auto"))
+```
+
+```python
+client.set_embedder(gemini_embedder(api_key="...", model="text-embedding-004"))
+```
+
+```python
+client.set_embedder(openai_embedder(api_key="...", model="text-embedding-3-small"))
+```
+
+## Examples
+
+- `examples/simple_memory.py` simple `store` + `ask` flow
+- `examples/basic_usage.py` typed client usage

@@ -2,18 +2,17 @@ from mnemos_client import MnemosClient
 
 
 def main() -> None:
-    with MnemosClient("127.0.0.1:50051") as client:
-        command_id = client.insert_text(
-            namespace="agent1",
-            text="hello from python",
+    with MnemosClient("127.0.0.1:50051", default_namespace="agent1") as client:
+        memory_id = client.remember(
+            "hello from python",
             importance=0.8,
             metadata={"source": "example"},
         )
-        print("insert command id:", command_id)
+        print("memory id:", memory_id)
 
-        result = client.query_text("hello", top_k=5, namespace="agent1")
-        print("hits:", len(result.hits))
-        for hit in result.hits:
+        hits = client.recall("hello", top_k=5)
+        print("hits:", len(hits))
+        for hit in hits:
             print("text:", hit.text)
             print("namespace:", hit.memory.namespace if hit.memory else None)
             print("metadata:", hit.memory.metadata if hit.memory else {})
