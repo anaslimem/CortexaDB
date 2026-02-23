@@ -19,6 +19,12 @@ pub struct QueryPlan {
 
 pub struct QueryPlanner;
 
+#[derive(Debug, Clone, Copy)]
+pub struct IntentAdjustments {
+    pub score_weights: ScoreWeights,
+    pub graph_hops: usize,
+}
+
 impl QueryPlanner {
     /// Build an execution plan from query options and current index size.
     ///
@@ -78,6 +84,66 @@ impl QueryPlanner {
             use_parallel,
         }
     }
+
+    /// Infer dynamic score mix + graph depth from query proximity to intent anchors.
+    ///
+    /// Anchors are expected to be embedded in the same vector space as `query_embedding`.
+    /// Returns `None` when dimensions mismatch or any vector is degenerate.
+    pub fn infer_intent_adjustments(
+        query_embedding: &[f32],
+        semantic_anchor: &[f32],
+        recency_anchor: &[f32],
+        graph_anchor: &[f32],
+    ) -> Option<IntentAdjustments> {
+        let semantic_sim = cosine_similarity(query_embedding, semantic_anchor)?;
+        let recency_sim = cosine_similarity(query_embedding, recency_anchor)?;
+        let graph_sim = cosine_similarity(query_embedding, graph_anchor)?;
+
+        let semantic = ((semantic_sim + 1.0) * 0.5).clamp(0.0, 1.0);
+        let recency = ((recency_sim + 1.0) * 0.5).clamp(0.0, 1.0);
+        let graph = ((graph_sim + 1.0) * 0.5).clamp(0.0, 1.0);
+
+        let score_weights = normalize_similarity_recency(semantic, recency);
+        let graph_hops = if graph >= 0.80 {
+            3
+        } else if graph >= 0.55 {
+            2
+        } else {
+            1
+        };
+
+        Some(IntentAdjustments {
+            score_weights,
+            graph_hops,
+        })
+    }
+}
+
+fn normalize_similarity_recency(semantic: f32, recency: f32) -> ScoreWeights {
+    let importance_pct = 20u8;
+    let budget = 100u8.saturating_sub(importance_pct);
+    let denom = (semantic + recency).max(1e-6);
+    let similarity_pct = ((semantic / denom) * f32::from(budget)).round() as u8;
+    let recency_pct = budget.saturating_sub(similarity_pct);
+    ScoreWeights::new(similarity_pct, importance_pct, recency_pct)
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> Option<f32> {
+    if a.len() != b.len() || a.is_empty() {
+        return None;
+    }
+    let mut dot = 0.0f32;
+    let mut na = 0.0f32;
+    let mut nb = 0.0f32;
+    for (x, y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        na += x * x;
+        nb += y * y;
+    }
+    if na <= f32::EPSILON || nb <= f32::EPSILON {
+        return None;
+    }
+    Some(dot / (na.sqrt() * nb.sqrt()))
 }
 
 #[cfg(test)]
@@ -104,5 +170,22 @@ mod tests {
         assert_eq!(plan.path, ExecutionPath::WeightedHybrid);
         assert!(plan.candidate_multiplier >= 5);
         assert!(plan.use_parallel);
+    }
+
+    #[test]
+    fn test_infer_intent_adjustments_prefers_graph_and_recency() {
+        let query = vec![0.0, 0.8, 0.6];
+        let semantic = vec![1.0, 0.0, 0.0];
+        let recency = vec![0.0, 1.0, 0.0];
+        let graph = vec![0.0, 0.0, 1.0];
+        let adj =
+            QueryPlanner::infer_intent_adjustments(&query, &semantic, &recency, &graph).unwrap();
+
+        assert!(adj.graph_hops >= 2);
+        assert!(adj.score_weights.recency_pct >= adj.score_weights.similarity_pct);
+        assert_eq!(
+            adj.score_weights.similarity_pct + adj.score_weights.importance_pct + adj.score_weights.recency_pct,
+            100
+        );
     }
 }

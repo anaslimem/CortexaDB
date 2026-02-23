@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use crate::core::memory_entry::MemoryId;
@@ -6,7 +7,7 @@ use crate::core::state_machine::StateMachine;
 use crate::index::combined::IndexLayer;
 use crate::index::graph::GraphIndex;
 use crate::query::hybrid::{HybridQueryError, QueryEmbedder, QueryHit};
-use crate::query::planner::{ExecutionPath, QueryPlan};
+use crate::query::planner::{ExecutionPath, QueryPlan, QueryPlanner};
 
 pub type Result<T> = std::result::Result<T, HybridQueryError>;
 
@@ -37,6 +38,46 @@ pub struct QueryExecution {
 
 pub struct QueryExecutor;
 
+#[derive(Clone)]
+struct IntentAnchors {
+    semantic: Vec<f32>,
+    recency: Vec<f32>,
+    graph: Vec<f32>,
+}
+
+fn intent_anchor_cache() -> &'static Mutex<HashMap<usize, IntentAnchors>> {
+    static CACHE: OnceLock<Mutex<HashMap<usize, IntentAnchors>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn load_or_build_intent_anchors(
+    embedder: &dyn QueryEmbedder,
+    dim: usize,
+) -> std::result::Result<IntentAnchors, String> {
+    let cache = intent_anchor_cache();
+    {
+        let guard = cache.lock().expect("intent anchor cache lock poisoned");
+        if let Some(found) = guard.get(&dim) {
+            return Ok(found.clone());
+        }
+    }
+
+    let semantic = embedder.embed("semantic meaning, similar content, concept match")?;
+    let recency = embedder.embed("recent events, latest updates, time, timeline, schedule")?;
+    let graph = embedder.embed("relationships, connections, linked people, social graph")?;
+    if semantic.len() != dim || recency.len() != dim || graph.len() != dim {
+        return Err("intent anchor embedding dimension mismatch".to_string());
+    }
+    let anchors = IntentAnchors {
+        semantic,
+        recency,
+        graph,
+    };
+    let mut guard = cache.lock().expect("intent anchor cache lock poisoned");
+    guard.insert(dim, anchors.clone());
+    Ok(anchors)
+}
+
 impl QueryExecutor {
     pub fn execute(
         query_text: &str,
@@ -57,7 +98,7 @@ impl QueryExecutor {
         mut trace: Option<&mut dyn FnMut(StageTrace)>,
     ) -> Result<QueryExecution> {
         let start = Instant::now();
-        let options = &plan.options;
+        let mut options = plan.options.clone();
 
         if options.top_k == 0 {
             return Err(HybridQueryError::InvalidTopK(options.top_k));
@@ -66,6 +107,43 @@ impl QueryExecutor {
             return Err(HybridQueryError::InvalidCandidateMultiplier(
                 options.candidate_multiplier,
             ));
+        }
+
+        if let Some((start_ts, end_ts)) = options.time_range {
+            if start_ts > end_ts {
+                return Err(HybridQueryError::InvalidTimeRange {
+                    start: start_ts,
+                    end: end_ts,
+                });
+            }
+        }
+
+        let query_embedding = embedder
+            .embed(query_text)
+            .map_err(HybridQueryError::Embedder)?;
+        if let Some(cb) = &mut trace {
+            cb(StageTrace::Embedded);
+        }
+
+        if let Ok(anchors) = load_or_build_intent_anchors(embedder, query_embedding.len()) {
+            if let Some(adj) = QueryPlanner::infer_intent_adjustments(
+                &query_embedding,
+                &anchors.semantic,
+                &anchors.recency,
+                &anchors.graph,
+            ) {
+                // Respect explicit user weights: only auto-adjust when still default.
+                if options.score_weights.similarity_pct == 70
+                    && options.score_weights.importance_pct == 20
+                    && options.score_weights.recency_pct == 10
+                {
+                    options.score_weights = adj.score_weights;
+                }
+                if options.graph_expansion.is_some() {
+                    options.graph_expansion =
+                        Some(crate::query::GraphExpansionOptions::new(adj.graph_hops));
+                }
+            }
         }
 
         let (sim_w, imp_w, rec_w) = {
@@ -85,22 +163,6 @@ impl QueryExecutor {
                 options.score_weights.recency_pct as f32 / 100.0,
             )
         };
-
-        if let Some((start_ts, end_ts)) = options.time_range {
-            if start_ts > end_ts {
-                return Err(HybridQueryError::InvalidTimeRange {
-                    start: start_ts,
-                    end: end_ts,
-                });
-            }
-        }
-
-        let query_embedding = embedder
-            .embed(query_text)
-            .map_err(HybridQueryError::Embedder)?;
-        if let Some(cb) = &mut trace {
-            cb(StageTrace::Embedded);
-        }
 
         let candidate_k = options.top_k.saturating_mul(plan.candidate_multiplier);
         let vector_results = index_layer.vector.search_scoped(
