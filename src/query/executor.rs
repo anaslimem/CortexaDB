@@ -7,6 +7,7 @@ use crate::core::state_machine::StateMachine;
 use crate::index::combined::IndexLayer;
 use crate::index::graph::GraphIndex;
 use crate::query::hybrid::{HybridQueryError, QueryEmbedder, QueryHit};
+use crate::query::intent::get_intent_policy;
 use crate::query::planner::{ExecutionPath, QueryPlan, QueryPlanner};
 
 pub type Result<T> = std::result::Result<T, HybridQueryError>;
@@ -50,6 +51,12 @@ fn intent_anchor_cache() -> &'static Mutex<HashMap<usize, IntentAnchors>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+pub(crate) fn clear_intent_anchor_cache() {
+    let cache = intent_anchor_cache();
+    let mut guard = cache.lock().expect("intent anchor cache lock poisoned");
+    guard.clear();
+}
+
 fn load_or_build_intent_anchors(
     embedder: &dyn QueryEmbedder,
     dim: usize,
@@ -62,9 +69,10 @@ fn load_or_build_intent_anchors(
         }
     }
 
-    let semantic = embedder.embed("semantic meaning, similar content, concept match")?;
-    let recency = embedder.embed("recent events, latest updates, time, timeline, schedule")?;
-    let graph = embedder.embed("relationships, connections, linked people, social graph")?;
+    let policy = get_intent_policy();
+    let semantic = embedder.embed(&policy.semantic_anchor_text)?;
+    let recency = embedder.embed(&policy.recency_anchor_text)?;
+    let graph = embedder.embed(&policy.graph_anchor_text)?;
     if semantic.len() != dim || recency.len() != dim || graph.len() != dim {
         return Err("intent anchor embedding dimension mismatch".to_string());
     }
@@ -126,11 +134,15 @@ impl QueryExecutor {
         }
 
         if let Ok(anchors) = load_or_build_intent_anchors(embedder, query_embedding.len()) {
+            let policy = get_intent_policy();
             if let Some(adj) = QueryPlanner::infer_intent_adjustments(
                 &query_embedding,
                 &anchors.semantic,
                 &anchors.recency,
                 &anchors.graph,
+                policy.graph_hops_2_threshold,
+                policy.graph_hops_3_threshold,
+                policy.importance_pct,
             ) {
                 // Respect explicit user weights: only auto-adjust when still default.
                 if options.score_weights.similarity_pct == 70

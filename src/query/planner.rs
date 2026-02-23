@@ -94,6 +94,9 @@ impl QueryPlanner {
         semantic_anchor: &[f32],
         recency_anchor: &[f32],
         graph_anchor: &[f32],
+        graph_hops_2_threshold: f32,
+        graph_hops_3_threshold: f32,
+        importance_pct: u8,
     ) -> Option<IntentAdjustments> {
         let semantic_sim = cosine_similarity(query_embedding, semantic_anchor)?;
         let recency_sim = cosine_similarity(query_embedding, recency_anchor)?;
@@ -103,10 +106,12 @@ impl QueryPlanner {
         let recency = ((recency_sim + 1.0) * 0.5).clamp(0.0, 1.0);
         let graph = ((graph_sim + 1.0) * 0.5).clamp(0.0, 1.0);
 
-        let score_weights = normalize_similarity_recency(semantic, recency);
-        let graph_hops = if graph >= 0.80 {
+        let score_weights = normalize_similarity_recency(semantic, recency, importance_pct);
+        let hop3 = graph_hops_3_threshold.clamp(0.0, 1.0);
+        let hop2 = graph_hops_2_threshold.clamp(0.0, hop3);
+        let graph_hops = if graph >= hop3 {
             3
-        } else if graph >= 0.55 {
+        } else if graph >= hop2 {
             2
         } else {
             1
@@ -119,8 +124,7 @@ impl QueryPlanner {
     }
 }
 
-fn normalize_similarity_recency(semantic: f32, recency: f32) -> ScoreWeights {
-    let importance_pct = 20u8;
+fn normalize_similarity_recency(semantic: f32, recency: f32, importance_pct: u8) -> ScoreWeights {
     let budget = 100u8.saturating_sub(importance_pct);
     let denom = (semantic + recency).max(1e-6);
     let similarity_pct = ((semantic / denom) * f32::from(budget)).round() as u8;
@@ -179,7 +183,8 @@ mod tests {
         let recency = vec![0.0, 1.0, 0.0];
         let graph = vec![0.0, 0.0, 1.0];
         let adj =
-            QueryPlanner::infer_intent_adjustments(&query, &semantic, &recency, &graph).unwrap();
+            QueryPlanner::infer_intent_adjustments(&query, &semantic, &recency, &graph, 0.55, 0.80, 20)
+                .unwrap();
 
         assert!(adj.graph_hops >= 2);
         assert!(adj.score_weights.recency_pct >= adj.score_weights.similarity_pct);

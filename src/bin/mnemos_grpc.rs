@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use mnemos::engine::SyncPolicy;
+use mnemos::query::{IntentPolicy, set_intent_policy};
 use mnemos::service::grpc::{MnemosGrpcService, MnemosServiceServer};
 use mnemos::store::CheckpointPolicy;
 use mnemos::store::MnemosStore;
@@ -26,6 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(3);
     let sync_policy = parse_sync_policy_from_env();
     let checkpoint_policy = parse_checkpoint_policy_from_env();
+    let intent_policy = parse_intent_policy_from_env();
+    set_intent_policy(intent_policy.clone());
 
     std::fs::create_dir_all(&data_dir)?;
     let wal = data_dir.join("mnemos.wal");
@@ -45,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Vector dimension: {}", vector_dim);
     println!("Sync policy: {:?}", sync_policy);
     println!("Checkpoint policy: {:?}", checkpoint_policy);
+    println!("Intent policy: {:?}", intent_policy);
 
     tokio::spawn(async move {
         if let Err(e) = run_status_server(status_addr).await {
@@ -102,6 +106,54 @@ fn parse_checkpoint_policy_from_env() -> CheckpointPolicy {
             .and_then(|v| v.parse().ok())
             .unwrap_or(30_000),
     }
+}
+
+fn parse_intent_policy_from_env() -> IntentPolicy {
+    let mut policy = IntentPolicy::default();
+
+    if let Ok(v) = std::env::var("MNEMOS_INTENT_ANCHOR_SEMANTIC") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            policy.semantic_anchor_text = trimmed.to_string();
+        }
+    }
+    if let Ok(v) = std::env::var("MNEMOS_INTENT_ANCHOR_RECENCY") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            policy.recency_anchor_text = trimmed.to_string();
+        }
+    }
+    if let Ok(v) = std::env::var("MNEMOS_INTENT_ANCHOR_GRAPH") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            policy.graph_anchor_text = trimmed.to_string();
+        }
+    }
+
+    if let Ok(v) = std::env::var("MNEMOS_INTENT_GRAPH_HOPS_2_THRESHOLD") {
+        if let Ok(parsed) = v.parse::<f32>() {
+            policy.graph_hops_2_threshold = parsed.clamp(0.0, 1.0);
+        }
+    }
+    if let Ok(v) = std::env::var("MNEMOS_INTENT_GRAPH_HOPS_3_THRESHOLD") {
+        if let Ok(parsed) = v.parse::<f32>() {
+            policy.graph_hops_3_threshold = parsed.clamp(0.0, 1.0);
+        }
+    }
+    if policy.graph_hops_2_threshold > policy.graph_hops_3_threshold {
+        std::mem::swap(
+            &mut policy.graph_hops_2_threshold,
+            &mut policy.graph_hops_3_threshold,
+        );
+    }
+
+    if let Ok(v) = std::env::var("MNEMOS_INTENT_IMPORTANCE_PCT") {
+        if let Ok(parsed) = v.parse::<u8>() {
+            policy.importance_pct = parsed.min(90);
+        }
+    }
+
+    policy
 }
 
 async fn run_status_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
