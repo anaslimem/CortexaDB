@@ -9,6 +9,8 @@ use crate::storage::wal::{CommandId, WriteAheadLog};
 
 #[derive(Error, Debug)]
 pub enum EngineError {
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
     #[error("WAL error: {0}")]
     WalError(#[from] crate::storage::wal::WalError),
     #[error("State machine error: {0}")]
@@ -17,6 +19,15 @@ pub enum EngineError {
     SegmentError(#[from] crate::storage::segment::SegmentError),
     #[error("Compaction error: {0}")]
     CompactionError(#[from] crate::storage::compaction::CompactionError),
+    #[error("Checkpoint error: {0}")]
+    CheckpointError(#[from] crate::storage::checkpoint::CheckpointError),
+    #[error(
+        "Checkpoint/WAL gap detected: checkpoint_last_applied={checkpoint_last_applied}, wal_highest={wal_highest:?}"
+    )]
+    CheckpointWalGap {
+        checkpoint_last_applied: u64,
+        wal_highest: Option<u64>,
+    },
     #[error("Engine not recovered properly")]
     NotRecovered,
 }
@@ -101,6 +112,14 @@ impl Engine {
     /// 2. Replay WAL commands to get latest state
     /// 3. This ensures consistency between disk and memory
     pub fn recover<P: AsRef<Path>>(wal_path: P, segments_dir: P) -> Result<Self> {
+        Self::recover_from_checkpoint(wal_path, segments_dir, None)
+    }
+
+    pub fn recover_from_checkpoint<P: AsRef<Path>>(
+        wal_path: P,
+        segments_dir: P,
+        checkpoint: Option<(StateMachine, CommandId)>,
+    ) -> Result<Self> {
         let wal_path = wal_path.as_ref();
         let segments_dir = segments_dir.as_ref();
 
@@ -111,13 +130,35 @@ impl Engine {
         let wal_outcome = WriteAheadLog::read_all_tolerant(wal_path)?;
         let commands = wal_outcome.commands;
 
-        // Create fresh state machine and replay commands
-        let mut state_machine = StateMachine::new();
+        // Create state machine base from checkpoint when available.
+        let (mut state_machine, checkpoint_last_applied) =
+            if let Some((base_state, last_applied)) = checkpoint {
+                (base_state, Some(last_applied))
+            } else {
+                (StateMachine::new(), None)
+            };
+
+        if let Some(last_applied) = checkpoint_last_applied {
+            let wal_highest = commands.last().map(|(id, _)| id.0);
+            if wal_highest.map(|v| v < last_applied.0).unwrap_or(true) {
+                return Err(EngineError::CheckpointWalGap {
+                    checkpoint_last_applied: last_applied.0,
+                    wal_highest,
+                });
+            }
+            // Conservative behavior: rebuild segments from checkpoint snapshot.
+            segments = Self::rebuild_segments_from_state(segments_dir, &state_machine)?;
+        }
         let mut repaired_segments = false;
 
         // Replay all commands in order
-        let mut last_id = CommandId(0);
+        let mut last_id = checkpoint_last_applied.unwrap_or(CommandId(0));
         for (cmd_id, cmd) in commands {
+            if let Some(checkpoint_id) = checkpoint_last_applied {
+                if cmd_id.0 <= checkpoint_id.0 {
+                    continue;
+                }
+            }
             match &cmd {
                 Command::InsertMemory(entry) => {
                     // Ensure segment view converges to WAL command stream.
@@ -152,6 +193,22 @@ impl Engine {
             state_machine,
             last_applied_id: last_id,
         })
+    }
+
+    fn rebuild_segments_from_state<P: AsRef<Path>>(
+        segments_dir: P,
+        state_machine: &StateMachine,
+    ) -> Result<SegmentStorage> {
+        let segments_dir = segments_dir.as_ref();
+        if segments_dir.exists() {
+            std::fs::remove_dir_all(segments_dir)?;
+        }
+        let mut segments = SegmentStorage::new(segments_dir)?;
+        for entry in state_machine.all_memories() {
+            segments.write_entry(entry)?;
+        }
+        segments.fsync()?;
+        Ok(segments)
     }
 
     /// Execute a command with durability guarantees
@@ -641,6 +698,26 @@ mod tests {
         }
 
         assert_eq!(engine.wal_len(), 19);
+    }
+
+    #[test]
+    fn test_recover_from_checkpoint_detects_wal_gap() {
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("engine_gap.wal");
+        let seg_dir = temp_dir.path().join("segments_gap");
+
+        {
+            let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
+            let entry = MemoryEntry::new(MemoryId(1), "ns".to_string(), b"a".to_vec(), 1000);
+            engine
+                .execute_command(Command::InsertMemory(entry))
+                .unwrap();
+        }
+
+        let state = StateMachine::new();
+        let result =
+            Engine::recover_from_checkpoint(&wal_path, &seg_dir, Some((state, CommandId(10))));
+        assert!(matches!(result, Err(EngineError::CheckpointWalGap { .. })));
     }
 
     #[test]

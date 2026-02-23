@@ -14,6 +14,9 @@ use crate::index::IndexLayer;
 use crate::query::{
     QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan, QueryPlanner, StageTrace,
 };
+use crate::storage::checkpoint::{
+    LoadedCheckpoint, checkpoint_path_from_wal, load_checkpoint, save_checkpoint,
+};
 use crate::storage::compaction::CompactionReport;
 use crate::storage::wal::CommandId;
 
@@ -25,6 +28,8 @@ pub enum MnemosStoreError {
     Vector(#[from] crate::index::vector::VectorError),
     #[error("Query error: {0}")]
     Query(#[from] crate::query::HybridQueryError),
+    #[error("Checkpoint error: {0}")]
+    Checkpoint(#[from] crate::storage::checkpoint::CheckpointError),
     #[error("Invariant violation: {0}")]
     InvariantViolation(String),
     #[error("Embedding required when content changes for memory id {0:?}")]
@@ -67,6 +72,18 @@ struct SyncRuntime {
     shutdown: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckpointPolicy {
+    Disabled,
+    Periodic { every_ops: usize, every_ms: u64 },
+}
+
+struct CheckpointRuntime {
+    pending_ops: usize,
+    dirty_since: Option<Instant>,
+    shutdown: bool,
+}
+
 /// Library-facing facade for storing and querying agent memory.
 ///
 /// Wraps:
@@ -83,6 +100,10 @@ pub struct MnemosStore {
     sync_policy: SyncPolicy,
     sync_control: Arc<(Mutex<SyncRuntime>, Condvar)>,
     sync_thread: Option<JoinHandle<()>>,
+    checkpoint_policy: CheckpointPolicy,
+    checkpoint_path: std::path::PathBuf,
+    checkpoint_control: Arc<(Mutex<CheckpointRuntime>, Condvar)>,
+    checkpoint_thread: Option<JoinHandle<()>>,
 }
 
 impl MnemosStore {
@@ -91,7 +112,13 @@ impl MnemosStore {
         segments_dir: P,
         vector_dimension: usize,
     ) -> Result<Self> {
-        Self::new_with_policy(wal_path, segments_dir, vector_dimension, SyncPolicy::Strict)
+        Self::new_with_policies(
+            wal_path,
+            segments_dir,
+            vector_dimension,
+            SyncPolicy::Strict,
+            CheckpointPolicy::Disabled,
+        )
     }
 
     pub fn new_with_policy<P: AsRef<Path>>(
@@ -100,8 +127,33 @@ impl MnemosStore {
         vector_dimension: usize,
         sync_policy: SyncPolicy,
     ) -> Result<Self> {
-        let engine = Engine::new(wal_path, segments_dir)?;
-        Self::from_engine(engine, vector_dimension, sync_policy)
+        Self::new_with_policies(
+            wal_path,
+            segments_dir,
+            vector_dimension,
+            sync_policy,
+            CheckpointPolicy::Disabled,
+        )
+    }
+
+    pub fn new_with_policies<P: AsRef<Path>>(
+        wal_path: P,
+        segments_dir: P,
+        vector_dimension: usize,
+        sync_policy: SyncPolicy,
+        checkpoint_policy: CheckpointPolicy,
+    ) -> Result<Self> {
+        let wal_path = wal_path.as_ref().to_path_buf();
+        let segments_dir = segments_dir.as_ref().to_path_buf();
+        let checkpoint_path = checkpoint_path_from_wal(&wal_path);
+        let engine = Engine::new(&wal_path, &segments_dir)?;
+        Self::from_engine(
+            engine,
+            vector_dimension,
+            sync_policy,
+            checkpoint_policy,
+            checkpoint_path,
+        )
     }
 
     pub fn recover<P: AsRef<Path>>(
@@ -109,7 +161,13 @@ impl MnemosStore {
         segments_dir: P,
         vector_dimension: usize,
     ) -> Result<Self> {
-        Self::recover_with_policy(wal_path, segments_dir, vector_dimension, SyncPolicy::Strict)
+        Self::recover_with_policies(
+            wal_path,
+            segments_dir,
+            vector_dimension,
+            SyncPolicy::Strict,
+            CheckpointPolicy::Disabled,
+        )
     }
 
     pub fn recover_with_policy<P: AsRef<Path>>(
@@ -118,14 +176,53 @@ impl MnemosStore {
         vector_dimension: usize,
         sync_policy: SyncPolicy,
     ) -> Result<Self> {
-        let engine = Engine::recover(wal_path, segments_dir)?;
-        Self::from_engine(engine, vector_dimension, sync_policy)
+        Self::recover_with_policies(
+            wal_path,
+            segments_dir,
+            vector_dimension,
+            sync_policy,
+            CheckpointPolicy::Disabled,
+        )
+    }
+
+    pub fn recover_with_policies<P: AsRef<Path>>(
+        wal_path: P,
+        segments_dir: P,
+        vector_dimension: usize,
+        sync_policy: SyncPolicy,
+        checkpoint_policy: CheckpointPolicy,
+    ) -> Result<Self> {
+        let wal_path = wal_path.as_ref().to_path_buf();
+        let segments_dir = segments_dir.as_ref().to_path_buf();
+        let checkpoint_path = checkpoint_path_from_wal(&wal_path);
+
+        let loaded_checkpoint = load_checkpoint(&checkpoint_path)?;
+        let engine = match loaded_checkpoint {
+            Some(LoadedCheckpoint {
+                last_applied_id,
+                state_machine,
+            }) => Engine::recover_from_checkpoint(
+                &wal_path,
+                &segments_dir,
+                Some((state_machine, CommandId(last_applied_id))),
+            )?,
+            None => Engine::recover(&wal_path, &segments_dir)?,
+        };
+        Self::from_engine(
+            engine,
+            vector_dimension,
+            sync_policy,
+            checkpoint_policy,
+            checkpoint_path,
+        )
     }
 
     fn from_engine(
         engine: Engine,
         vector_dimension: usize,
         sync_policy: SyncPolicy,
+        checkpoint_policy: CheckpointPolicy,
+        checkpoint_path: std::path::PathBuf,
     ) -> Result<Self> {
         let indexes = Self::build_vector_index(engine.get_state_machine(), vector_dimension)?;
         Self::assert_vector_index_in_sync_inner(engine.get_state_machine(), &indexes)?;
@@ -155,12 +252,35 @@ impl MnemosStore {
             )),
         };
 
+        let checkpoint_control = Arc::new((
+            Mutex::new(CheckpointRuntime {
+                pending_ops: 0,
+                dirty_since: None,
+                shutdown: false,
+            }),
+            Condvar::new(),
+        ));
+        let checkpoint_thread = match checkpoint_policy {
+            CheckpointPolicy::Disabled => None,
+            CheckpointPolicy::Periodic { .. } => Some(Self::spawn_checkpoint_thread(
+                Arc::clone(&writer),
+                Arc::clone(&snapshot),
+                Arc::clone(&checkpoint_control),
+                checkpoint_path.clone(),
+                checkpoint_policy,
+            )),
+        };
+
         Ok(Self {
             writer,
             snapshot,
             sync_policy,
             sync_control,
             sync_thread,
+            checkpoint_policy,
+            checkpoint_path,
+            checkpoint_control,
+            checkpoint_thread,
         })
     }
 
@@ -175,6 +295,24 @@ impl MnemosStore {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
         writer.engine.flush()?;
         self.clear_pending_sync_state();
+        Ok(())
+    }
+
+    pub fn checkpoint_now(&self) -> Result<()> {
+        let snapshot = self.snapshot();
+        let last_applied_id = self
+            .writer
+            .lock()
+            .expect("writer lock poisoned")
+            .engine
+            .last_applied_id()
+            .0;
+        save_checkpoint(
+            &self.checkpoint_path,
+            snapshot.state_machine(),
+            last_applied_id,
+        )?;
+        self.clear_pending_checkpoint_state();
         Ok(())
     }
 
@@ -240,6 +378,78 @@ impl MnemosStore {
                     if let Err(err) = write_state.engine.flush() {
                         eprintln!("mnemos sync manager flush error: {err}");
                     }
+                }
+            }
+        })
+    }
+
+    fn spawn_checkpoint_thread(
+        writer: Arc<Mutex<WriteState>>,
+        snapshot: Arc<RwLock<Arc<ReadSnapshot>>>,
+        checkpoint_control: Arc<(Mutex<CheckpointRuntime>, Condvar)>,
+        checkpoint_path: std::path::PathBuf,
+        checkpoint_policy: CheckpointPolicy,
+    ) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            let (lock, cvar) = &*checkpoint_control;
+            loop {
+                let mut runtime = lock.lock().expect("checkpoint runtime lock poisoned");
+                if runtime.shutdown {
+                    break;
+                }
+
+                match checkpoint_policy {
+                    CheckpointPolicy::Disabled => break,
+                    CheckpointPolicy::Periodic {
+                        every_ops,
+                        every_ms,
+                    } => {
+                        let every_ops = every_ops.max(1);
+                        let max_delay = Duration::from_millis(every_ms.max(1));
+                        if runtime.pending_ops < every_ops {
+                            if let Some(dirty_since) = runtime.dirty_since {
+                                let elapsed = dirty_since.elapsed();
+                                if elapsed < max_delay {
+                                    let timeout = max_delay - elapsed;
+                                    let (guard, _) = cvar
+                                        .wait_timeout(runtime, timeout)
+                                        .expect("checkpoint runtime wait poisoned");
+                                    runtime = guard;
+                                }
+                            } else {
+                                runtime = cvar
+                                    .wait(runtime)
+                                    .expect("checkpoint runtime wait poisoned");
+                            }
+                        }
+                    }
+                }
+
+                if runtime.shutdown {
+                    break;
+                }
+
+                if runtime.pending_ops == 0 {
+                    continue;
+                }
+                runtime.pending_ops = 0;
+                runtime.dirty_since = None;
+                drop(runtime);
+
+                let read_snapshot = snapshot.read().expect("snapshot lock poisoned").clone();
+                let last_applied_id = writer
+                    .lock()
+                    .expect("writer lock poisoned")
+                    .engine
+                    .last_applied_id()
+                    .0;
+
+                if let Err(err) = save_checkpoint(
+                    &checkpoint_path,
+                    read_snapshot.state_machine(),
+                    last_applied_id,
+                ) {
+                    eprintln!("mnemos checkpoint write error: {err}");
                 }
             }
         })
@@ -382,6 +592,7 @@ impl MnemosStore {
         } else {
             self.clear_pending_sync_state();
         }
+        self.mark_pending_checkpoint(report.evicted_ids.len().max(1));
         Ok(report)
     }
 
@@ -426,6 +637,26 @@ impl MnemosStore {
     fn clear_pending_sync_state(&self) {
         let (lock, _) = &*self.sync_control;
         let mut runtime = lock.lock().expect("sync runtime lock poisoned");
+        runtime.pending_ops = 0;
+        runtime.dirty_since = None;
+    }
+
+    fn mark_pending_checkpoint(&self, ops: usize) {
+        if ops == 0 || self.checkpoint_policy == CheckpointPolicy::Disabled {
+            return;
+        }
+        let (lock, cvar) = &*self.checkpoint_control;
+        let mut runtime = lock.lock().expect("checkpoint runtime lock poisoned");
+        runtime.pending_ops = runtime.pending_ops.saturating_add(ops);
+        if runtime.dirty_since.is_none() {
+            runtime.dirty_since = Some(Instant::now());
+        }
+        cvar.notify_one();
+    }
+
+    fn clear_pending_checkpoint_state(&self) {
+        let (lock, _) = &*self.checkpoint_control;
+        let mut runtime = lock.lock().expect("checkpoint runtime lock poisoned");
         runtime.pending_ops = 0;
         runtime.dirty_since = None;
     }
@@ -514,6 +745,7 @@ impl MnemosStore {
         } else {
             self.clear_pending_sync_state();
         }
+        self.mark_pending_checkpoint(1);
         Ok(cmd_id)
     }
 
@@ -564,6 +796,9 @@ impl MnemosStore {
 impl Drop for MnemosStore {
     fn drop(&mut self) {
         let _ = self.flush();
+        if self.checkpoint_policy != CheckpointPolicy::Disabled {
+            let _ = self.checkpoint_now();
+        }
         let (lock, cvar) = &*self.sync_control;
         {
             let mut runtime = lock.lock().expect("sync runtime lock poisoned");
@@ -571,6 +806,16 @@ impl Drop for MnemosStore {
             cvar.notify_all();
         }
         if let Some(handle) = self.sync_thread.take() {
+            let _ = handle.join();
+        }
+
+        let (lock, cvar) = &*self.checkpoint_control;
+        {
+            let mut runtime = lock.lock().expect("checkpoint runtime lock poisoned");
+            runtime.shutdown = true;
+            cvar.notify_all();
+        }
+        if let Some(handle) = self.checkpoint_thread.take() {
             let _ = handle.join();
         }
     }
@@ -888,5 +1133,46 @@ mod tests {
 
         let recovered = MnemosStore::recover(&wal, &seg, 3).unwrap();
         assert_eq!(recovered.state_machine().len(), 1);
+    }
+
+    #[test]
+    fn test_periodic_checkpoint_recovery() {
+        let temp = TempDir::new().unwrap();
+        let wal = temp.path().join("store_ckpt.wal");
+        let seg = temp.path().join("segments_ckpt");
+
+        {
+            let store = MnemosStore::new_with_policies(
+                &wal,
+                &seg,
+                3,
+                SyncPolicy::Strict,
+                CheckpointPolicy::Periodic {
+                    every_ops: 1,
+                    every_ms: 10,
+                },
+            )
+            .unwrap();
+
+            store
+                .insert_memory(
+                    MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"a".to_vec(), 1000)
+                        .with_embedding(vec![1.0, 0.0, 0.0]),
+                )
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(40));
+            store.checkpoint_now().unwrap();
+        }
+
+        let recovered = MnemosStore::recover_with_policies(
+            &wal,
+            &seg,
+            3,
+            SyncPolicy::Strict,
+            CheckpointPolicy::Disabled,
+        )
+        .unwrap();
+        assert_eq!(recovered.state_machine().len(), 1);
+        assert!(recovered.state_machine().get_memory(MemoryId(1)).is_ok());
     }
 }

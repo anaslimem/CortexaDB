@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use mnemos::engine::SyncPolicy;
 use mnemos::service::grpc::{MnemosGrpcService, MnemosServiceServer};
+use mnemos::store::CheckpointPolicy;
 use mnemos::store::MnemosStore;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -24,15 +25,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(3);
     let sync_policy = parse_sync_policy_from_env();
+    let checkpoint_policy = parse_checkpoint_policy_from_env();
 
     std::fs::create_dir_all(&data_dir)?;
     let wal = data_dir.join("mnemos.wal");
     let seg = data_dir.join("segments");
 
     let store = if wal.exists() {
-        MnemosStore::recover_with_policy(&wal, &seg, vector_dim, sync_policy)?
+        MnemosStore::recover_with_policies(&wal, &seg, vector_dim, sync_policy, checkpoint_policy)?
     } else {
-        MnemosStore::new_with_policy(&wal, &seg, vector_dim, sync_policy)?
+        MnemosStore::new_with_policies(&wal, &seg, vector_dim, sync_policy, checkpoint_policy)?
     };
 
     let service = MnemosGrpcService::new(store);
@@ -42,6 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Data dir: {}", data_dir.display());
     println!("Vector dimension: {}", vector_dim);
     println!("Sync policy: {:?}", sync_policy);
+    println!("Checkpoint policy: {:?}", checkpoint_policy);
 
     tokio::spawn(async move {
         if let Err(e) = run_status_server(status_addr).await {
@@ -77,6 +80,27 @@ fn parse_sync_policy_from_env() -> SyncPolicy {
                 .unwrap_or(25),
         },
         _ => SyncPolicy::Strict,
+    }
+}
+
+fn parse_checkpoint_policy_from_env() -> CheckpointPolicy {
+    let enabled = std::env::var("MNEMOS_CHECKPOINT_ENABLED")
+        .ok()
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if !enabled {
+        return CheckpointPolicy::Disabled;
+    }
+
+    CheckpointPolicy::Periodic {
+        every_ops: std::env::var("MNEMOS_CHECKPOINT_EVERY_OPS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10_000),
+        every_ms: std::env::var("MNEMOS_CHECKPOINT_EVERY_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30_000),
     }
 }
 

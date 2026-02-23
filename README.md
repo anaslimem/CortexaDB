@@ -177,6 +177,9 @@ Environment variables:
 - `MNEMOS_SYNC_BATCH_MAX_OPS` (default `64`)
 - `MNEMOS_SYNC_BATCH_MAX_DELAY_MS` (default `25`)
 - `MNEMOS_SYNC_ASYNC_INTERVAL_MS` (default `25`)
+- `MNEMOS_CHECKPOINT_ENABLED` (`true`/`false`, default `false`)
+- `MNEMOS_CHECKPOINT_EVERY_OPS` (default `10000`)
+- `MNEMOS_CHECKPOINT_EVERY_MS` (default `30000`)
 
 Run server:
 

@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
@@ -15,14 +16,14 @@ pub enum StateMachineError {
 pub type Result<T> = std::result::Result<T, StateMachineError>;
 
 /// Edge in the memory graph with associated relation type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edge {
     pub to: MemoryId,
     pub relation: String,
 }
 
 /// Deterministic state machine that applies commands and maintains memory state
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateMachine {
     /// All memory entries indexed by ID
     memories: HashMap<MemoryId, MemoryEntry>,
