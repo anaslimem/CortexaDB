@@ -1,11 +1,14 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mnemos::engine::SyncPolicy;
+use mnemos::index::vector::VectorBackendMode;
 use mnemos::query::{IntentPolicy, set_intent_policy};
 use mnemos::service::grpc::{
     AllowAllAuthProvider, ApiKeyAuthProvider, AuthProvider, MnemosGrpcService, MnemosServiceServer,
+    QuotaPolicy, RbacPolicy,
 };
 use mnemos::store::CheckpointPolicy;
 use mnemos::store::MnemosStore;
@@ -32,6 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let checkpoint_policy = parse_checkpoint_policy_from_env();
     let intent_policy = parse_intent_policy_from_env();
     let auth_provider = parse_auth_provider_from_env();
+    let rbac_policy = parse_rbac_policy_from_env();
+    let quota_policy = parse_quota_policy_from_env();
     set_intent_policy(intent_policy.clone());
 
     std::fs::create_dir_all(&data_dir)?;
@@ -43,8 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         MnemosStore::new_with_policies(&wal, &seg, vector_dim, sync_policy, checkpoint_policy)?
     };
+    store.set_vector_backend_mode(parse_vector_backend_mode_from_env());
 
-    let service = MnemosGrpcService::new_with_auth(store, auth_provider);
+    let service = MnemosGrpcService::new_with_config(store, auth_provider, rbac_policy, quota_policy.clone());
 
     println!("Mnemos gRPC listening on {}", addr);
     println!("Mnemos status HTTP listening on {}", status_addr);
@@ -53,17 +59,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Sync policy: {:?}", sync_policy);
     println!("Checkpoint policy: {:?}", checkpoint_policy);
     println!("Intent policy: {:?}", intent_policy);
+    println!("Quota policy: {:?}", quota_policy);
     println!(
         "Auth mode: {}",
         std::env::var("MNEMOS_AUTH_MODE").unwrap_or_else(|_| "none".to_string())
     );
 
+    let metrics_service = service.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_status_server(status_addr).await {
+        if let Err(e) = run_status_server(status_addr, metrics_service).await {
             eprintln!("status server error: {e}");
         }
     });
 
+    log_tls_env_state();
     Server::builder()
         .add_service(MnemosServiceServer::new(service))
         .serve(addr)
@@ -182,20 +191,120 @@ fn parse_auth_provider_from_env() -> Arc<dyn AuthProvider> {
     }
 }
 
-async fn run_status_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+fn parse_vector_backend_mode_from_env() -> VectorBackendMode {
+    let mode = std::env::var("MNEMOS_VECTOR_BACKEND").unwrap_or_else(|_| "exact".to_string());
+    match mode.to_ascii_lowercase().as_str() {
+        "ann" => VectorBackendMode::Ann {
+            ann_search_multiplier: std::env::var("MNEMOS_VECTOR_ANN_SEARCH_MULTIPLIER")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(8),
+        },
+        _ => VectorBackendMode::Exact,
+    }
+}
+
+fn parse_rbac_policy_from_env() -> RbacPolicy {
+    let admins = parse_csv(std::env::var("MNEMOS_RBAC_ADMIN_PRINCIPALS").ok());
+    let mut read_allow = HashMap::<String, HashSet<String>>::new();
+    let mut write_allow = HashMap::<String, HashSet<String>>::new();
+
+    for entry in parse_csv(std::env::var("MNEMOS_RBAC_READ").ok()) {
+        if let Some((ns, principals)) = parse_namespace_principals(&entry) {
+            read_allow.insert(ns, principals);
+        }
+    }
+    for entry in parse_csv(std::env::var("MNEMOS_RBAC_WRITE").ok()) {
+        if let Some((ns, principals)) = parse_namespace_principals(&entry) {
+            write_allow.insert(ns, principals);
+        }
+    }
+
+    RbacPolicy {
+        admin_principals: admins.into_iter().collect(),
+        read_namespace_allow: read_allow,
+        write_namespace_allow: write_allow,
+    }
+}
+
+fn parse_quota_policy_from_env() -> QuotaPolicy {
+    QuotaPolicy {
+        max_requests_per_minute: std::env::var("MNEMOS_QUOTA_RPM")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        max_top_k: std::env::var("MNEMOS_QUOTA_MAX_TOP_K")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100),
+        max_graph_hops: std::env::var("MNEMOS_QUOTA_MAX_GRAPH_HOPS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4),
+    }
+}
+
+fn log_tls_env_state() {
+    let cert = std::env::var("MNEMOS_TLS_CERT_PATH").ok();
+    let key = std::env::var("MNEMOS_TLS_KEY_PATH").ok();
+    if cert.as_deref().unwrap_or("").is_empty() && key.as_deref().unwrap_or("").is_empty() {
+        return;
+    }
+    eprintln!(
+        "TLS cert/key env variables detected, but this binary is built without tonic TLS feature; run behind a TLS terminator (e.g. Envoy/Caddy/Nginx) for now."
+    );
+}
+
+fn parse_csv(value: Option<String>) -> Vec<String> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn parse_namespace_principals(entry: &str) -> Option<(String, HashSet<String>)> {
+    let (ns, principals) = entry.split_once(':')?;
+    let principals: HashSet<String> = principals
+        .split('|')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if ns.trim().is_empty() {
+        return None;
+    }
+    Some((ns.trim().to_string(), principals))
+}
+
+async fn run_status_server(
+    addr: SocketAddr,
+    service: MnemosGrpcService,
+) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(addr).await?;
     loop {
         let (mut socket, _) = listener.accept().await?;
+        let service = service.clone();
         tokio::spawn(async move {
             let mut buffer = [0u8; 1024];
-            let _ = socket.read(&mut buffer).await;
-            let body = b"Mnemos is running";
+            let n = socket.read(&mut buffer).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buffer[..n]);
+            let path = req
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("/");
+            let body = if path == "/metrics" {
+                service.render_prometheus_metrics().into_bytes()
+            } else {
+                b"Mnemos is running".to_vec()
+            };
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             );
             let _ = socket.write_all(response.as_bytes()).await;
-            let _ = socket.write_all(body).await;
+            let _ = socket.write_all(&body).await;
             let _ = socket.shutdown().await;
         });
     }

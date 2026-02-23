@@ -1,12 +1,13 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, oneshot};
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
 use crate::engine::CapacityPolicy;
@@ -63,10 +64,216 @@ impl AuthProvider for ApiKeyAuthProvider {
 }
 
 #[derive(Default)]
-struct ServiceMetrics {
-    rpc_total: AtomicU64,
-    writes_deduplicated: AtomicU64,
-    writes_committed: AtomicU64,
+pub struct ServiceMetrics {
+    rpc_total: AtomicUsize,
+    rpc_error_total: AtomicUsize,
+    writes_deduplicated: AtomicUsize,
+    writes_committed: AtomicUsize,
+    method_calls: std::sync::Mutex<HashMap<&'static str, usize>>,
+    method_errors: std::sync::Mutex<HashMap<&'static str, usize>>,
+    method_latency_ms_sum: std::sync::Mutex<HashMap<&'static str, u128>>,
+    method_latency_buckets: std::sync::Mutex<HashMap<&'static str, [usize; 6]>>,
+    query_vector_candidates_sum: AtomicUsize,
+    query_final_results_sum: AtomicUsize,
+}
+
+impl ServiceMetrics {
+    fn record_rpc(&self, method: &'static str, status: Code, elapsed: Duration) {
+        self.rpc_total.fetch_add(1, Ordering::Relaxed);
+        {
+            let mut calls = self.method_calls.lock().expect("metrics lock poisoned");
+            *calls.entry(method).or_insert(0) += 1;
+        }
+
+        let elapsed_ms = elapsed.as_millis();
+        {
+            let mut sum = self
+                .method_latency_ms_sum
+                .lock()
+                .expect("metrics lock poisoned");
+            *sum.entry(method).or_insert(0) += elapsed_ms;
+        }
+        {
+            let mut buckets = self
+                .method_latency_buckets
+                .lock()
+                .expect("metrics lock poisoned");
+            let entry = buckets.entry(method).or_insert([0; 6]);
+            let idx = match elapsed_ms {
+                0..=5 => 0,
+                6..=10 => 1,
+                11..=25 => 2,
+                26..=50 => 3,
+                51..=100 => 4,
+                _ => 5,
+            };
+            entry[idx] += 1;
+        }
+
+        if status != Code::Ok {
+            self.rpc_error_total.fetch_add(1, Ordering::Relaxed);
+            let mut errors = self.method_errors.lock().expect("metrics lock poisoned");
+            *errors.entry(method).or_insert(0) += 1;
+        }
+    }
+
+    fn observe_query_result(&self, vector_candidates: usize, final_results: usize) {
+        self.query_vector_candidates_sum
+            .fetch_add(vector_candidates, Ordering::Relaxed);
+        self.query_final_results_sum
+            .fetch_add(final_results, Ordering::Relaxed);
+    }
+
+    fn render_prometheus(&self) -> String {
+        let mut out = String::new();
+        out.push_str("# HELP mnemos_rpc_total Total gRPC requests\n");
+        out.push_str("# TYPE mnemos_rpc_total counter\n");
+        out.push_str(&format!(
+            "mnemos_rpc_total {}\n",
+            self.rpc_total.load(Ordering::Relaxed)
+        ));
+        out.push_str("# HELP mnemos_rpc_errors_total Total gRPC failed requests\n");
+        out.push_str("# TYPE mnemos_rpc_errors_total counter\n");
+        out.push_str(&format!(
+            "mnemos_rpc_errors_total {}\n",
+            self.rpc_error_total.load(Ordering::Relaxed)
+        ));
+        out.push_str("# HELP mnemos_writes_committed_total Total committed writes\n");
+        out.push_str("# TYPE mnemos_writes_committed_total counter\n");
+        out.push_str(&format!(
+            "mnemos_writes_committed_total {}\n",
+            self.writes_committed.load(Ordering::Relaxed)
+        ));
+        out.push_str("# HELP mnemos_writes_deduplicated_total Total deduplicated idempotent writes\n");
+        out.push_str("# TYPE mnemos_writes_deduplicated_total counter\n");
+        out.push_str(&format!(
+            "mnemos_writes_deduplicated_total {}\n",
+            self.writes_deduplicated.load(Ordering::Relaxed)
+        ));
+
+        let calls = self.method_calls.lock().expect("metrics lock poisoned").clone();
+        let errors = self
+            .method_errors
+            .lock()
+            .expect("metrics lock poisoned")
+            .clone();
+        let sums = self
+            .method_latency_ms_sum
+            .lock()
+            .expect("metrics lock poisoned")
+            .clone();
+        let buckets = self
+            .method_latency_buckets
+            .lock()
+            .expect("metrics lock poisoned")
+            .clone();
+
+        out.push_str("# HELP mnemos_rpc_method_calls_total Calls per method\n");
+        out.push_str("# TYPE mnemos_rpc_method_calls_total counter\n");
+        for (method, value) in calls {
+            out.push_str(&format!(
+                "mnemos_rpc_method_calls_total{{method=\"{}\"}} {}\n",
+                method, value
+            ));
+        }
+        out.push_str("# HELP mnemos_rpc_method_errors_total Errors per method\n");
+        out.push_str("# TYPE mnemos_rpc_method_errors_total counter\n");
+        for (method, value) in errors {
+            out.push_str(&format!(
+                "mnemos_rpc_method_errors_total{{method=\"{}\"}} {}\n",
+                method, value
+            ));
+        }
+        out.push_str("# HELP mnemos_rpc_method_latency_ms_sum Summed method latencies in ms\n");
+        out.push_str("# TYPE mnemos_rpc_method_latency_ms_sum counter\n");
+        for (method, value) in sums {
+            out.push_str(&format!(
+                "mnemos_rpc_method_latency_ms_sum{{method=\"{}\"}} {}\n",
+                method, value
+            ));
+        }
+        out.push_str("# HELP mnemos_rpc_method_latency_bucket Latency bucket counts\n");
+        out.push_str("# TYPE mnemos_rpc_method_latency_bucket counter\n");
+        let bounds = ["5", "10", "25", "50", "100", "+Inf"];
+        for (method, vals) in buckets {
+            for (i, bound) in bounds.iter().enumerate() {
+                out.push_str(&format!(
+                    "mnemos_rpc_method_latency_bucket{{method=\"{}\",le=\"{}\"}} {}\n",
+                    method, bound, vals[i]
+                ));
+            }
+        }
+
+        out.push_str("# HELP mnemos_query_vector_candidates_sum Sum of query vector candidates\n");
+        out.push_str("# TYPE mnemos_query_vector_candidates_sum counter\n");
+        out.push_str(&format!(
+            "mnemos_query_vector_candidates_sum {}\n",
+            self.query_vector_candidates_sum.load(Ordering::Relaxed)
+        ));
+        out.push_str("# HELP mnemos_query_final_results_sum Sum of query final results\n");
+        out.push_str("# TYPE mnemos_query_final_results_sum counter\n");
+        out.push_str(&format!(
+            "mnemos_query_final_results_sum {}\n",
+            self.query_final_results_sum.load(Ordering::Relaxed)
+        ));
+
+        out
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RbacPolicy {
+    pub admin_principals: HashSet<String>,
+    pub read_namespace_allow: HashMap<String, HashSet<String>>,
+    pub write_namespace_allow: HashMap<String, HashSet<String>>,
+}
+
+impl RbacPolicy {
+    pub fn allow_all() -> Self {
+        Self {
+            admin_principals: HashSet::new(),
+            read_namespace_allow: HashMap::new(),
+            write_namespace_allow: HashMap::new(),
+        }
+    }
+
+    fn is_allowed(&self, principal: &str, namespace: &str, write: bool) -> bool {
+        if self.admin_principals.contains(principal) {
+            return true;
+        }
+        let set = if write {
+            self.write_namespace_allow.get(namespace)
+        } else {
+            self.read_namespace_allow.get(namespace)
+        };
+        match set {
+            Some(principals) => principals.contains(principal),
+            None => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct QuotaPolicy {
+    pub max_requests_per_minute: usize,
+    pub max_top_k: usize,
+    pub max_graph_hops: usize,
+}
+
+impl Default for QuotaPolicy {
+    fn default() -> Self {
+        Self {
+            max_requests_per_minute: 0,
+            max_top_k: 100,
+            max_graph_hops: 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PrincipalWindow {
+    window_started_at: Instant,
+    count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -97,15 +304,32 @@ pub struct MnemosGrpcService {
     writer_tx: mpsc::Sender<WriteRequest>,
     auth: Arc<dyn AuthProvider>,
     metrics: Arc<ServiceMetrics>,
+    rbac: Arc<RbacPolicy>,
+    quota: Arc<QuotaPolicy>,
+    quota_windows: Arc<std::sync::Mutex<HashMap<String, PrincipalWindow>>>,
     idempotency: Arc<std::sync::Mutex<HashMap<IdempotencyKey, IdempotencyRecord>>>,
 }
 
 impl MnemosGrpcService {
     pub fn new(store: MnemosStore) -> Self {
-        Self::new_with_auth(store, Arc::new(AllowAllAuthProvider))
+        Self::new_with_config(
+            store,
+            Arc::new(AllowAllAuthProvider),
+            RbacPolicy::allow_all(),
+            QuotaPolicy::default(),
+        )
     }
 
     pub fn new_with_auth(store: MnemosStore, auth: Arc<dyn AuthProvider>) -> Self {
+        Self::new_with_config(store, auth, RbacPolicy::allow_all(), QuotaPolicy::default())
+    }
+
+    pub fn new_with_config(
+        store: MnemosStore,
+        auth: Arc<dyn AuthProvider>,
+        rbac: RbacPolicy,
+        quota: QuotaPolicy,
+    ) -> Self {
         let store = Arc::new(store);
         let (writer_tx, mut writer_rx) = mpsc::channel::<WriteRequest>(1024);
 
@@ -148,8 +372,19 @@ impl MnemosGrpcService {
             writer_tx,
             auth,
             metrics: Arc::new(ServiceMetrics::default()),
+            rbac: Arc::new(rbac),
+            quota: Arc::new(quota),
+            quota_windows: Arc::new(std::sync::Mutex::new(HashMap::new())),
             idempotency: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn metrics(&self) -> Arc<ServiceMetrics> {
+        Arc::clone(&self.metrics)
+    }
+
+    pub fn render_prometheus_metrics(&self) -> String {
+        self.metrics.render_prometheus()
     }
 
     async fn send_write(&self, command: WriteCommand) -> Result<WriteResult, Status> {
@@ -169,7 +404,65 @@ impl MnemosGrpcService {
     }
 
     fn authorize_request<T>(&self, req: &Request<T>) -> Result<(), Status> {
-        self.auth.authorize(req.metadata())
+        self.auth.authorize(req.metadata())?;
+        self.check_quota(req.metadata())
+    }
+
+    fn principal_from_metadata(metadata: &tonic::metadata::MetadataMap) -> String {
+        metadata
+            .get("x-principal-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "anonymous".to_string())
+    }
+
+    fn check_quota(&self, metadata: &tonic::metadata::MetadataMap) -> Result<(), Status> {
+        if self.quota.max_requests_per_minute == 0 {
+            return Ok(());
+        }
+        let principal = Self::principal_from_metadata(metadata);
+        let mut windows = self.quota_windows.lock().expect("quota lock poisoned");
+        let entry = windows.entry(principal).or_insert(PrincipalWindow {
+            window_started_at: Instant::now(),
+            count: 0,
+        });
+        if entry.window_started_at.elapsed() >= Duration::from_secs(60) {
+            entry.window_started_at = Instant::now();
+            entry.count = 0;
+        }
+        if entry.count >= self.quota.max_requests_per_minute {
+            return Err(Status::resource_exhausted("request quota exceeded"));
+        }
+        entry.count += 1;
+        Ok(())
+    }
+
+    fn check_namespace_access(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+        namespace: &str,
+        write: bool,
+    ) -> Result<(), Status> {
+        let principal = Self::principal_from_metadata(metadata);
+        if self.rbac.is_allowed(&principal, namespace, write) {
+            Ok(())
+        } else {
+            Err(Status::permission_denied(format!(
+                "principal {} not allowed for namespace {}",
+                principal, namespace
+            )))
+        }
+    }
+
+    fn record_rpc_result<T>(
+        &self,
+        method: &'static str,
+        started: Instant,
+        result: &Result<Response<T>, Status>,
+    ) {
+        let status = result.as_ref().map(|_| Code::Ok).unwrap_or_else(|e| e.code());
+        self.metrics.record_rpc(method, status, started.elapsed());
     }
 
     async fn execute_write_idempotent(
@@ -268,14 +561,96 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         &self,
         request: Request<proto::InsertMemoryRequest>,
     ) -> Result<Response<proto::InsertMemoryResponse>, Status> {
-        self.metrics.rpc_total.fetch_add(1, Ordering::Relaxed);
-        self.authorize_request(&request)?;
         let started = Instant::now();
+        let result = self.insert_memory_impl(request).await;
+        self.record_rpc_result("insert_memory", started, &result);
+        result
+    }
+
+    async fn delete_memory(
+        &self,
+        request: Request<proto::DeleteMemoryRequest>,
+    ) -> Result<Response<proto::DeleteMemoryResponse>, Status> {
+        let started = Instant::now();
+        let result = self.delete_memory_impl(request).await;
+        self.record_rpc_result("delete_memory", started, &result);
+        result
+    }
+
+    async fn add_edge(
+        &self,
+        request: Request<proto::AddEdgeRequest>,
+    ) -> Result<Response<proto::AddEdgeResponse>, Status> {
+        let started = Instant::now();
+        let result = self.add_edge_impl(request).await;
+        self.record_rpc_result("add_edge", started, &result);
+        result
+    }
+
+    async fn remove_edge(
+        &self,
+        request: Request<proto::RemoveEdgeRequest>,
+    ) -> Result<Response<proto::RemoveEdgeResponse>, Status> {
+        let started = Instant::now();
+        let result = self.remove_edge_impl(request).await;
+        self.record_rpc_result("remove_edge", started, &result);
+        result
+    }
+
+    async fn query(
+        &self,
+        request: Request<proto::QueryRequest>,
+    ) -> Result<Response<proto::QueryResponse>, Status> {
+        let started = Instant::now();
+        let result = self.query_impl(request).await;
+        self.record_rpc_result("query", started, &result);
+        result
+    }
+
+    async fn enforce_capacity(
+        &self,
+        request: Request<proto::EnforceCapacityRequest>,
+    ) -> Result<Response<proto::EnforceCapacityResponse>, Status> {
+        let started = Instant::now();
+        let result = self.enforce_capacity_impl(request).await;
+        self.record_rpc_result("enforce_capacity", started, &result);
+        result
+    }
+
+    async fn compact_segments(
+        &self,
+        request: Request<proto::CompactSegmentsRequest>,
+    ) -> Result<Response<proto::CompactSegmentsResponse>, Status> {
+        let started = Instant::now();
+        let result = self.compact_segments_impl(request).await;
+        self.record_rpc_result("compact_segments", started, &result);
+        result
+    }
+
+    async fn stats(
+        &self,
+        request: Request<proto::StatsRequest>,
+    ) -> Result<Response<proto::StatsResponse>, Status> {
+        let started = Instant::now();
+        let result = self.stats_impl(request).await;
+        self.record_rpc_result("stats", started, &result);
+        result
+    }
+}
+
+impl MnemosGrpcService {
+    async fn insert_memory_impl(
+        &self,
+        request: Request<proto::InsertMemoryRequest>,
+    ) -> Result<Response<proto::InsertMemoryResponse>, Status> {
+        self.authorize_request(&request)?;
+        let metadata = request.metadata().clone();
         let req_id = extract_request_id(&request);
         let req = request.into_inner();
         let mem = req
             .memory
             .ok_or_else(|| Status::invalid_argument("memory is required"))?;
+        self.check_namespace_access(&metadata, &mem.namespace, true)?;
 
         let metadata: HashMap<String, String> = mem
             .metadata
@@ -304,18 +679,20 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
             WriteResult::CommandId(id) => id,
             _ => return Err(Status::internal("unexpected writer response for insert")),
         };
-        eprintln!("insert_memory completed in {}ms", started.elapsed().as_millis());
         Ok(Response::new(proto::InsertMemoryResponse {
             command_id: cmd_id,
         }))
     }
 
-    async fn delete_memory(
+    async fn delete_memory_impl(
         &self,
         request: Request<proto::DeleteMemoryRequest>,
     ) -> Result<Response<proto::DeleteMemoryResponse>, Status> {
-        self.metrics.rpc_total.fetch_add(1, Ordering::Relaxed);
         self.authorize_request(&request)?;
+        let id = request.get_ref().id;
+        if let Ok(existing) = self.store.state_machine().get_memory(MemoryId(id)) {
+            self.check_namespace_access(request.metadata(), &existing.namespace, true)?;
+        }
         let req_id = extract_request_id(&request);
         let req = request.into_inner();
         let cmd_id = match self
@@ -335,12 +712,19 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         }))
     }
 
-    async fn add_edge(
+    async fn add_edge_impl(
         &self,
         request: Request<proto::AddEdgeRequest>,
     ) -> Result<Response<proto::AddEdgeResponse>, Status> {
-        self.metrics.rpc_total.fetch_add(1, Ordering::Relaxed);
         self.authorize_request(&request)?;
+        let from = request.get_ref().from;
+        let to = request.get_ref().to;
+        if let Ok(existing_from) = self.store.state_machine().get_memory(MemoryId(from)) {
+            self.check_namespace_access(request.metadata(), &existing_from.namespace, true)?;
+        }
+        if let Ok(existing_to) = self.store.state_machine().get_memory(MemoryId(to)) {
+            self.check_namespace_access(request.metadata(), &existing_to.namespace, true)?;
+        }
         let req_id = extract_request_id(&request);
         let req = request.into_inner();
         let cmd_id = match self
@@ -362,12 +746,19 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         Ok(Response::new(proto::AddEdgeResponse { command_id: cmd_id }))
     }
 
-    async fn remove_edge(
+    async fn remove_edge_impl(
         &self,
         request: Request<proto::RemoveEdgeRequest>,
     ) -> Result<Response<proto::RemoveEdgeResponse>, Status> {
-        self.metrics.rpc_total.fetch_add(1, Ordering::Relaxed);
         self.authorize_request(&request)?;
+        let from = request.get_ref().from;
+        let to = request.get_ref().to;
+        if let Ok(existing_from) = self.store.state_machine().get_memory(MemoryId(from)) {
+            self.check_namespace_access(request.metadata(), &existing_from.namespace, true)?;
+        }
+        if let Ok(existing_to) = self.store.state_machine().get_memory(MemoryId(to)) {
+            self.check_namespace_access(request.metadata(), &existing_to.namespace, true)?;
+        }
         let req_id = extract_request_id(&request);
         let req = request.into_inner();
         let cmd_id = match self
@@ -394,12 +785,12 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         }))
     }
 
-    async fn query(
+    async fn query_impl(
         &self,
         request: Request<proto::QueryRequest>,
     ) -> Result<Response<proto::QueryResponse>, Status> {
-        self.metrics.rpc_total.fetch_add(1, Ordering::Relaxed);
         self.authorize_request(&request)?;
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         if req.query_embedding.is_empty() {
             return Err(Status::invalid_argument("query_embedding is required"));
@@ -407,14 +798,29 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
 
         let top_k =
             usize::try_from(req.top_k).map_err(|_| Status::invalid_argument("invalid top_k"))?;
+        if self.quota.max_top_k > 0 && top_k > self.quota.max_top_k {
+            return Err(Status::resource_exhausted(format!(
+                "top_k exceeds configured limit {}",
+                self.quota.max_top_k
+            )));
+        }
         let mut options = QueryOptions::with_top_k(top_k);
         options.namespace = req.namespace;
+        if let Some(ns) = options.namespace.as_deref() {
+            self.check_namespace_access(&metadata, ns, false)?;
+        }
         if let (Some(start), Some(end)) = (req.time_start, req.time_end) {
             options.time_range = Some((start, end));
         }
         if let Some(hops) = req.graph_hops {
             let hops = usize::try_from(hops)
                 .map_err(|_| Status::invalid_argument("invalid graph_hops"))?;
+            if self.quota.max_graph_hops > 0 && hops > self.quota.max_graph_hops {
+                return Err(Status::resource_exhausted(format!(
+                    "graph_hops exceeds configured limit {}",
+                    self.quota.max_graph_hops
+                )));
+            }
             options.graph_expansion = if hops == 0 {
                 None
             } else {
@@ -441,32 +847,29 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
             .store
             .query_with_snapshot("grpc_query", options, &embedder)
             .map_err(map_store_error)?;
+        self.metrics
+            .observe_query_result(out.metrics.vector_candidates, out.metrics.final_results);
 
         let hits = out
             .hits
             .into_iter()
             .map(|h| {
-                let memory =
-                    snapshot
-                        .state_machine()
-                        .get_memory(h.id)
-                        .ok()
-                        .map(|m| proto::Memory {
-                            id: m.id.0,
-                            namespace: m.namespace.clone(),
-                            content: m.content.clone(),
-                            embedding: m.embedding.clone().unwrap_or_default(),
-                            created_at: m.created_at,
-                            importance: m.importance,
-                            metadata: m
-                                .metadata
-                                .iter()
-                                .map(|(k, v)| proto::MetadataPair {
-                                    key: k.clone(),
-                                    value: v.clone(),
-                                })
-                                .collect(),
-                        });
+                let memory = snapshot.state_machine().get_memory(h.id).ok().map(|m| proto::Memory {
+                    id: m.id.0,
+                    namespace: m.namespace.clone(),
+                    content: m.content.clone(),
+                    embedding: m.embedding.clone().unwrap_or_default(),
+                    created_at: m.created_at,
+                    importance: m.importance,
+                    metadata: m
+                        .metadata
+                        .iter()
+                        .map(|(k, v)| proto::MetadataPair {
+                            key: k.clone(),
+                            value: v.clone(),
+                        })
+                        .collect(),
+                });
                 proto::QueryHit {
                     id: h.id.0,
                     final_score: h.final_score,
@@ -489,11 +892,10 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         }))
     }
 
-    async fn enforce_capacity(
+    async fn enforce_capacity_impl(
         &self,
         request: Request<proto::EnforceCapacityRequest>,
     ) -> Result<Response<proto::EnforceCapacityResponse>, Status> {
-        self.metrics.rpc_total.fetch_add(1, Ordering::Relaxed);
         self.authorize_request(&request)?;
         let req_id = extract_request_id(&request);
         let req = request.into_inner();
@@ -528,11 +930,10 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         }))
     }
 
-    async fn compact_segments(
+    async fn compact_segments_impl(
         &self,
         request: Request<proto::CompactSegmentsRequest>,
     ) -> Result<Response<proto::CompactSegmentsResponse>, Status> {
-        self.metrics.rpc_total.fetch_add(1, Ordering::Relaxed);
         self.authorize_request(&request)?;
         let req_id = extract_request_id(&request);
         let report = match self
@@ -558,11 +959,10 @@ impl proto::mnemos_service_server::MnemosService for MnemosGrpcService {
         }))
     }
 
-    async fn stats(
+    async fn stats_impl(
         &self,
         request: Request<proto::StatsRequest>,
     ) -> Result<Response<proto::StatsResponse>, Status> {
-        self.metrics.rpc_total.fetch_add(1, Ordering::Relaxed);
         self.authorize_request(&request)?;
         Ok(Response::new(proto::StatsResponse {
             wal_len: self.store.wal_len(),
@@ -665,6 +1065,7 @@ fn map_store_error(err: MnemosStoreError) -> Status {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use tempfile::TempDir;
     use tonic::metadata::MetadataValue;
@@ -823,6 +1224,46 @@ mod tests {
         .await
         .expect_err("cross-namespace edge must fail");
         assert_eq!(err.code(), Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn query_respects_quota_limits() {
+        let mut quota = QuotaPolicy::default();
+        quota.max_top_k = 1;
+        let service = MnemosGrpcService::new_with_config(
+            test_store(),
+            Arc::new(AllowAllAuthProvider),
+            RbacPolicy::allow_all(),
+            quota,
+        );
+
+        let err = MnemosService::query(
+            &service,
+            Request::new(proto::QueryRequest {
+                query_embedding: vec![0.1, 0.2, 0.3],
+                top_k: 10,
+                namespace: Some("agent1".to_string()),
+                time_start: None,
+                time_end: None,
+                graph_hops: None,
+                candidate_multiplier: 0,
+                similarity_pct: 0,
+                importance_pct: 0,
+                recency_pct: 0,
+            }),
+        )
+        .await
+        .expect_err("top_k should be limited");
+        assert_eq!(err.code(), Code::ResourceExhausted);
+    }
+
+    #[test]
+    fn metrics_render_contains_core_counters() {
+        let metrics = ServiceMetrics::default();
+        metrics.record_rpc("stats", Code::Ok, Duration::from_millis(5));
+        let body = metrics.render_prometheus();
+        assert!(body.contains("mnemos_rpc_total"));
+        assert!(body.contains("mnemos_rpc_method_calls_total"));
     }
 
     #[test]

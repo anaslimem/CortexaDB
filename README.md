@@ -182,6 +182,15 @@ Environment variables:
 - `MNEMOS_CHECKPOINT_EVERY_MS` (default `30000`)
 - `MNEMOS_AUTH_MODE` (`none` | `api_key`, default `none`)
 - `MNEMOS_API_KEY` (required when `MNEMOS_AUTH_MODE=api_key`)
+- `MNEMOS_VECTOR_BACKEND` (`exact` | `ann`, default `exact`)
+- `MNEMOS_VECTOR_ANN_SEARCH_MULTIPLIER` (default `8`)
+- `MNEMOS_RBAC_ADMIN_PRINCIPALS` (csv principals with full access)
+- `MNEMOS_RBAC_READ` (csv of `namespace:principal|principal`)
+- `MNEMOS_RBAC_WRITE` (csv of `namespace:principal|principal`)
+- `MNEMOS_QUOTA_RPM` (requests/minute per principal, `0` disables)
+- `MNEMOS_QUOTA_MAX_TOP_K` (default `100`)
+- `MNEMOS_QUOTA_MAX_GRAPH_HOPS` (default `4`)
+- `MNEMOS_TLS_CERT_PATH`, `MNEMOS_TLS_KEY_PATH` (currently use external TLS terminator)
 - `MNEMOS_INTENT_ANCHOR_SEMANTIC` (default semantic anchor text)
 - `MNEMOS_INTENT_ANCHOR_RECENCY` (default recency anchor text)
 - `MNEMOS_INTENT_ANCHOR_GRAPH` (default graph anchor text)
@@ -198,6 +207,7 @@ scripts/run_grpc.sh
 Status check in browser:
 
 - [http://127.0.0.1:50052](http://127.0.0.1:50052)
+- [http://127.0.0.1:50052/metrics](http://127.0.0.1:50052/metrics) (Prometheus-compatible text)
 
 ### Intent Tuning Guide
 

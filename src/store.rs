@@ -11,6 +11,7 @@ use crate::core::memory_entry::{MemoryEntry, MemoryId};
 use crate::core::state_machine::StateMachine;
 use crate::engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy};
 use crate::index::IndexLayer;
+use crate::index::vector::VectorBackendMode;
 use crate::query::{
     QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan, QueryPlanner, StageTrace,
 };
@@ -506,6 +507,12 @@ impl MnemosStore {
         )?;
         self.publish_snapshot_from_write_state(&writer);
         Ok(indexed)
+    }
+
+    pub fn set_vector_backend_mode(&self, mode: VectorBackendMode) {
+        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        writer.indexes.set_vector_backend_mode(mode);
+        self.publish_snapshot_from_write_state(&writer);
     }
 
     pub fn query(

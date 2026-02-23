@@ -46,6 +46,91 @@ pub trait VectorSearchBackend: Send + Sync + std::fmt::Debug {
     fn ann_multiplier_hint(&self) -> usize;
 }
 
+trait AnnCandidateProvider: Send + Sync + std::fmt::Debug {
+    #[allow(dead_code)]
+    fn name(&self) -> &'static str;
+    fn candidates(
+        &self,
+        query: &[f32],
+        ann_k: usize,
+        namespace: Option<&str>,
+        partitions: &HashMap<String, NamespacePartition>,
+    ) -> Result<Vec<MemoryId>>;
+}
+
+#[derive(Debug)]
+struct PrefixAnnCandidateProvider;
+
+impl AnnCandidateProvider for PrefixAnnCandidateProvider {
+    fn name(&self) -> &'static str {
+        "prefix"
+    }
+
+    fn candidates(
+        &self,
+        query: &[f32],
+        ann_k: usize,
+        namespace: Option<&str>,
+        partitions: &HashMap<String, NamespacePartition>,
+    ) -> Result<Vec<MemoryId>> {
+        let approx_dims = query.len().min(8).max(1);
+        let query_prefix = &query[..approx_dims];
+        let query_mag = magnitude(query_prefix)?;
+        let mut approx_scored = Vec::new();
+
+        let iter: Box<dyn Iterator<Item = (&String, &NamespacePartition)>> = match namespace {
+            Some(ns) => match partitions.get_key_value(ns) {
+                Some(one) => Box::new(std::iter::once(one)),
+                None => Box::new(std::iter::empty()),
+            },
+            None => Box::new(partitions.iter()),
+        };
+
+        for (_ns, partition) in iter {
+            for (id, embedding) in &partition.embeddings {
+                if partition.tombstones.contains(id) {
+                    continue;
+                }
+                let score = cosine_similarity(query_prefix, &embedding[..approx_dims], query_mag);
+                approx_scored.push((*id, score));
+            }
+        }
+
+        if approx_scored.is_empty() {
+            if namespace.is_some() {
+                return Ok(Vec::new());
+            }
+            return Err(VectorError::NoEmbeddings);
+        }
+
+        approx_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        approx_scored.truncate(ann_k);
+        Ok(approx_scored.into_iter().map(|(id, _)| id).collect())
+    }
+}
+
+/// Placeholder provider with an HNSW-ready name/shape. Today it falls back to prefix ANN
+/// while keeping a stable extension point for external HNSW integrations.
+#[derive(Debug)]
+#[allow(dead_code)]
+struct HnswReadyAnnCandidateProvider;
+
+impl AnnCandidateProvider for HnswReadyAnnCandidateProvider {
+    fn name(&self) -> &'static str {
+        "hnsw-ready"
+    }
+
+    fn candidates(
+        &self,
+        query: &[f32],
+        ann_k: usize,
+        namespace: Option<&str>,
+        partitions: &HashMap<String, NamespacePartition>,
+    ) -> Result<Vec<MemoryId>> {
+        PrefixAnnCandidateProvider.candidates(query, ann_k, namespace, partitions)
+    }
+}
+
 #[derive(Debug)]
 struct ExactBackend;
 
@@ -96,6 +181,8 @@ pub struct VectorIndex {
     backend_mode: VectorBackendMode,
     /// Pluggable backend strategy
     backend: Arc<dyn VectorSearchBackend>,
+    /// ANN candidate strategy (prefix by default; swappable for HNSW/FAISS adapters)
+    ann_provider: Arc<dyn AnnCandidateProvider>,
 }
 
 impl VectorIndex {
@@ -107,7 +194,13 @@ impl VectorIndex {
             vector_dimension,
             backend_mode: VectorBackendMode::Exact,
             backend: Arc::new(ExactBackend),
+            ann_provider: Arc::new(PrefixAnnCandidateProvider),
         }
+    }
+
+    #[allow(dead_code)]
+    fn set_ann_provider(&mut self, provider: Arc<dyn AnnCandidateProvider>) {
+        self.ann_provider = provider;
     }
 
     pub fn set_backend_mode(&mut self, mode: VectorBackendMode) {
@@ -422,31 +515,8 @@ impl VectorIndex {
         ann_k: usize,
         namespace: Option<&str>,
     ) -> Result<Vec<MemoryId>> {
-        let approx_dims = query.len().min(8).max(1);
-        let query_prefix = &query[..approx_dims];
-        let query_mag = magnitude(query_prefix)?;
-        let mut approx_scored = Vec::new();
-
-        for (_ns, partition) in self.partition_iter(namespace) {
-            for (id, embedding) in &partition.embeddings {
-                if partition.tombstones.contains(id) {
-                    continue;
-                }
-                let score = cosine_similarity(query_prefix, &embedding[..approx_dims], query_mag);
-                approx_scored.push((*id, score));
-            }
-        }
-
-        if approx_scored.is_empty() {
-            if namespace.is_some() {
-                return Ok(Vec::new());
-            }
-            return Err(VectorError::NoEmbeddings);
-        }
-
-        approx_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        approx_scored.truncate(ann_k);
-        Ok(approx_scored.into_iter().map(|(id, _)| id).collect())
+        self.ann_provider
+            .candidates(query, ann_k, namespace, &self.partitions)
     }
 
     fn rerank_exact(
