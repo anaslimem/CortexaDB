@@ -5,7 +5,7 @@ use crate::core::memory_entry::MemoryId;
 use crate::core::state_machine::StateMachine;
 use crate::index::graph::GraphIndex;
 use crate::index::temporal::TemporalIndex;
-use crate::index::vector::VectorIndex;
+use crate::index::vector::{VectorBackendMode, VectorIndex};
 
 #[derive(Error, Debug)]
 pub enum CombinedError {
@@ -274,6 +274,11 @@ impl IndexLayer {
     /// Get mutable vector index
     pub fn vector_index_mut(&mut self) -> &mut VectorIndex {
         &mut self.vector
+    }
+
+    /// Configure vector backend mode (exact fallback or ANN-like candidate search).
+    pub fn set_vector_backend_mode(&mut self, mode: VectorBackendMode) {
+        self.vector.set_backend_mode(mode);
     }
 }
 

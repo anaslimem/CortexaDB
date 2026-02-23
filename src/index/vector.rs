@@ -1,5 +1,6 @@
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::core::memory_entry::MemoryId;
@@ -20,29 +21,122 @@ pub enum VectorError {
 
 pub type Result<T> = std::result::Result<T, VectorError>;
 
+const DEFAULT_NAMESPACE: &str = "__global__";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VectorBackendMode {
+    Exact,
+    /// HNSW-like mode:
+    /// 1) fetch larger approximate candidate pool (`ann_k`)
+    /// 2) exact cosine rerank on those candidates
+    /// 3) return top-k final results
+    Ann {
+        ann_search_multiplier: usize,
+    },
+}
+
+impl Default for VectorBackendMode {
+    fn default() -> Self {
+        Self::Exact
+    }
+}
+
+pub trait VectorSearchBackend: Send + Sync + std::fmt::Debug {
+    fn mode(&self) -> VectorBackendMode;
+    fn ann_multiplier_hint(&self) -> usize;
+}
+
+#[derive(Debug)]
+struct ExactBackend;
+
+impl VectorSearchBackend for ExactBackend {
+    fn mode(&self) -> VectorBackendMode {
+        VectorBackendMode::Exact
+    }
+    fn ann_multiplier_hint(&self) -> usize {
+        1
+    }
+}
+
+#[derive(Debug)]
+struct AnnBackend {
+    ann_search_multiplier: usize,
+}
+
+impl VectorSearchBackend for AnnBackend {
+    fn mode(&self) -> VectorBackendMode {
+        VectorBackendMode::Ann {
+            ann_search_multiplier: self.ann_search_multiplier,
+        }
+    }
+    fn ann_multiplier_hint(&self) -> usize {
+        self.ann_search_multiplier
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct NamespacePartition {
+    embeddings: HashMap<MemoryId, Vec<f32>>,
+    tombstones: HashSet<MemoryId>,
+}
+
 /// Vector index for semantic search via embeddings
 ///
 /// Stores embeddings (vectors) and enables fast similarity search
 /// using cosine similarity with parallel computation via Rayon
 #[derive(Debug, Clone)]
 pub struct VectorIndex {
-    /// MemoryId → embedding vector
-    embeddings: HashMap<MemoryId, Vec<f32>>,
+    /// namespace -> partition
+    partitions: HashMap<String, NamespacePartition>,
+    /// Global lookup for ID -> namespace
+    id_to_namespace: HashMap<MemoryId, String>,
     /// Dimension of embeddings (typically 384, 768, 1536)
     vector_dimension: usize,
+    /// Search backend mode
+    backend_mode: VectorBackendMode,
+    /// Pluggable backend strategy
+    backend: Arc<dyn VectorSearchBackend>,
 }
 
 impl VectorIndex {
     /// Create a new vector index with specified dimension
     pub fn new(vector_dimension: usize) -> Self {
         Self {
-            embeddings: HashMap::new(),
+            partitions: HashMap::new(),
+            id_to_namespace: HashMap::new(),
             vector_dimension,
+            backend_mode: VectorBackendMode::Exact,
+            backend: Arc::new(ExactBackend),
         }
+    }
+
+    pub fn set_backend_mode(&mut self, mode: VectorBackendMode) {
+        self.backend_mode = mode;
+        self.backend = match mode {
+            VectorBackendMode::Exact => Arc::new(ExactBackend),
+            VectorBackendMode::Ann {
+                ann_search_multiplier,
+            } => Arc::new(AnnBackend {
+                ann_search_multiplier: ann_search_multiplier.max(1),
+            }),
+        };
+    }
+
+    pub fn backend_mode(&self) -> VectorBackendMode {
+        self.backend_mode
     }
 
     /// Add or update embedding for a memory
     pub fn index(&mut self, id: MemoryId, embedding: Vec<f32>) -> Result<()> {
+        self.index_in_namespace(DEFAULT_NAMESPACE, id, embedding)
+    }
+
+    pub fn index_in_namespace<S: AsRef<str>>(
+        &mut self,
+        namespace: S,
+        id: MemoryId,
+        embedding: Vec<f32>,
+    ) -> Result<()> {
         if embedding.len() != self.vector_dimension {
             return Err(VectorError::DimensionMismatch {
                 expected: self.vector_dimension,
@@ -50,71 +144,82 @@ impl VectorIndex {
             });
         }
 
-        self.embeddings.insert(id, embedding);
+        let namespace = namespace.as_ref().to_string();
+        if let Some(previous_ns) = self.id_to_namespace.get(&id).cloned() {
+            if previous_ns != namespace {
+                if let Some(partition) = self.partitions.get_mut(&previous_ns) {
+                    partition.embeddings.remove(&id);
+                    partition.tombstones.remove(&id);
+                }
+            }
+        }
+
+        let partition = self.partitions.entry(namespace.clone()).or_default();
+        partition.tombstones.remove(&id);
+        partition.embeddings.insert(id, embedding);
+        self.id_to_namespace.insert(id, namespace);
         Ok(())
     }
 
     /// Remove embedding for a memory
     pub fn remove(&mut self, id: MemoryId) -> Result<()> {
-        self.embeddings.remove(&id);
+        if let Some(namespace) = self.id_to_namespace.get(&id).cloned() {
+            let mode = self.backend_mode;
+            if let Some(partition) = self.partitions.get_mut(&namespace) {
+                match mode {
+                    VectorBackendMode::Exact => {
+                        partition.embeddings.remove(&id);
+                        partition.tombstones.remove(&id);
+                    }
+                    VectorBackendMode::Ann { .. } => {
+                        if partition.embeddings.contains_key(&id) {
+                            partition.tombstones.insert(id);
+                        }
+                        // Compaction trigger: rebuild if tombstones > 20%.
+                        let total = partition.embeddings.len();
+                        let tombstones = partition.tombstones.len();
+                        if total > 0 && (tombstones as f64 / total as f64) > 0.2 {
+                            Self::compact_partition(partition);
+                        }
+                    }
+                }
+                if partition.embeddings.is_empty() {
+                    self.partitions.remove(&namespace);
+                }
+            }
+            self.id_to_namespace.remove(&id);
+        }
         Ok(())
     }
 
     /// Check if memory has embedding
     pub fn has(&self, id: MemoryId) -> bool {
-        self.embeddings.contains_key(&id)
+        let Some(namespace) = self.id_to_namespace.get(&id) else {
+            return false;
+        };
+        let Some(partition) = self.partitions.get(namespace) else {
+            return false;
+        };
+        partition.embeddings.contains_key(&id) && !partition.tombstones.contains(&id)
     }
 
     /// Get number of indexed embeddings
     pub fn len(&self) -> usize {
-        self.embeddings.len()
+        self.partitions
+            .values()
+            .map(|p| p.embeddings.len().saturating_sub(p.tombstones.len()))
+            .sum()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.embeddings.is_empty()
+        self.len() == 0
     }
 
     /// Serial search: find top K similar embeddings
     ///
     /// Returns list of (MemoryId, cosine_similarity_score) sorted by score descending
     pub fn search(&self, query: &[f32], top_k: usize) -> Result<Vec<(MemoryId, f32)>> {
-        if query.is_empty() {
-            return Err(VectorError::EmptyQuery);
-        }
-
-        if query.len() != self.vector_dimension {
-            return Err(VectorError::DimensionMismatch {
-                expected: self.vector_dimension,
-                actual: query.len(),
-            });
-        }
-
-        if self.embeddings.is_empty() {
-            return Err(VectorError::NoEmbeddings);
-        }
-
-        if top_k == 0 {
-            return Err(VectorError::InvalidTopK(top_k));
-        }
-
-        let query_magnitude = magnitude(query)?;
-
-        // Compute similarity with all embeddings
-        let mut results: Vec<(MemoryId, f32)> = self
-            .embeddings
-            .iter()
-            .map(|(id, embedding)| {
-                let similarity = cosine_similarity(query, embedding, query_magnitude);
-                (*id, similarity)
-            })
-            .collect();
-
-        // Sort by similarity descending
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Return top K
-        results.truncate(top_k);
-        Ok(results)
+        self.search_scoped(query, top_k, None, false, 1)
     }
 
     /// Parallel search: find top K similar embeddings using Rayon
@@ -122,6 +227,17 @@ impl VectorIndex {
     /// Same as search() but uses thread pool for parallelization
     /// Faster for large datasets (>10k embeddings)
     pub fn search_parallel(&self, query: &[f32], top_k: usize) -> Result<Vec<(MemoryId, f32)>> {
+        self.search_scoped(query, top_k, None, true, 1)
+    }
+
+    pub fn search_scoped(
+        &self,
+        query: &[f32],
+        top_k: usize,
+        namespace: Option<&str>,
+        use_parallel: bool,
+        ann_candidate_multiplier: usize,
+    ) -> Result<Vec<(MemoryId, f32)>> {
         if query.is_empty() {
             return Err(VectorError::EmptyQuery);
         }
@@ -133,7 +249,7 @@ impl VectorIndex {
             });
         }
 
-        if self.embeddings.is_empty() {
+        if self.is_empty() {
             return Err(VectorError::NoEmbeddings);
         }
 
@@ -141,24 +257,22 @@ impl VectorIndex {
             return Err(VectorError::InvalidTopK(top_k));
         }
 
-        let query_magnitude = magnitude(query)?;
-
-        // Parallel computation using Rayon
-        let mut results: Vec<(MemoryId, f32)> = self
-            .embeddings
-            .par_iter() // ← Rayon parallel iterator
-            .map(|(id, embedding)| {
-                let similarity = cosine_similarity(query, embedding, query_magnitude);
-                (*id, similarity)
-            })
-            .collect();
-
-        // Sort by similarity descending
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Return top K
-        results.truncate(top_k);
-        Ok(results)
+        match self.backend.mode() {
+            VectorBackendMode::Exact => {
+                self.search_exact_scoped(query, top_k, namespace, use_parallel)
+            }
+            VectorBackendMode::Ann { .. } => {
+                let ann_multiplier = ann_candidate_multiplier
+                    .max(self.backend.ann_multiplier_hint())
+                    .max(1);
+                let ann_k = top_k.saturating_mul(ann_multiplier);
+                let approx = self.search_approx_candidates(query, ann_k, namespace)?;
+                if approx.is_empty() {
+                    return Ok(Vec::new());
+                }
+                self.rerank_exact(query, &approx, top_k)
+            }
+        }
     }
 
     /// Search similarity only within a restricted set of memory IDs.
@@ -179,7 +293,7 @@ impl VectorIndex {
             });
         }
 
-        if self.embeddings.is_empty() {
+        if self.is_empty() {
             return Err(VectorError::NoEmbeddings);
         }
 
@@ -196,10 +310,14 @@ impl VectorIndex {
         let mut results: Vec<(MemoryId, f32)> = candidate_ids
             .iter()
             .filter_map(|id| {
-                self.embeddings.get(id).map(|embedding| {
-                    let similarity = cosine_similarity(query, embedding, query_magnitude);
-                    (*id, similarity)
-                })
+                let namespace = self.id_to_namespace.get(id)?;
+                let partition = self.partitions.get(namespace)?;
+                if partition.tombstones.contains(id) {
+                    return None;
+                }
+                let embedding = partition.embeddings.get(id)?;
+                let similarity = cosine_similarity(query, embedding, query_magnitude);
+                Some((*id, similarity))
             })
             .collect();
 
@@ -215,7 +333,148 @@ impl VectorIndex {
 
     /// Get all indexed memory IDs
     pub fn indexed_ids(&self) -> Vec<MemoryId> {
-        self.embeddings.keys().copied().collect()
+        self.id_to_namespace
+            .keys()
+            .copied()
+            .filter(|id| self.has(*id))
+            .collect()
+    }
+
+    fn compact_partition(partition: &mut NamespacePartition) {
+        if partition.tombstones.is_empty() {
+            return;
+        }
+        let tombstones = std::mem::take(&mut partition.tombstones);
+        for id in tombstones {
+            partition.embeddings.remove(&id);
+        }
+    }
+
+    fn partition_iter<'a>(
+        &'a self,
+        namespace: Option<&str>,
+    ) -> Box<dyn Iterator<Item = (&'a String, &'a NamespacePartition)> + 'a> {
+        match namespace {
+            Some(ns) => {
+                if let Some(partition) = self.partitions.get_key_value(ns) {
+                    Box::new(std::iter::once(partition))
+                } else {
+                    Box::new(std::iter::empty())
+                }
+            }
+            None => Box::new(self.partitions.iter()),
+        }
+    }
+
+    fn search_exact_scoped(
+        &self,
+        query: &[f32],
+        top_k: usize,
+        namespace: Option<&str>,
+        use_parallel: bool,
+    ) -> Result<Vec<(MemoryId, f32)>> {
+        let query_magnitude = magnitude(query)?;
+        let mut results: Vec<(MemoryId, f32)> = Vec::new();
+
+        for (_ns, partition) in self.partition_iter(namespace) {
+            let iter_results: Vec<(MemoryId, f32)> = if use_parallel {
+                partition
+                    .embeddings
+                    .par_iter()
+                    .filter_map(|(id, embedding)| {
+                        if partition.tombstones.contains(id) {
+                            return None;
+                        }
+                        Some((*id, cosine_similarity(query, embedding, query_magnitude)))
+                    })
+                    .collect()
+            } else {
+                partition
+                    .embeddings
+                    .iter()
+                    .filter_map(|(id, embedding)| {
+                        if partition.tombstones.contains(id) {
+                            return None;
+                        }
+                        Some((*id, cosine_similarity(query, embedding, query_magnitude)))
+                    })
+                    .collect()
+            };
+            results.extend(iter_results);
+        }
+
+        if results.is_empty() {
+            if namespace.is_some() {
+                return Ok(Vec::new());
+            }
+            return Err(VectorError::NoEmbeddings);
+        }
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(top_k);
+        Ok(results)
+    }
+
+    /// Cheap approximate pass for ANN mode: uses first 8 dimensions (or fewer),
+    /// then caller performs full exact rerank on these candidates.
+    fn search_approx_candidates(
+        &self,
+        query: &[f32],
+        ann_k: usize,
+        namespace: Option<&str>,
+    ) -> Result<Vec<MemoryId>> {
+        let approx_dims = query.len().min(8).max(1);
+        let query_prefix = &query[..approx_dims];
+        let query_mag = magnitude(query_prefix)?;
+        let mut approx_scored = Vec::new();
+
+        for (_ns, partition) in self.partition_iter(namespace) {
+            for (id, embedding) in &partition.embeddings {
+                if partition.tombstones.contains(id) {
+                    continue;
+                }
+                let score = cosine_similarity(query_prefix, &embedding[..approx_dims], query_mag);
+                approx_scored.push((*id, score));
+            }
+        }
+
+        if approx_scored.is_empty() {
+            if namespace.is_some() {
+                return Ok(Vec::new());
+            }
+            return Err(VectorError::NoEmbeddings);
+        }
+
+        approx_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        approx_scored.truncate(ann_k);
+        Ok(approx_scored.into_iter().map(|(id, _)| id).collect())
+    }
+
+    fn rerank_exact(
+        &self,
+        query: &[f32],
+        candidate_ids: &[MemoryId],
+        top_k: usize,
+    ) -> Result<Vec<(MemoryId, f32)>> {
+        let query_mag = magnitude(query)?;
+        let mut out = Vec::new();
+        for id in candidate_ids {
+            let Some(ns) = self.id_to_namespace.get(id) else {
+                continue;
+            };
+            let Some(partition) = self.partitions.get(ns) else {
+                continue;
+            };
+            if partition.tombstones.contains(id) {
+                continue;
+            }
+            let Some(embedding) = partition.embeddings.get(id) else {
+                continue;
+            };
+            out.push((*id, cosine_similarity(query, embedding, query_mag)));
+        }
+        out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        out.truncate(top_k);
+        Ok(out)
     }
 }
 
@@ -541,5 +800,72 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, MemoryId(1));
         assert!(results.iter().all(|(id, _)| *id != MemoryId(2)));
+    }
+
+    #[test]
+    fn test_namespace_partition_search_scope() {
+        let mut index = VectorIndex::new(3);
+        index
+            .index_in_namespace("agent1", MemoryId(1), vec![1.0, 0.0, 0.0])
+            .unwrap();
+        index
+            .index_in_namespace("agent2", MemoryId(2), vec![1.0, 0.0, 0.0])
+            .unwrap();
+
+        let scoped = index
+            .search_scoped(&[1.0, 0.0, 0.0], 10, Some("agent1"), false, 1)
+            .unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].0, MemoryId(1));
+    }
+
+    #[test]
+    fn test_ann_mode_uses_candidate_expansion_and_exact_rerank() {
+        let mut index = VectorIndex::new(3);
+        index.set_backend_mode(VectorBackendMode::Ann {
+            ann_search_multiplier: 7,
+        });
+        for i in 0..30u64 {
+            let emb = if i == 29 {
+                vec![1.0, 0.0, 0.0]
+            } else {
+                vec![0.6, 0.8, 0.0]
+            };
+            index
+                .index_in_namespace("agent1", MemoryId(i), emb)
+                .unwrap();
+        }
+
+        let results = index
+            .search_scoped(&[1.0, 0.0, 0.0], 3, Some("agent1"), false, 7)
+            .unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].0, MemoryId(29));
+    }
+
+    #[test]
+    fn test_ann_tombstone_compaction_trigger_over_20pct() {
+        let mut index = VectorIndex::new(3);
+        index.set_backend_mode(VectorBackendMode::Ann {
+            ann_search_multiplier: 7,
+        });
+
+        for i in 0..10u64 {
+            index
+                .index_in_namespace("agent1", MemoryId(i), vec![1.0, 0.0, 0.0])
+                .unwrap();
+        }
+        assert_eq!(index.len(), 10);
+
+        // 3/10 deletions exceed the 20% tombstone threshold, triggering compaction.
+        index.remove(MemoryId(0)).unwrap();
+        index.remove(MemoryId(1)).unwrap();
+        index.remove(MemoryId(2)).unwrap();
+
+        assert_eq!(index.len(), 7);
+        let results = index
+            .search_scoped(&[1.0, 0.0, 0.0], 20, Some("agent1"), false, 7)
+            .unwrap();
+        assert!(results.iter().all(|(id, _)| *id >= MemoryId(3)));
     }
 }

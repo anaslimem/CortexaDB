@@ -688,10 +688,11 @@ impl MnemosStore {
                         .execute_command_unsynced(Command::InsertMemory(entry.clone()))?
                 };
                 match entry.embedding {
-                    Some(embedding) => writer
-                        .indexes
-                        .vector_index_mut()
-                        .index(entry.id, embedding)?,
+                    Some(embedding) => writer.indexes.vector_index_mut().index_in_namespace(
+                        &entry.namespace,
+                        entry.id,
+                        embedding,
+                    )?,
                     None => {
                         let _ = writer.indexes.vector_index_mut().remove(entry.id);
                     }
@@ -764,7 +765,11 @@ impl MnemosStore {
         let mut indexes = IndexLayer::new(vector_dimension);
         for entry in state_machine.all_memories() {
             if let Some(embedding) = entry.embedding.clone() {
-                indexes.vector_index_mut().index(entry.id, embedding)?;
+                indexes.vector_index_mut().index_in_namespace(
+                    &entry.namespace,
+                    entry.id,
+                    embedding,
+                )?;
             }
         }
         Ok(indexes)

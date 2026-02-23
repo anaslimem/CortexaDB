@@ -188,14 +188,18 @@ impl<'a> HybridQueryEngine<'a> {
             .map_err(HybridQueryError::Embedder)?;
 
         let candidate_k = options.top_k.saturating_mul(options.candidate_multiplier);
-        let vector_results = self
-            .index_layer
-            .vector
-            .search(&query_embedding, candidate_k)?;
+        let ann_multiplier = options.candidate_multiplier.max(7);
+        let vector_results = self.index_layer.vector.search_scoped(
+            &query_embedding,
+            candidate_k,
+            options.namespace.as_deref(),
+            false,
+            ann_multiplier,
+        )?;
 
         let mut candidate_scores = HashMap::new();
         for (id, cosine_similarity) in vector_results {
-            if self.matches_filters(id, options.namespace.as_deref(), options.time_range) {
+            if self.matches_filters(id, None, options.time_range) {
                 candidate_scores.insert(id, cosine_similarity);
             }
         }
@@ -213,12 +217,14 @@ impl<'a> HybridQueryEngine<'a> {
                     }
                 }
 
-                let rescored = self.index_layer.vector.search_in_ids(
-                    &query_embedding,
-                    &expanded_ids,
-                    expanded_ids.len(),
-                )?;
-                candidate_scores = rescored.into_iter().collect();
+                if !expanded_ids.is_empty() {
+                    let rescored = self.index_layer.vector.search_in_ids(
+                        &query_embedding,
+                        &expanded_ids,
+                        expanded_ids.len(),
+                    )?;
+                    candidate_scores = rescored.into_iter().collect();
+                }
             }
         }
 
@@ -338,7 +344,7 @@ mod tests {
         for entry in [&a, &b, &c] {
             layer
                 .vector_index_mut()
-                .index(entry.id, entry.embedding.clone().unwrap())
+                .index_in_namespace(&entry.namespace, entry.id, entry.embedding.clone().unwrap())
                 .unwrap();
         }
         sm.insert_memory(a).unwrap();

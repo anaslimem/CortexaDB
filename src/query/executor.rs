@@ -103,13 +103,13 @@ impl QueryExecutor {
         }
 
         let candidate_k = options.top_k.saturating_mul(plan.candidate_multiplier);
-        let vector_results = if plan.use_parallel {
-            index_layer
-                .vector
-                .search_parallel(&query_embedding, candidate_k)?
-        } else {
-            index_layer.vector.search(&query_embedding, candidate_k)?
-        };
+        let vector_results = index_layer.vector.search_scoped(
+            &query_embedding,
+            candidate_k,
+            options.namespace.as_deref(),
+            plan.use_parallel,
+            plan.ann_candidate_multiplier,
+        )?;
         if let Some(cb) = &mut trace {
             cb(StageTrace::VectorScored {
                 candidates: vector_results.len(),
@@ -118,14 +118,7 @@ impl QueryExecutor {
 
         let mut candidate_scores: HashMap<MemoryId, f32> = vector_results
             .into_iter()
-            .filter(|(id, _)| {
-                matches_filters(
-                    state_machine,
-                    *id,
-                    options.namespace.as_deref(),
-                    options.time_range,
-                )
-            })
+            .filter(|(id, _)| matches_filters(state_machine, *id, None, options.time_range))
             .collect();
         if let Some(cb) = &mut trace {
             cb(StageTrace::Filtered {

@@ -13,6 +13,7 @@ pub struct QueryPlan {
     pub path: ExecutionPath,
     pub options: QueryOptions,
     pub candidate_multiplier: usize,
+    pub ann_candidate_multiplier: usize,
     pub use_parallel: bool,
 }
 
@@ -56,6 +57,7 @@ impl QueryPlanner {
 
         let estimated_candidates = options.top_k.saturating_mul(multiplier);
         let use_parallel = indexed_embeddings >= 10_000 || estimated_candidates >= 1_000;
+        let ann_candidate_multiplier = (multiplier * 2).max(7);
 
         options.candidate_multiplier = multiplier;
 
@@ -72,6 +74,7 @@ impl QueryPlanner {
             path,
             options,
             candidate_multiplier: multiplier,
+            ann_candidate_multiplier,
             use_parallel,
         }
     }
