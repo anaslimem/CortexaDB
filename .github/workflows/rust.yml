@@ -24,11 +24,12 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    - name: Install Maturin
-      run: pip install maturin
     - name: Test Python Bindings
       run: |
         cd crates/mnemos-py
+        python3 -m venv .venv
+        source .venv/bin/activate
+        pip install maturin
         maturin develop --release
         python3 test_smoke.py
         python3 test_stress.py
