@@ -421,5 +421,6 @@ Areas still evolving toward full production multi-agent scale:
 
 ## Documentation
 
+- [ROADMAP.md](ROADMAP.md) — project roadmap and phased development plan
 - [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) — current constraints and caveats
 - [Python Client README](python/mnemos-client/README.md) — API reference and quickstart
