@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use mnemos::core::memory_entry::{MemoryEntry, MemoryId};
-use mnemos::engine::SyncPolicy;
-use mnemos::store::MnemosStore;
+use mnemos_core::core::memory_entry::{MemoryEntry, MemoryId};
+use mnemos_core::engine::SyncPolicy;
+use mnemos_core::store::MnemosStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = BenchConfig::from_args(std::env::args().skip(1).collect())?;

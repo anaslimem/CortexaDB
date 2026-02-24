@@ -1,6 +1,6 @@
-use mnemos::core::memory_entry::{MemoryEntry, MemoryId};
-use mnemos::query::{QueryEmbedder, QueryOptions};
-use mnemos::store::MnemosStore;
+use mnemos_core::core::memory_entry::{MemoryEntry, MemoryId};
+use mnemos_core::query::{QueryEmbedder, QueryOptions};
+use mnemos_core::store::MnemosStore;
 
 struct DemoEmbedder;
 

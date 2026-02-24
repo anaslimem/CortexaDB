@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use mnemos::core::memory_entry::MemoryId;
-use mnemos::store::MnemosStore;
+use mnemos_core::core::memory_entry::MemoryId;
+use mnemos_core::store::MnemosStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = std::env::args()

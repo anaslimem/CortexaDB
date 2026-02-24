@@ -13,7 +13,7 @@ It provides durable memory storage, deterministic replay, and hybrid retrieval a
 - graph relationships (connected memories),
 - temporal constraints (time-aware recall).
 
-Mnemos is built as a library and includes a gRPC service layer for multi-agent usage from Python and other languages.
+Mnemos is built as an **embedded Rust library** — no server required.
 
 ## Why Mnemos
 
@@ -37,72 +37,49 @@ Mnemos is designed specifically for that shape of problem.
 - Combined weighted retrieval.
 - Capacity/eviction engine (`max_entries`, `max_bytes`) using deterministic delete commands.
 - Segment compaction with atomic directory swap.
-- gRPC service endpoint for remote clients.
-- Python client package with high-level `MnemosMemory` (`store` / `ask`) and advanced typed APIs.
 
 ## Quickstart
-
-One clear path from zero to first retrieval:
-
-1. Clone and start server.
 
 ```bash
 git clone https://github.com/anaslimem/Mnemos.git
 cd Mnemos
-scripts/run_grpc.sh
+cargo run -p mnemos-core --bin manual_store
 ```
 
-2. In another terminal, run Python quickstart.
-
-```bash
-cd python/mnemos-client
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-./scripts/generate_proto.sh
-export MNEMOS_ADDR=127.0.0.1:50051
-export MNEMOS_NAMESPACE=quickstart-$(date +%s)
-python examples/simple_memory.py
-```
-
-3. Optional: check live metrics.
-
-```bash
-curl -s http://127.0.0.1:50052/metrics | head -n 40
-```
+This runs a local demo that inserts memories, creates edges, queries, and prints scored results.
 
 ## Project Layout
 
 ```text
-src/
-  core/
-    memory_entry.rs      # Memory model
-    command.rs           # Command/event types
-    state_machine.rs     # Deterministic state transitions
-  storage/
-    wal.rs               # Write-ahead log
-    segment.rs           # Segment files + in-memory segment index
-    compaction.rs        # Segment compaction
-  index/
-    vector.rs            # Cosine similarity index
-    graph.rs             # Graph traversal index
-    temporal.rs          # Time-based index
-    combined.rs          # Hybrid index composition
-  query/
-    planner.rs           # Query planning heuristics
-    executor.rs          # Plan execution + metrics/traces
-    hybrid.rs            # Text-oriented hybrid query engine
-  engine.rs              # Core orchestrator (WAL + segments + state)
-  store.rs               # Unified facade API (MnemosStore)
-  service/grpc.rs        # gRPC service implementation
-  bin/
-    mnemos_grpc.rs       # gRPC server binary
-    manual_store.rs      # local manual demo binary
-proto/
-  mnemos.proto           # gRPC contract
-python/
-  mnemos-client/         # typed Python client package
+crates/
+  mnemos-core/
+    src/
+      core/
+        memory_entry.rs      # Memory model
+        command.rs           # Command/event types
+        state_machine.rs     # Deterministic state transitions
+      storage/
+        wal.rs               # Write-ahead log
+        segment.rs           # Segment files + in-memory segment index
+        compaction.rs        # Segment compaction
+        checkpoint.rs        # State checkpoint serialization
+      index/
+        vector.rs            # Cosine similarity index
+        graph.rs             # Graph traversal index
+        temporal.rs          # Time-based index
+        combined.rs          # Hybrid index composition
+      query/
+        planner.rs           # Query planning heuristics
+        executor.rs          # Plan execution + metrics/traces
+        hybrid.rs            # Text-oriented hybrid query engine
+        intent.rs            # Intent-based weight tuning
+      engine.rs              # Core orchestrator (WAL + segments + state)
+      store.rs               # Unified facade API (MnemosStore)
+      bin/
+        manual_store.rs      # Local manual demo binary
+        sync_bench.rs        # Sync policy benchmark
+        monkey_writer.rs     # Crash-safety stress writer
+        monkey_verify.rs     # Recovery verification
 ```
 
 ## Architecture Overview
@@ -125,7 +102,7 @@ Read/query path:
 
 ## Storage Details
 
-### WAL (`src/storage/wal.rs`)
+### WAL
 
 Record format:
 
@@ -136,7 +113,7 @@ Record format:
 - Detects corruption via checksum.
 - Used for crash recovery and deterministic replay.
 
-### Segment Storage (`src/storage/segment.rs`)
+### Segment Storage
 
 Record format:
 
@@ -148,7 +125,7 @@ Record format:
 - In-memory index: `MemoryId -> (segment_id, offset, length)`.
 - Supports logical delete and compaction eligibility analysis.
 
-### Compaction (`src/storage/compaction.rs`)
+### Compaction
 
 - Rewrites live entries into a fresh segment directory.
 - Performs atomic swap (`old -> backup`, `new -> old`, delete backup).
@@ -156,7 +133,7 @@ Record format:
 
 ## Querying
 
-### High-level Rust facade (`src/store.rs`)
+### High-level Rust facade
 
 `MnemosStore` wraps:
 
@@ -192,151 +169,14 @@ Eviction order is deterministic:
 
 Evictions are issued as `DeleteMemory` commands, so WAL and replay stay consistent.
 
-## gRPC Service
-
-Binary: `src/bin/mnemos_grpc.rs`
-
-Endpoints include:
-
-- insert/delete memory,
-- add/remove edge,
-- query,
-- enforce capacity,
-- compact segments,
-- stats.
-
-Environment variables:
-
-- `MNEMOS_GRPC_ADDR` (default `127.0.0.1:50051`)
-- `MNEMOS_STATUS_ADDR` (default `127.0.0.1:50052`)
-- `MNEMOS_DATA_DIR` (default `/tmp/mnemos_grpc`)
-- `MNEMOS_VECTOR_DIM` (default `3`)
-- `MNEMOS_SYNC_POLICY` (`strict` | `batch` | `async`, default `strict`)
-- `MNEMOS_SYNC_BATCH_MAX_OPS` (default `64`)
-- `MNEMOS_SYNC_BATCH_MAX_DELAY_MS` (default `25`)
-- `MNEMOS_SYNC_ASYNC_INTERVAL_MS` (default `25`)
-- `MNEMOS_CHECKPOINT_ENABLED` (`true`/`false`, default `false`)
-- `MNEMOS_CHECKPOINT_EVERY_OPS` (default `10000`)
-- `MNEMOS_CHECKPOINT_EVERY_MS` (default `30000`)
-- `MNEMOS_AUTH_MODE` (`none` | `api_key`, default `none`)
-- `MNEMOS_API_KEY` (required when `MNEMOS_AUTH_MODE=api_key`)
-- `MNEMOS_VECTOR_BACKEND` (`exact` | `ann`, default `exact`)
-- `MNEMOS_VECTOR_ANN_SEARCH_MULTIPLIER` (default `8`)
-- `MNEMOS_RBAC_ADMIN_PRINCIPALS` (csv principals with full access)
-- `MNEMOS_RBAC_READ` (csv of `namespace:principal|principal`)
-- `MNEMOS_RBAC_WRITE` (csv of `namespace:principal|principal`)
-- `MNEMOS_QUOTA_RPM` (requests/minute per principal, `0` disables)
-- `MNEMOS_QUOTA_MAX_TOP_K` (default `100`)
-- `MNEMOS_QUOTA_MAX_GRAPH_HOPS` (default `4`)
-- `MNEMOS_TLS_CERT_PATH`, `MNEMOS_TLS_KEY_PATH` (currently use external TLS terminator)
-- `MNEMOS_INTENT_ANCHOR_SEMANTIC` (default semantic anchor text)
-- `MNEMOS_INTENT_ANCHOR_RECENCY` (default recency anchor text)
-- `MNEMOS_INTENT_ANCHOR_GRAPH` (default graph anchor text)
-- `MNEMOS_INTENT_GRAPH_HOPS_2_THRESHOLD` (default `0.55`)
-- `MNEMOS_INTENT_GRAPH_HOPS_3_THRESHOLD` (default `0.80`)
-- `MNEMOS_INTENT_IMPORTANCE_PCT` (default `20`)
-
-Run server:
-
-```bash
-scripts/run_grpc.sh
-```
-
-Status check in browser:
-
-- [http://127.0.0.1:50052](http://127.0.0.1:50052)
-- [http://127.0.0.1:50052/metrics](http://127.0.0.1:50052/metrics) (Prometheus-compatible text)
-
-### Intent Tuning Guide
-
-Mnemos uses intent anchors to auto-balance retrieval between similarity, recency, and graph expansion.
-Tune this behavior with env vars depending on your goal.
-
-Preset: Hackathon (higher recall, more relationship exploration)
-
-```bash
-MNEMOS_INTENT_GRAPH_HOPS_2_THRESHOLD=0.45
-MNEMOS_INTENT_GRAPH_HOPS_3_THRESHOLD=0.70
-MNEMOS_INTENT_IMPORTANCE_PCT=15
-```
-
-Preset: Production-Latency (tighter graph expansion, steadier latency)
-
-```bash
-MNEMOS_INTENT_GRAPH_HOPS_2_THRESHOLD=0.65
-MNEMOS_INTENT_GRAPH_HOPS_3_THRESHOLD=0.88
-MNEMOS_INTENT_IMPORTANCE_PCT=25
-```
-
-Quick guidance:
-
-- Lower graph thresholds => more frequent 2-3 hop expansion => better recall, higher latency.
-- Higher graph thresholds => graph is used more conservatively => lower tail latency.
-- Lower importance percent => similarity/recency dominate ranking.
-- Higher importance percent => stable “important memory” ranking boost.
-
-## Python Client
-
-Package: `python/mnemos-client`
-
-High-level developer API:
-
-- `MnemosMemory.store(...)`
-- `MnemosMemory.ask(...)`
-
-0.1 stable contract surface:
-
-- `store`
-- `store_many`
-- `ask`
-- `ask_raw`
-- `ask_with_context`
-- `close`
-
-Advanced typed API also available:
-
-- `MnemosClient.remember(...)`
-- `MnemosClient.recall(...)`
-- `MnemosClient.query(...)`
-
-Typical setup:
-
-```bash
-cd python/mnemos-client
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-./scripts/generate_proto.sh
-python examples/simple_memory.py
-```
-
-Function-by-function Python docs:
-
-- `python/mnemos-client/README.md`
-
-## Local Manual Demo
-
-Run the Rust manual example:
-
-```bash
-cargo run --bin manual_store
-```
-
-This demonstrates:
-
-- inserts,
-- edge creation,
-- query and score outputs.
-
 ## Sync Policy Benchmark
 
 Quick local throughput comparison between durability modes:
 
 ```bash
-cargo run --bin sync_bench -- --mode strict --ops 20000
-cargo run --bin sync_bench -- --mode batch --ops 20000 --batch-max-ops 128 --batch-max-delay-ms 20
-cargo run --bin sync_bench -- --mode async --ops 20000 --async-interval-ms 20
+cargo run -p mnemos-core --bin sync_bench -- --mode strict --ops 20000
+cargo run -p mnemos-core --bin sync_bench -- --mode batch --ops 20000 --batch-max-ops 128 --batch-max-delay-ms 20
+cargo run -p mnemos-core --bin sync_bench -- --mode async --ops 20000 --async-interval-ms 20
 ```
 
 Each run prints ingest/flush/total timing, ops/sec, and a recovery durability check.
@@ -352,56 +192,12 @@ Sample local result (`ops=500`, same machine, debug build):
 These numbers are workload and hardware dependent, but show the expected pattern:
 `batch`/`async` improve write throughput compared with `strict`.
 
-## gRPC Throughput Benchmark (DB-Style)
-
-For p50/p95/p99 and throughput under concurrent load:
-
-```bash
-cargo run --bin bench_grpc -- \
-  --addr 127.0.0.1:50051 \
-  --namespace bench \
-  --vector-dim 3 \
-  --insert-ops 5000 \
-  --query-ops 5000 \
-  --concurrency 32 \
-  --top-k 10
-```
-
-Output includes:
-
-- insert/query throughput (ops/s),
-- average latency,
-- p50/p95/p99/max latency.
-
-For observability during benchmark, scrape:
-
-```bash
-curl -s http://127.0.0.1:50052/metrics
-```
-
-### Comparison Protocol (Mnemos vs Qdrant vs Pinecone)
-
-To compare fairly, keep identical workload shape across all systems:
-
-1. same embedding model + vector dimension,
-2. same dataset and namespace cardinality,
-3. same write count / query count / concurrency,
-4. same top-k and filter conditions,
-5. same warmup period and measurement window.
-
-Use `bench_grpc` numbers from Mnemos as baseline, then run equivalent load for Qdrant/Pinecone and compare:
-
-- ingest ops/s,
-- query ops/s,
-- p95 and p99 query latency,
-- resource usage/cost for same workload.
-
 ## Test
 
 Run all tests:
 
 ```bash
-cargo test -- --nocapture
+cargo test --workspace -- --nocapture
 ```
 
 ## Current Status
@@ -409,18 +205,16 @@ cargo test -- --nocapture
 Mnemos is already usable for:
 
 - single-node agent memory storage/retrieval,
-- deterministic recovery,
-- remote access via gRPC.
+- deterministic recovery.
 
-Areas still evolving toward full production multi-agent scale:
+Areas under active development (see [Roadmap](ROADMAP.md)):
 
-- stronger service hardening (authn/authz, richer observability),
-- concurrency/snapshot strategy for high write contention,
-- optional ANN backends for larger vector scale,
-- operational tooling and deployment templates.
+- embedded `Mnemos` facade with simplified API,
+- snapshot + WAL truncation for fast startup,
+- PyO3 native Python bindings,
+- multi-agent namespace model.
 
 ## Documentation
 
 - [ROADMAP.md](ROADMAP.md) — project roadmap and phased development plan
 - [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) — current constraints and caveats
-- [Python Client README](python/mnemos-client/README.md) — API reference and quickstart

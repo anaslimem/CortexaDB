@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-use mnemos::core::memory_entry::{MemoryEntry, MemoryId};
-use mnemos::store::MnemosStore;
+use mnemos_core::core::memory_entry::{MemoryEntry, MemoryId};
+use mnemos_core::store::MnemosStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
