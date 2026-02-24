@@ -138,27 +138,22 @@ impl Engine {
                 (StateMachine::new(), None)
             };
 
-        if let Some(last_applied) = checkpoint_last_applied {
-            let wal_highest = commands.last().map(|(id, _)| id.0);
-            if wal_highest.map(|v| v < last_applied.0).unwrap_or(true) {
-                return Err(EngineError::CheckpointWalGap {
-                    checkpoint_last_applied: last_applied.0,
-                    wal_highest,
-                });
-            }
-            // Conservative behavior: rebuild segments from checkpoint snapshot.
+        if let Some(_last_applied) = checkpoint_last_applied {
+            // After WAL truncation, the WAL only contains entries written after
+            // the checkpoint. These entries are renumbered starting from 0, so
+            // we cannot compare WAL IDs against the checkpoint's
+            // last_applied_id. Instead, we trust the checkpoint state and
+            // unconditionally replay all WAL entries (they are all
+            // post-checkpoint).
             segments = Self::rebuild_segments_from_state(segments_dir, &state_machine)?;
         }
         let mut repaired_segments = false;
 
-        // Replay all commands in order
+        // Replay all WAL entries. When a checkpoint was loaded, all entries in
+        // the WAL are post-checkpoint (WAL was truncated). When no checkpoint
+        // exists, all entries are replayed from scratch.
         let mut last_id = checkpoint_last_applied.unwrap_or(CommandId(0));
-        for (cmd_id, cmd) in commands {
-            if let Some(checkpoint_id) = checkpoint_last_applied {
-                if cmd_id.0 <= checkpoint_id.0 {
-                    continue;
-                }
-            }
+        for (_cmd_id, cmd) in commands {
             match &cmd {
                 Command::InsertMemory(entry) => {
                     // Ensure segment view converges to WAL command stream.
@@ -178,7 +173,7 @@ impl Engine {
                 Command::AddEdge { .. } | Command::RemoveEdge { .. } => {}
             }
             state_machine.apply_command(cmd)?;
-            last_id = cmd_id;
+            last_id = CommandId(last_id.0 + 1);
         }
         if repaired_segments || wal_outcome.truncated {
             segments.fsync()?;
@@ -443,6 +438,18 @@ impl Engine {
         self.segments = SegmentStorage::new(&dir)?;
         Ok(report)
     }
+
+    /// Get the WAL file path (needed for truncation after checkpoint).
+    pub fn wal_path(&self) -> &Path {
+        self.wal.path()
+    }
+
+    /// Reopen the WAL file (needed after truncation rewrites the file).
+    pub fn reopen_wal(&mut self) -> Result<()> {
+        let path = self.wal.path().to_path_buf();
+        self.wal = WriteAheadLog::new(&path)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -701,7 +708,10 @@ mod tests {
     }
 
     #[test]
-    fn test_recover_from_checkpoint_detects_wal_gap() {
+    fn test_recover_from_checkpoint_trusts_state() {
+        // After WAL truncation, the WAL may have fewer entries than the
+        // checkpoint's last_applied_id. Recovery should trust the checkpoint
+        // state and replay all WAL entries unconditionally.
         let temp_dir = TempDir::new().unwrap();
         let wal_path = temp_dir.path().join("engine_gap.wal");
         let seg_dir = temp_dir.path().join("segments_gap");
@@ -714,10 +724,15 @@ mod tests {
                 .unwrap();
         }
 
+        // Simulate: checkpoint says last_applied=10, but WAL only has 1 entry.
+        // This is the normal state after WAL truncation.
         let state = StateMachine::new();
         let result =
             Engine::recover_from_checkpoint(&wal_path, &seg_dir, Some((state, CommandId(10))));
-        assert!(matches!(result, Err(EngineError::CheckpointWalGap { .. })));
+        // Should succeed — checkpoint is trusted, WAL entry is replayed.
+        assert!(result.is_ok());
+        let engine = result.unwrap();
+        assert_eq!(engine.get_state_machine().len(), 1);
     }
 
     #[test]

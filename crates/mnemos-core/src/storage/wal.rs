@@ -236,6 +236,57 @@ impl WriteAheadLog {
         Ok(())
     }
 
+    /// Rewrite the WAL keeping only entries with `CommandId > keep_after`.
+    ///
+    /// This is the key operation for fast startup: after a checkpoint captures
+    /// all state up to `keep_after`, the prefix of the WAL is no longer needed.
+    /// The rewrite uses an atomic tmp-file + rename for crash safety.
+    pub fn truncate_prefix<P: AsRef<Path>>(path: P, keep_after: CommandId) -> Result<()> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let outcome = Self::read_all_tolerant(path)?;
+        let tail: Vec<_> = outcome
+            .commands
+            .into_iter()
+            .filter(|(id, _)| id.0 > keep_after.0)
+            .collect();
+
+        let tmp_path = path.with_extension("wal.trunc.tmp");
+        {
+            let file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&tmp_path)?;
+            let mut writer = BufWriter::new(file);
+            let crc = Crc::<u32>::new(&crc::CRC_32_CKSUM);
+
+            for (_id, cmd) in &tail {
+                let bytes = bincode::serialize(cmd)?;
+                let len = bytes.len() as u32;
+                let checksum = crc.checksum(&bytes);
+                writer.write_all(&len.to_le_bytes())?;
+                writer.write_all(&checksum.to_le_bytes())?;
+                writer.write_all(&bytes)?;
+            }
+            writer.flush()?;
+            writer.get_mut().sync_all()?;
+        }
+
+        std::fs::rename(&tmp_path, path)?;
+        // fsync parent directory for rename durability.
+        if let Some(parent) = path.parent() {
+            if let Ok(dir) = OpenOptions::new().read(true).open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get number of entries in WAL
     pub fn len(&self) -> u64 {
         self.entries_count

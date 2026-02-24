@@ -19,7 +19,7 @@ use crate::storage::checkpoint::{
     LoadedCheckpoint, checkpoint_path_from_wal, load_checkpoint, save_checkpoint,
 };
 use crate::storage::compaction::CompactionReport;
-use crate::storage::wal::CommandId;
+use crate::storage::wal::{CommandId, WriteAheadLog};
 
 #[derive(Error, Debug)]
 pub enum MnemosStoreError {
@@ -31,6 +31,8 @@ pub enum MnemosStoreError {
     Query(#[from] crate::query::HybridQueryError),
     #[error("Checkpoint error: {0}")]
     Checkpoint(#[from] crate::storage::checkpoint::CheckpointError),
+    #[error("WAL error: {0}")]
+    Wal(#[from] crate::storage::wal::WalError),
     #[error("Invariant violation: {0}")]
     InvariantViolation(String),
     #[error("Embedding required when content changes for memory id {0:?}")]
@@ -301,18 +303,20 @@ impl MnemosStore {
 
     pub fn checkpoint_now(&self) -> Result<()> {
         let snapshot = self.snapshot();
-        let last_applied_id = self
-            .writer
-            .lock()
-            .expect("writer lock poisoned")
-            .engine
-            .last_applied_id()
-            .0;
+        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let last_applied_id = writer.engine.last_applied_id().0;
         save_checkpoint(
             &self.checkpoint_path,
             snapshot.state_machine(),
             last_applied_id,
         )?;
+
+        // Truncate WAL prefix — only keep entries written after the checkpoint.
+        let wal_path = writer.engine.wal_path().to_path_buf();
+        WriteAheadLog::truncate_prefix(&wal_path, CommandId(last_applied_id))?;
+        writer.engine.reopen_wal()?;
+
+        drop(writer);
         self.clear_pending_checkpoint_state();
         Ok(())
     }
@@ -451,6 +455,26 @@ impl MnemosStore {
                     last_applied_id,
                 ) {
                     eprintln!("mnemos checkpoint write error: {err}");
+                } else {
+                    // Truncate WAL prefix after successful checkpoint.
+                    let wal_path = writer
+                        .lock()
+                        .expect("writer lock poisoned")
+                        .engine
+                        .wal_path()
+                        .to_path_buf();
+                    if let Err(err) =
+                        WriteAheadLog::truncate_prefix(&wal_path, CommandId(last_applied_id))
+                    {
+                        eprintln!("mnemos WAL truncation error: {err}");
+                    } else if let Err(err) = writer
+                        .lock()
+                        .expect("writer lock poisoned")
+                        .engine
+                        .reopen_wal()
+                    {
+                        eprintln!("mnemos WAL reopen error: {err}");
+                    }
                 }
             }
         })
@@ -807,12 +831,19 @@ impl MnemosStore {
 
 impl Drop for MnemosStore {
     fn drop(&mut self) {
-        let _ = self.flush();
-        if self.checkpoint_policy != CheckpointPolicy::Disabled {
-            let _ = self.checkpoint_now();
-        }
-        let (lock, cvar) = &*self.sync_control;
+        // Shutdown background threads FIRST to avoid races with WAL truncation.
         {
+            let (lock, cvar) = &*self.checkpoint_control;
+            let mut runtime = lock.lock().expect("checkpoint runtime lock poisoned");
+            runtime.shutdown = true;
+            cvar.notify_all();
+        }
+        if let Some(handle) = self.checkpoint_thread.take() {
+            let _ = handle.join();
+        }
+
+        {
+            let (lock, cvar) = &*self.sync_control;
             let mut runtime = lock.lock().expect("sync runtime lock poisoned");
             runtime.shutdown = true;
             cvar.notify_all();
@@ -821,14 +852,10 @@ impl Drop for MnemosStore {
             let _ = handle.join();
         }
 
-        let (lock, cvar) = &*self.checkpoint_control;
-        {
-            let mut runtime = lock.lock().expect("checkpoint runtime lock poisoned");
-            runtime.shutdown = true;
-            cvar.notify_all();
-        }
-        if let Some(handle) = self.checkpoint_thread.take() {
-            let _ = handle.join();
+        // Now do the final flush + checkpoint with no background threads running.
+        let _ = self.flush();
+        if self.checkpoint_policy != CheckpointPolicy::Disabled {
+            let _ = self.checkpoint_now();
         }
     }
 }

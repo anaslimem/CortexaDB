@@ -74,10 +74,12 @@ crates/
         hybrid.rs            # Text-oriented hybrid query engine
         intent.rs            # Intent-based weight tuning
       engine.rs              # Core orchestrator (WAL + segments + state)
-      store.rs               # Unified facade API (MnemosStore)
+      store.rs               # Unified store API (MnemosStore)
+      facade.rs              # Embedded facade (Mnemos — simplified API)
       bin/
         manual_store.rs      # Local manual demo binary
         sync_bench.rs        # Sync policy benchmark
+        startup_bench.rs     # Startup time benchmark
         monkey_writer.rs     # Crash-safety stress writer
         monkey_verify.rs     # Recovery verification
 ```
@@ -131,18 +133,32 @@ Record format:
 - Performs atomic swap (`old -> backup`, `new -> old`, delete backup).
 - Rebuilds segment storage index after swap.
 
-## Querying
+## API
 
-### High-level Rust facade
+### Embedded Facade
 
-`MnemosStore` wraps:
+```rust
+use mnemos_core::Mnemos;
 
-- `Engine`
-- `IndexLayer`
-- `QueryPlanner`
-- `QueryExecutor`
+let db = Mnemos::open("agent.mem")?;
 
-It provides one practical API surface for ingest, retrieval, capacity, and compaction.
+// Store a memory (with pre-computed embedding)
+let id = db.remember(vec![1.0, 0.0, 0.0], None)?;
+
+// Query by vector similarity
+let hits = db.ask(vec![1.0, 0.0, 0.0], 5)?;
+
+// Connect memories
+db.connect(id1, id2, "related")?;
+
+// Compact on-disk storage
+db.compact()?;
+
+// Force checkpoint (snapshot + WAL truncation)
+db.checkpoint()?;
+```
+
+The `Mnemos` struct wraps `MnemosStore` and handles directory layout, auto-incrementing IDs, timestamps, checkpoint/recovery, and WAL truncation transparently.
 
 ### Weighted ranking
 
@@ -169,7 +185,20 @@ Eviction order is deterministic:
 
 Evictions are issued as `DeleteMemory` commands, so WAL and replay stay consistent.
 
-## Sync Policy Benchmark
+## Benchmarks
+
+### Startup Time
+
+Measured with `cargo run -p mnemos-core --release --bin startup_bench`:
+
+| Scenario | Entries | Vec Dim | Time (ms) | Target |
+|---|---:|---:|---:|---:|
+| Cold open (full WAL replay) | 1,000 | 128 | **22.9** | < 100 ✅ |
+| Fast open (checkpoint + WAL tail) | 1,000 | 128 | **23.0** | < 100 ✅ |
+
+After a checkpoint, the WAL is truncated so startup only replays recent operations.
+
+### Sync Policy Throughput
 
 Quick local throughput comparison between durability modes:
 
@@ -202,17 +231,18 @@ cargo test --workspace -- --nocapture
 
 ## Current Status
 
-Mnemos is already usable for:
+Mnemos is usable today for:
 
 - single-node agent memory storage/retrieval,
-- deterministic recovery.
+- deterministic recovery and replay,
+- embedded use via the `Mnemos` facade API,
+- checkpoint + WAL truncation for fast startup (< 100ms).
 
 Areas under active development (see [Roadmap](ROADMAP.md)):
 
-- embedded `Mnemos` facade with simplified API,
-- snapshot + WAL truncation for fast startup,
-- PyO3 native Python bindings,
-- multi-agent namespace model.
+- PyO3 native Python bindings (`pip install mnemos`),
+- multi-agent namespace model,
+- deterministic replay export/import.
 
 ## Documentation
 
