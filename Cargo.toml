@@ -1,3 +1,6 @@
 [workspace]
-members = ["crates/mnemos-core"]
+members = [
+    "crates/mnemos-core",
+    "crates/mnemos-py",
+]
 resolver = "2"

@@ -40,10 +40,21 @@ Mnemos is designed specifically for that shape of problem.
 
 ## Quickstart
 
+### Rust (Embedded Core)
 ```bash
 git clone https://github.com/anaslimem/Mnemos.git
 cd Mnemos
 cargo run -p mnemos-core --bin manual_store
+```
+
+### Python (Native Bindings)
+```python
+from mnemos import Mnemos
+
+with Mnemos.open("agent.mem", dimension=128) as db:
+    mid = db.remember_embedding([0.1] * 128)
+    hits = db.ask_embedding([0.1] * 128, top_k=5)
+    print(f"Top hit score: {hits[0].score:.3f}")
 ```
 
 This runs a local demo that inserts memories, creates edges, queries, and prints scored results.
@@ -82,6 +93,11 @@ crates/
         startup_bench.rs     # Startup time benchmark
         monkey_writer.rs     # Crash-safety stress writer
         monkey_verify.rs     # Recovery verification
+  mnemos-py/
+    src/
+      lib.rs                 # PyO3 Native bindings
+    test_smoke.py            # Python SDK smoke tests
+    test_stress.py           # Python SDK stress tests
 ```
 
 ## Architecture Overview
@@ -236,13 +252,14 @@ Mnemos is usable today for:
 - single-node agent memory storage/retrieval,
 - deterministic recovery and replay,
 - embedded use via the `Mnemos` facade API,
-- checkpoint + WAL truncation for fast startup (< 100ms).
+- checkpoint + WAL truncation for fast startup (< 100ms),
+- **native Python integration** via PyO3 bindings (`mnemos-py`).
 
 Areas under active development (see [Roadmap](ROADMAP.md)):
 
-- PyO3 native Python bindings (`pip install mnemos`),
 - multi-agent namespace model,
-- deterministic replay export/import.
+- deterministic replay export/import,
+- built-in chunking/embedding pipeline.
 
 ## Documentation
 

@@ -16,7 +16,19 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Build
+    - name: Build Workspace
       run: cargo build --workspace --verbose
-    - name: Run tests
+    - name: Run Core Tests
       run: cargo test --workspace --verbose
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install Maturin
+      run: pip install maturin
+    - name: Test Python Bindings
+      run: |
+        cd crates/mnemos-py
+        maturin develop --release
+        python3 test_smoke.py
+        python3 test_stress.py

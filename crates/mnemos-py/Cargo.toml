@@ -1,0 +1,15 @@
+[package]
+name = "mnemos-py"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "mnemos"
+crate-type = ["cdylib"]
+
+[dependencies]
+mnemos-core = { path = "../mnemos-core" }
+pyo3 = { version = "0.24", features = ["extension-module"] }
+
+[package.metadata.maturin]
+name = "mnemos"

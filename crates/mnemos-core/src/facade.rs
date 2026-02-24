@@ -19,15 +19,21 @@ use crate::store::{CheckpointPolicy, MnemosStore, MnemosStoreError};
 
 /// Returned by [`Mnemos::ask`] — a scored memory hit.
 #[derive(Debug, Clone)]
+pub struct Hit {
+    pub id: u64,
+    pub score: f32,
+}
+
+/// A full memory entry retrieved by ID.
+#[derive(Debug, Clone)]
 pub struct Memory {
-    pub id: MemoryId,
+    pub id: u64,
     pub content: Vec<u8>,
     pub namespace: String,
     pub embedding: Option<Vec<f32>>,
     pub metadata: HashMap<String, String>,
     pub created_at: u64,
     pub importance: f32,
-    pub score: f32,
 }
 
 /// Database statistics.
@@ -37,6 +43,7 @@ pub struct Stats {
     pub indexed_embeddings: usize,
     pub wal_length: u64,
     pub vector_dimension: usize,
+    pub storage_version: u32,
 }
 
 /// Configuration for opening a Mnemos database.
@@ -71,6 +78,8 @@ pub enum MnemosError {
     Store(#[from] MnemosStoreError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Memory not found: {0}")]
+    MemoryNotFound(u64),
 }
 
 pub type Result<T> = std::result::Result<T, MnemosError>;
@@ -160,7 +169,7 @@ impl Mnemos {
         &self,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
-    ) -> Result<MemoryId> {
+    ) -> Result<u64> {
         self.remember_in_namespace("default", embedding, metadata)
     }
 
@@ -170,7 +179,7 @@ impl Mnemos {
         namespace: &str,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
-    ) -> Result<MemoryId> {
+    ) -> Result<u64> {
         let id = MemoryId(
             self.next_id
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -187,7 +196,7 @@ impl Mnemos {
         }
 
         self.inner.insert_memory(entry)?;
-        Ok(id)
+        Ok(id.0)
     }
 
     /// Store a memory with explicit content bytes.
@@ -196,7 +205,7 @@ impl Mnemos {
         content: Vec<u8>,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
-    ) -> Result<MemoryId> {
+    ) -> Result<u64> {
         let id = MemoryId(
             self.next_id
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -213,42 +222,52 @@ impl Mnemos {
         }
 
         self.inner.insert_memory(entry)?;
-        Ok(id)
+        Ok(id.0)
     }
 
     /// Query the database for the top-k most relevant memories.
     ///
-    /// `query_embedding` is the vector to search for. The returned memories
+    /// `query_embedding` is the vector to search for. The returned hits
     /// are scored and sorted by descending relevance.
-    pub fn ask(&self, query_embedding: Vec<f32>, top_k: usize) -> Result<Vec<Memory>> {
+    pub fn ask(&self, query_embedding: Vec<f32>, top_k: usize) -> Result<Vec<Hit>> {
         let embedder = StaticEmbedder {
             embedding: query_embedding,
         };
         let options = QueryOptions::with_top_k(top_k);
         let execution = self.inner.query("", options, &embedder)?;
 
-        let snapshot = self.inner.snapshot();
         let mut results = Vec::with_capacity(execution.hits.len());
         for hit in execution.hits {
-            if let Ok(entry) = snapshot.state_machine().get_memory(hit.id) {
-                results.push(Memory {
-                    id: hit.id,
-                    content: entry.content.clone(),
-                    namespace: entry.namespace.clone(),
-                    embedding: entry.embedding.clone(),
-                    metadata: entry.metadata.clone(),
-                    created_at: entry.created_at,
-                    importance: entry.importance,
-                    score: hit.final_score,
-                });
-            }
+            results.push(Hit {
+                id: hit.id.0,
+                score: hit.final_score,
+            });
         }
         Ok(results)
     }
 
+    /// Retrieve a full memory by its identifier.
+    pub fn get_memory(&self, id: u64) -> Result<Memory> {
+        let snapshot = self.inner.snapshot();
+        let entry = snapshot
+            .state_machine()
+            .get_memory(MemoryId(id))
+            .map_err(|_e| MnemosError::MemoryNotFound(id))?;
+
+        Ok(Memory {
+            id: entry.id.0,
+            content: entry.content.clone(),
+            namespace: entry.namespace.clone(),
+            embedding: entry.embedding.clone(),
+            metadata: entry.metadata.clone(),
+            created_at: entry.created_at,
+            importance: entry.importance,
+        })
+    }
+
     /// Create an edge (relationship) between two memories.
-    pub fn connect(&self, from: MemoryId, to: MemoryId, relation: &str) -> Result<()> {
-        self.inner.add_edge(from, to, relation.to_string())?;
+    pub fn connect(&self, from: u64, to: u64, relation: &str) -> Result<()> {
+        self.inner.add_edge(MemoryId(from), MemoryId(to), relation.to_string())?;
         Ok(())
     }
 
@@ -271,6 +290,7 @@ impl Mnemos {
             indexed_embeddings: self.inner.indexed_embeddings(),
             wal_length: self.inner.wal_len(),
             vector_dimension: self.inner.vector_dimension(),
+            storage_version: 1,
         }
     }
 
@@ -381,8 +401,10 @@ mod tests {
 
         let hits = db.ask(vec![1.0, 0.0, 0.0], 1).unwrap();
         assert_eq!(hits[0].id, id);
+        
+        let memory = db.get_memory(id).unwrap();
         assert_eq!(
-            hits[0].metadata.get("source").map(|s| s.as_str()),
+            memory.metadata.get("source").map(|s| s.as_str()),
             Some("test")
         );
     }
@@ -393,12 +415,13 @@ mod tests {
         let path = temp.path().join("testdb");
         let db = Mnemos::open(path.to_str().unwrap()).unwrap();
 
-        db.remember_in_namespace("agent_a", vec![1.0, 0.0, 0.0], None)
-            .unwrap();
-        db.remember_in_namespace("agent_b", vec![0.0, 1.0, 0.0], None)
-            .unwrap();
+        let id1 = db.remember_in_namespace("agent_b", vec![0.0, 1.0, 0.0], None).unwrap();
+        let id2 = db.remember_in_namespace("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();
 
         let stats = db.stats();
         assert_eq!(stats.entries, 2);
+        
+        let m1 = db.get_memory(id1).unwrap();
+        assert_eq!(m1.namespace, "agent_b");
     }
 }
