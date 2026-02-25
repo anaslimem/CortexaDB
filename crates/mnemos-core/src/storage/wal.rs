@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::core::command::Command;
+use crate::storage::serialization::{deserialize_versioned, serialize_versioned};
 
 #[derive(Error, Debug)]
 pub enum WalError {
@@ -109,8 +110,8 @@ impl WriteAheadLog {
     /// Append a command to the WAL
     /// Returns the CommandId assigned to this command
     pub fn append(&mut self, cmd: &Command) -> Result<CommandId> {
-        // Serialize command
-        let command_bytes = bincode::serialize(cmd)?;
+        // Serialize command (versioned)
+        let command_bytes = serialize_versioned(cmd)?;
         let len = command_bytes.len() as u32;
 
         // Calculate CRC32 checksum
@@ -201,8 +202,8 @@ impl WriteAheadLog {
                         break;
                     }
 
-                    // Deserialize command
-                    let cmd = match bincode::deserialize(&command_bytes) {
+                    // Deserialize command (with version fallback)
+                    let cmd = match deserialize_versioned(&command_bytes) {
                         Ok(cmd) => cmd,
                         Err(_) => {
                             truncated = true;
@@ -265,7 +266,7 @@ impl WriteAheadLog {
             let crc = Crc::<u32>::new(&crc::CRC_32_CKSUM);
 
             for (_id, cmd) in &tail {
-                let bytes = bincode::serialize(cmd)?;
+                let bytes = serialize_versioned(cmd)?;
                 let len = bytes.len() as u32;
                 let checksum = crc.checksum(&bytes);
                 writer.write_all(&len.to_le_bytes())?;

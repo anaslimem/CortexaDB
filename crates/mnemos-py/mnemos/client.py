@@ -1,6 +1,6 @@
 import typing as t
 
-from ._mnemos import MnemosError, Hit, Memory, Stats
+from ._mnemos import MnemosError, Hit, Memory, Stats, MnemosNotFoundError, MnemosConfigError, MnemosIOError
 from . import _mnemos
 from .embedder import Embedder
 from .chunker import chunk_text
@@ -151,6 +151,8 @@ class Mnemos:
         try:
             self._inner = _mnemos.Mnemos.open(path, dimension=dimension, sync=sync, max_entries=max_entries)
         except Exception as e:
+            if isinstance(e, MnemosError):
+                raise
             raise MnemosError(str(e))
 
     @classmethod
@@ -186,11 +188,11 @@ class Mnemos:
                          provided, or if the database cannot be opened.
         """
         if embedder is not None and dimension is not None:
-            raise MnemosError(
+            raise MnemosConfigError(
                 "Provide either 'dimension' or 'embedder', not both."
             )
         if embedder is None and dimension is None:
-            raise MnemosError(
+            raise MnemosConfigError(
                 "One of 'dimension' or 'embedder' is required."
             )
 
@@ -242,8 +244,10 @@ class Mnemos:
         """
         try:
             reader = ReplayReader(log_path)
-        except (FileNotFoundError, ValueError) as e:
-            raise MnemosError(str(e))
+        except FileNotFoundError as e:
+            raise MnemosIOError(str(e))
+        except ValueError as e:
+            raise MnemosConfigError(str(e))
 
         hdr = reader.header
         db = cls(db_path, dimension=hdr.dimension, sync=sync)
@@ -305,7 +309,7 @@ class Mnemos:
         if supplied is not None:
             return supplied
         if self._embedder is None:
-            raise MnemosError(
+            raise MnemosConfigError(
                 "No embedder configured. Either pass 'embedding=' explicitly "
                 "or open the database with 'embedder=...'."
             )
@@ -485,7 +489,7 @@ class Mnemos:
         Requires an embedder to be configured.
         """
         if self._embedder is None:
-            raise MnemosError(
+            raise MnemosConfigError(
                 "ingest_document() requires an embedder. "
                 "Open the database with 'embedder=...'."
             )

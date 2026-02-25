@@ -396,7 +396,7 @@ mod tests {
         let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
         assert_ne!(id1, id2);
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 5).unwrap();
+        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
         assert_eq!(hits[0].id, id1);
     }
@@ -433,7 +433,7 @@ mod tests {
         let stats = db.stats();
         assert_eq!(stats.entries, 2);
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 5).unwrap();
+        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
     }
 
@@ -476,7 +476,7 @@ mod tests {
         meta.insert("source".to_string(), "test".to_string());
         let id = db.remember(vec![1.0, 0.0, 0.0], Some(meta)).unwrap();
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 1).unwrap();
+        let hits = db.ask(vec![1.0, 0.0, 0.0], 1, None).unwrap();
         assert_eq!(hits[0].id, id);
         
         let memory = db.get_memory(id).unwrap();

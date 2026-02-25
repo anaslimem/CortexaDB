@@ -18,10 +18,29 @@ use mnemos_core::store::CheckpointPolicy;
 // ---------------------------------------------------------------------------
 
 create_exception!(mnemos, MnemosError, PyException);
+create_exception!(mnemos, MnemosNotFoundError, MnemosError);
+create_exception!(mnemos, MnemosConfigError, MnemosError);
+create_exception!(mnemos, MnemosIOError, MnemosError);
 
-/// Convert any mnemos-core error into our custom Python exception.
-fn to_py_err(e: impl std::fmt::Display) -> PyErr {
-    MnemosError::new_err(e.to_string())
+
+/// Map core MnemosError to specific Python exceptions.
+fn map_mnemos_err(e: facade::MnemosError) -> PyErr {
+    match e {
+        facade::MnemosError::MemoryNotFound(id) => {
+            MnemosNotFoundError::new_err(format!("Memory ID {} not found", id))
+        }
+        facade::MnemosError::Io(io_err) => MnemosIOError::new_err(io_err.to_string()),
+        facade::MnemosError::Store(store_err) => match store_err {
+            mnemos_core::store::MnemosStoreError::Vector(
+                mnemos_core::index::vector::VectorError::DimensionMismatch { expected, actual },
+            ) => MnemosConfigError::new_err(format!(
+                "Dimension mismatch: expected {}, got {}",
+                expected, actual
+            )),
+            _ => MnemosError::new_err(store_err.to_string()),
+        },
+        _ => MnemosError::new_err(e.to_string()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,14 +198,14 @@ impl PyMnemos {
     )]
     fn open(path: &str, dimension: usize, sync: String, max_entries: Option<usize>) -> PyResult<Self> {
         if dimension == 0 {
-            return Err(MnemosError::new_err("dimension must be > 0"));
+            return Err(MnemosConfigError::new_err("dimension must be > 0"));
         }
 
         let sync_policy = match sync.to_lowercase().as_str() {
             "strict" => SyncPolicy::Strict,
             "async"  => SyncPolicy::Async { interval_ms: 10 },
             "batch"  => SyncPolicy::Batch { max_ops: 64, max_delay_ms: 50 },
-            other    => return Err(MnemosError::new_err(format!(
+            other    => return Err(MnemosConfigError::new_err(format!(
                 "unknown sync policy '{}'. Valid values: 'strict', 'async', 'batch'",
                 other,
             ))),
@@ -203,12 +222,12 @@ impl PyMnemos {
             capacity_policy: CapacityPolicy::new(max_entries, None),
         };
 
-        let db = facade::Mnemos::open_with_config(path, config).map_err(to_py_err)?;
+        let db = facade::Mnemos::open_with_config(path, config).map_err(map_mnemos_err)?;
 
         // Validate dimension matches existing data.
         let stats = db.stats();
         if stats.entries > 0 && stats.vector_dimension != dimension {
-            return Err(MnemosError::new_err(format!(
+            return Err(MnemosConfigError::new_err(format!(
                 "dimension mismatch: database has dimension={}, but open() was called with dimension={}",
                 stats.vector_dimension, dimension,
             )));
@@ -258,7 +277,7 @@ impl PyMnemos {
             } else {
                  self.inner.remember_with_content(&namespace, content.into_bytes(), embedding, metadata)
             }
-        }).map_err(to_py_err)?;
+        }).map_err(map_mnemos_err)?;
         Ok(id)
     }
 
@@ -292,7 +311,7 @@ impl PyMnemos {
             )));
         }
 
-        let results = py.allow_threads(|| self.inner.ask(embedding, top_k, filter)).map_err(to_py_err)?;
+        let results = py.allow_threads(|| self.inner.ask(embedding, top_k, filter)).map_err(map_mnemos_err)?;
         Ok(results
             .into_iter()
             .map(|m| PyHit {
@@ -337,7 +356,7 @@ impl PyMnemos {
         let ns = namespace.to_string();
         let results = py
             .allow_threads(|| self.inner.ask_in_namespace(&ns, embedding, top_k, filter))
-            .map_err(to_py_err)?;
+            .map_err(map_mnemos_err)?;
 
         Ok(results
             .into_iter()
@@ -360,7 +379,7 @@ impl PyMnemos {
     ///     MnemosError: If the memory ID does not exist.
     #[pyo3(text_signature = "(self, mid)")]
     fn get(&self, mid: u64) -> PyResult<PyMemory> {
-        let entry = self.inner.get_memory(mid).map_err(to_py_err)?;
+        let entry = self.inner.get_memory(mid).map_err(map_mnemos_err)?;
 
         Ok(PyMemory {
             id: entry.id,
@@ -381,7 +400,7 @@ impl PyMnemos {
     ///     MnemosError: If the memory ID does not exist or deletion fails.
     #[pyo3(text_signature = "(self, mid)")]
     fn delete_memory(&self, py: Python<'_>, mid: u64) -> PyResult<()> {
-        py.allow_threads(|| self.inner.delete_memory(mid)).map_err(to_py_err)
+        py.allow_threads(|| self.inner.delete_memory(mid)).map_err(map_mnemos_err)
     }
 
     /// Create an edge between two memories.
@@ -397,7 +416,7 @@ impl PyMnemos {
     fn connect(&self, from_id: u64, to_id: u64, relation: &str) -> PyResult<()> {
         self.inner
             .connect(from_id, to_id, relation)
-            .map_err(to_py_err)
+            .map_err(map_mnemos_err)
     }
 
     /// Retrieve the outgoing graph connections from a specific memory.
@@ -412,7 +431,7 @@ impl PyMnemos {
     ///     MnemosError: If the memory ID does not exist.
     #[pyo3(text_signature = "(self, id)")]
     fn get_neighbors(&self, id: u64) -> PyResult<Vec<(u64, String)>> {
-        self.inner.get_neighbors(id).map_err(to_py_err)
+        self.inner.get_neighbors(id).map_err(map_mnemos_err)
     }
 
     /// Compact on-disk segment storage (removes tombstoned entries).
@@ -421,7 +440,7 @@ impl PyMnemos {
     ///     MnemosError: If compaction fails.
     #[pyo3(text_signature = "(self)")]
     fn compact(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| self.inner.compact()).map_err(to_py_err)
+        py.allow_threads(|| self.inner.compact()).map_err(map_mnemos_err)
     }
 
     /// Flush all pending WAL writes to disk.
@@ -429,7 +448,7 @@ impl PyMnemos {
     ///     MnemosError: If the flush fails.
     #[pyo3(text_signature = "(self)")]
     fn flush(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| self.inner.flush()).map_err(to_py_err)
+        py.allow_threads(|| self.inner.flush()).map_err(map_mnemos_err)
     }
 
     /// Force a checkpoint (snapshot state + truncate WAL).
@@ -438,7 +457,7 @@ impl PyMnemos {
     ///     MnemosError: If the checkpoint fails.
     #[pyo3(text_signature = "(self)")]
     fn checkpoint(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| self.inner.checkpoint()).map_err(to_py_err)
+        py.allow_threads(|| self.inner.checkpoint()).map_err(map_mnemos_err)
     }
 
     /// Get database statistics.
@@ -495,5 +514,8 @@ fn _mnemos(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMemory>()?;
     m.add_class::<PyStats>()?;
     m.add("MnemosError", m.py().get_type::<MnemosError>())?;
+    m.add("MnemosNotFoundError", m.py().get_type::<MnemosNotFoundError>())?;
+    m.add("MnemosConfigError", m.py().get_type::<MnemosConfigError>())?;
+    m.add("MnemosIOError", m.py().get_type::<MnemosIOError>())?;
     Ok(())
 }

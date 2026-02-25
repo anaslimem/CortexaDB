@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
+use crate::storage::serialization::{deserialize_versioned, serialize_versioned};
 
 #[derive(Error, Debug)]
 pub enum SegmentError {
@@ -170,8 +171,8 @@ impl SegmentStorage {
                         });
                     }
 
-                    // Deserialize to get memory ID
-                    let entry: MemoryEntry = match bincode::deserialize(&entry_bytes) {
+                    // Deserialize to get memory ID (with version fallback)
+                    let entry: MemoryEntry = match deserialize_versioned(&entry_bytes) {
                         Ok(entry) => entry,
                         Err(_) if offset.saturating_add(record_size) == file_len => {
                             Self::truncate_segment_tail(path, offset)?;
@@ -271,8 +272,8 @@ impl SegmentStorage {
 
     /// Write entry to segment storage
     pub fn write_entry(&mut self, entry: &MemoryEntry) -> Result<SegmentLocation> {
-        // Serialize entry
-        let entry_bytes = bincode::serialize(entry)?;
+        // Serialize entry (versioned)
+        let entry_bytes = serialize_versioned(entry)?;
         let len = entry_bytes.len() as u32;
 
         // Calculate checksum
@@ -360,8 +361,8 @@ impl SegmentStorage {
             });
         }
 
-        // Deserialize
-        Ok(bincode::deserialize(&entry_bytes)?)
+        // Deserialize (with version fallback)
+        Ok(deserialize_versioned(&entry_bytes)?)
     }
 
     /// Mark entry as deleted (tombstone)
