@@ -23,7 +23,7 @@ use crate::storage::compaction::CompactionReport;
 use crate::storage::wal::{CommandId, WriteAheadLog};
 
 #[derive(Error, Debug)]
-pub enum AgentLiteStoreError {
+pub enum CortexaDBStoreError {
     #[error("Engine error: {0}")]
     Engine(#[from] crate::engine::EngineError),
     #[error("Vector index error: {0}")]
@@ -40,7 +40,7 @@ pub enum AgentLiteStoreError {
     MissingEmbeddingOnContentChange(MemoryId),
 }
 
-pub type Result<T> = std::result::Result<T, AgentLiteStoreError>;
+pub type Result<T> = std::result::Result<T, CortexaDBStoreError>;
 
 #[derive(Clone)]
 pub struct ReadSnapshot {
@@ -98,7 +98,7 @@ struct CheckpointRuntime {
 /// Concurrency model:
 /// - single writer (`Mutex<WriteState>`) for deterministic write ordering
 /// - snapshot reads (`Arc<ReadSnapshot>`) for isolated concurrent queries
-pub struct AgentLiteStore {
+pub struct CortexaDBStore {
     writer: Arc<Mutex<WriteState>>,
     snapshot: Arc<ArcSwap<ReadSnapshot>>,
     sync_policy: SyncPolicy,
@@ -111,7 +111,7 @@ pub struct AgentLiteStore {
     capacity_policy: CapacityPolicy,
 }
 
-impl AgentLiteStore {
+impl CortexaDBStore {
     pub fn new<P: AsRef<Path>>(
         wal_path: P,
         segments_dir: P,
@@ -389,7 +389,7 @@ impl AgentLiteStore {
                 if should_flush {
                     let mut write_state = writer.lock().expect("writer lock poisoned");
                     if let Err(err) = write_state.engine.flush() {
-                        eprintln!("agentlite sync manager flush error: {err}");
+                        eprintln!("cortexadb sync manager flush error: {err}");
                     }
                 }
             }
@@ -462,7 +462,7 @@ impl AgentLiteStore {
                     read_snapshot.state_machine(),
                     last_applied_id,
                 ) {
-                    eprintln!("agentlite checkpoint write error: {err}");
+                    eprintln!("cortexadb checkpoint write error: {err}");
                 } else {
                     // Truncate WAL prefix after successful checkpoint.
                     let wal_path = writer
@@ -474,14 +474,14 @@ impl AgentLiteStore {
                     if let Err(err) =
                         WriteAheadLog::truncate_prefix(&wal_path, CommandId(last_applied_id))
                     {
-                        eprintln!("agentlite WAL truncation error: {err}");
+                        eprintln!("cortexadb WAL truncation error: {err}");
                     } else if let Err(err) = writer
                         .lock()
                         .expect("writer lock poisoned")
                         .engine
                         .reopen_wal()
                     {
-                        eprintln!("agentlite WAL reopen error: {err}");
+                        eprintln!("cortexadb WAL reopen error: {err}");
                     }
                 }
             }
@@ -495,7 +495,7 @@ impl AgentLiteStore {
         if let Ok(prev) = writer.engine.get_state_machine().get_memory(effective.id) {
             let content_changed = prev.content != effective.content;
             if content_changed && effective.embedding.is_none() {
-                return Err(AgentLiteStoreError::MissingEmbeddingOnContentChange(
+                return Err(CortexaDBStoreError::MissingEmbeddingOnContentChange(
                     effective.id,
                 ));
             }
@@ -843,7 +843,7 @@ impl AgentLiteStore {
         let index_ids: HashSet<MemoryId> = indexes.vector.indexed_ids().into_iter().collect();
 
         if state_ids != index_ids {
-            return Err(AgentLiteStoreError::InvariantViolation(format!(
+            return Err(CortexaDBStoreError::InvariantViolation(format!(
                 "vector index mismatch: state={} index={}",
                 state_ids.len(),
                 index_ids.len()
@@ -853,7 +853,7 @@ impl AgentLiteStore {
     }
 }
 
-impl Drop for AgentLiteStore {
+impl Drop for CortexaDBStore {
     fn drop(&mut self) {
         // Shutdown background threads FIRST to avoid races with WAL truncation.
         {
@@ -928,7 +928,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let wal = temp.path().join("store.wal");
         let seg = temp.path().join("segments");
-        let store = AgentLiteStore::new(&wal, &seg, 3).unwrap();
+        let store = CortexaDBStore::new(&wal, &seg, 3).unwrap();
 
         let a = MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"a".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0])
@@ -950,7 +950,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let wal = temp.path().join("store.wal");
         let seg = temp.path().join("segments");
-        let store = AgentLiteStore::new(&wal, &seg, 3).unwrap();
+        let store = CortexaDBStore::new(&wal, &seg, 3).unwrap();
 
         let entry = MemoryEntry::new(MemoryId(10), "agent1".to_string(), b"x".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0]);
@@ -968,14 +968,14 @@ mod tests {
         let seg = temp.path().join("segments");
 
         {
-            let store = AgentLiteStore::new(&wal, &seg, 3).unwrap();
+            let store = CortexaDBStore::new(&wal, &seg, 3).unwrap();
             let entry = MemoryEntry::new(MemoryId(77), "agent1".to_string(), b"z".to_vec(), 1000)
                 .with_embedding(vec![1.0, 0.0, 0.0]);
             store.insert_memory(entry).unwrap();
             assert_eq!(store.indexed_embeddings(), 1);
         }
 
-        let recovered = AgentLiteStore::recover(&wal, &seg, 3).unwrap();
+        let recovered = CortexaDBStore::recover(&wal, &seg, 3).unwrap();
         assert_eq!(recovered.indexed_embeddings(), 1);
 
         let mut options = QueryOptions::with_top_k(1);
@@ -990,7 +990,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let wal = temp.path().join("store.wal");
         let seg = temp.path().join("segments");
-        let store = AgentLiteStore::new(&wal, &seg, 3).unwrap();
+        let store = CortexaDBStore::new(&wal, &seg, 3).unwrap();
 
         let original = MemoryEntry::new(MemoryId(90), "agent1".to_string(), b"old".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0]);
@@ -1001,7 +1001,7 @@ mod tests {
         let err = store.insert_memory(changed_content).unwrap_err();
         assert!(matches!(
             err,
-            AgentLiteStoreError::MissingEmbeddingOnContentChange(MemoryId(90))
+            CortexaDBStoreError::MissingEmbeddingOnContentChange(MemoryId(90))
         ));
     }
 
@@ -1010,7 +1010,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let wal = temp.path().join("store.wal");
         let seg = temp.path().join("segments");
-        let store = AgentLiteStore::new(&wal, &seg, 3).unwrap();
+        let store = CortexaDBStore::new(&wal, &seg, 3).unwrap();
 
         let original = MemoryEntry::new(MemoryId(91), "agent1".to_string(), b"same".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0])
@@ -1029,7 +1029,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let wal = temp.path().join("store.wal");
         let seg = temp.path().join("segments");
-        let store = AgentLiteStore::new(&wal, &seg, 3).unwrap();
+        let store = CortexaDBStore::new(&wal, &seg, 3).unwrap();
 
         let original = MemoryEntry::new(MemoryId(92), "agent1".to_string(), b"old".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0]);
@@ -1047,7 +1047,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let wal = temp.path().join("store.wal");
         let seg = temp.path().join("segments");
-        let store = AgentLiteStore::new(&wal, &seg, 3).unwrap();
+        let store = CortexaDBStore::new(&wal, &seg, 3).unwrap();
 
         let original = MemoryEntry::new(MemoryId(99), "agent1".to_string(), b"old".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0]);
@@ -1064,7 +1064,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             err,
-            AgentLiteStoreError::MissingEmbeddingOnContentChange(MemoryId(99))
+            CortexaDBStoreError::MissingEmbeddingOnContentChange(MemoryId(99))
         ));
 
         let after = store.snapshot();
@@ -1089,7 +1089,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let wal = temp.path().join("store.wal");
         let seg = temp.path().join("segments");
-        let store = Arc::new(AgentLiteStore::new(&wal, &seg, 3).unwrap());
+        let store = Arc::new(CortexaDBStore::new(&wal, &seg, 3).unwrap());
 
         store
             .insert_memory(
@@ -1146,7 +1146,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let wal = temp.path().join("store_batch.wal");
         let seg = temp.path().join("segments_batch");
-        let store = AgentLiteStore::new_with_policy(
+        let store = CortexaDBStore::new_with_policy(
             &wal,
             &seg,
             3,
@@ -1172,7 +1172,7 @@ mod tests {
 
         thread::sleep(Duration::from_millis(120));
 
-        let recovered = AgentLiteStore::recover(&wal, &seg, 3).unwrap();
+        let recovered = CortexaDBStore::recover(&wal, &seg, 3).unwrap();
         assert_eq!(recovered.state_machine().len(), 2);
     }
 
@@ -1182,7 +1182,7 @@ mod tests {
         let wal = temp.path().join("store_async.wal");
         let seg = temp.path().join("segments_async");
         let store =
-            AgentLiteStore::new_with_policy(&wal, &seg, 3, SyncPolicy::Async { interval_ms: 25 })
+            CortexaDBStore::new_with_policy(&wal, &seg, 3, SyncPolicy::Async { interval_ms: 25 })
                 .unwrap();
 
         store
@@ -1194,7 +1194,7 @@ mod tests {
 
         thread::sleep(Duration::from_millis(120));
 
-        let recovered = AgentLiteStore::recover(&wal, &seg, 3).unwrap();
+        let recovered = CortexaDBStore::recover(&wal, &seg, 3).unwrap();
         assert_eq!(recovered.state_machine().len(), 1);
     }
 
@@ -1205,7 +1205,7 @@ mod tests {
         let seg = temp.path().join("segments_ckpt");
 
         {
-            let store = AgentLiteStore::new_with_policies(
+            let store = CortexaDBStore::new_with_policies(
                 &wal,
                 &seg,
                 3,
@@ -1228,7 +1228,7 @@ mod tests {
             store.checkpoint_now().unwrap();
         }
 
-        let recovered = AgentLiteStore::recover_with_policies(
+        let recovered = CortexaDBStore::recover_with_policies(
             &wal,
             &seg,
             3,

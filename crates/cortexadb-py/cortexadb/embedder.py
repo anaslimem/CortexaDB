@@ -1,14 +1,14 @@
 """
-agentlite.embedder — Embedder ABC and HashEmbedder (for testing).
+cortexadb.embedder — Embedder ABC and HashEmbedder (for testing).
 
-The Embedder protocol is the integration point between AgentLite and any embedding
-model. Implement `Embedder` and pass it to `AgentLite.open(embedder=...)` to enable
+The Embedder protocol is the integration point between CortexaDB and any embedding
+model. Implement `Embedder` and pass it to `CortexaDB.open(embedder=...)` to enable
 automatic embedding.
 
-    from agentlite import AgentLite
-    from agentlite.providers.openai import OpenAIEmbedder
+    from cortexadb import CortexaDB
+    from cortexadb.providers.openai import OpenAIEmbedder
 
-    db = AgentLite.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
+    db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
     db.remember("We chose Stripe for payments")   # embeds automatically
     hits = db.ask("payment provider?")            # embeds query automatically
 """
@@ -26,7 +26,7 @@ class Embedder(ABC):
     Abstract base class for embedding models.
 
     Subclass this to integrate any embedding provider (OpenAI, Gemini, Ollama,
-    or your own local model) with AgentLite.
+    or your own local model) with CortexaDB.
 
     The two required members are:
 
@@ -85,10 +85,10 @@ class HashEmbedder(Embedder):
 
     Example::
 
-        from agentlite import AgentLite
-        from agentlite import HashEmbedder
+        from cortexadb import CortexaDB
+        from cortexadb import HashEmbedder
 
-        db = AgentLite.open("/tmp/test.mem", embedder=HashEmbedder(dimension=64))
+        db = CortexaDB.open("/tmp/test.mem", embedder=HashEmbedder(dimension=64))
         db.remember("hello world")
     """
 

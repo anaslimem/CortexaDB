@@ -1,7 +1,7 @@
-//! Embedded `AgentLite` facade — simplified API for agent memory.
+//! Embedded `CortexaDB` facade — simplified API for agent memory.
 //!
-//! This is the recommended entry point for using AgentLite as a library.
-//! It wraps [`AgentLiteStore`] and hides planner/engine/index details behind
+//! This is the recommended entry point for using CortexaDB as a library.
+//! It wraps [`CortexaDBStore`] and hides planner/engine/index details behind
 //! five core operations: `open`, `remember`, `ask`, `connect`, `compact`.
 
 use std::collections::HashMap;
@@ -12,13 +12,13 @@ use crate::core::memory_entry::{MemoryEntry, MemoryId};
 use crate::core::state_machine::StateMachineError;
 use crate::engine::{CapacityPolicy, SyncPolicy};
 use crate::query::hybrid::{QueryEmbedder, QueryOptions};
-use crate::store::{CheckpointPolicy, AgentLiteStore, AgentLiteStoreError};
+use crate::store::{CheckpointPolicy, CortexaDBStore, CortexaDBStoreError};
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-/// Returned by [`AgentLite::ask`] — a scored memory hit.
+/// Returned by [`CortexaDB::ask`] — a scored memory hit.
 #[derive(Debug, Clone)]
 pub struct Hit {
     pub id: u64,
@@ -47,16 +47,16 @@ pub struct Stats {
     pub storage_version: u32,
 }
 
-/// Configuration for opening a AgentLite database.
+/// Configuration for opening a CortexaDB database.
 #[derive(Debug, Clone)]
-pub struct AgentLiteConfig {
+pub struct CortexaDBConfig {
     pub vector_dimension: usize,
     pub sync_policy: SyncPolicy,
     pub checkpoint_policy: CheckpointPolicy,
     pub capacity_policy: CapacityPolicy,
 }
 
-impl Default for AgentLiteConfig {
+impl Default for CortexaDBConfig {
     fn default() -> Self {
         Self {
             vector_dimension: 3,
@@ -74,11 +74,11 @@ impl Default for AgentLiteConfig {
 // Error
 // ---------------------------------------------------------------------------
 
-/// Errors from the AgentLite facade.
+/// Errors from the CortexaDB facade.
 #[derive(Debug, thiserror::Error)]
-pub enum AgentLiteError {
+pub enum CortexaDBError {
     #[error("Store error: {0}")]
-    Store(#[from] AgentLiteStoreError),
+    Store(#[from] CortexaDBStoreError),
     #[error("State machine error: {0}")]
     StateMachine(#[from] StateMachineError),
     #[error("IO error: {0}")]
@@ -87,7 +87,7 @@ pub enum AgentLiteError {
     MemoryNotFound(u64),
 }
 
-pub type Result<T> = std::result::Result<T, AgentLiteError>;
+pub type Result<T> = std::result::Result<T, CortexaDBError>;
 
 // ---------------------------------------------------------------------------
 // Embedder adapter (used internally for `ask`)
@@ -104,38 +104,38 @@ impl QueryEmbedder for StaticEmbedder {
 }
 
 // ---------------------------------------------------------------------------
-// AgentLite facade
+// CortexaDB facade
 // ---------------------------------------------------------------------------
 
 /// Embedded, file-backed agent memory database.
 ///
 /// # Example
 /// ```ignore
-/// let db = AgentLite::open("agent.mem")?;
+/// let db = CortexaDB::open("agent.mem")?;
 /// let id = db.remember(vec![1.0, 0.0, 0.0], None)?;
 /// let hits = db.ask(vec![1.0, 0.0, 0.0], 5)?;
 /// ```
-pub struct AgentLite {
-    inner: AgentLiteStore,
+pub struct CortexaDB {
+    inner: CortexaDBStore,
     next_id: std::sync::atomic::AtomicU64,
 }
 
-impl AgentLite {
-    /// Open or create a AgentLite database at the given path with default config.
+impl CortexaDB {
+    /// Open or create a CortexaDB database at the given path with default config.
     pub fn open(path: &str) -> Result<Self> {
-        Self::open_with_config(path, AgentLiteConfig::default())
+        Self::open_with_config(path, CortexaDBConfig::default())
     }
 
-    /// Open or create a AgentLite database with custom configuration.
-    pub fn open_with_config(path: &str, config: AgentLiteConfig) -> Result<Self> {
+    /// Open or create a CortexaDB database with custom configuration.
+    pub fn open_with_config(path: &str, config: CortexaDBConfig) -> Result<Self> {
         let base = PathBuf::from(path);
         std::fs::create_dir_all(&base)?;
 
-        let wal_path = base.join("agentlite.wal");
+        let wal_path = base.join("cortexadb.wal");
         let segments_dir = base.join("segments");
 
         let store = if wal_path.exists() {
-            AgentLiteStore::recover_with_policies(
+            CortexaDBStore::recover_with_policies(
                 &wal_path,
                 &segments_dir,
                 config.vector_dimension,
@@ -144,7 +144,7 @@ impl AgentLite {
                 config.capacity_policy,
             )?
         } else {
-            AgentLiteStore::new_with_policies(
+            CortexaDBStore::new_with_policies(
                 &wal_path,
                 &segments_dir,
                 config.vector_dimension,
@@ -317,7 +317,7 @@ impl AgentLite {
         let entry = snapshot
             .state_machine()
             .get_memory(MemoryId(id))
-            .map_err(|_e| AgentLiteError::MemoryNotFound(id))?;
+            .map_err(|_e| CortexaDBError::MemoryNotFound(id))?;
 
         Ok(Memory {
             id: entry.id.0,
@@ -371,8 +371,8 @@ impl AgentLite {
         }
     }
 
-    /// Access the underlying `AgentLiteStore` for advanced operations.
-    pub fn store(&self) -> &AgentLiteStore {
+    /// Access the underlying `CortexaDBStore` for advanced operations.
+    pub fn store(&self) -> &CortexaDBStore {
         &self.inner
     }
 }
@@ -390,7 +390,7 @@ mod tests {
     fn test_open_remember_ask() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
-        let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
 
         let id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
         let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
@@ -405,7 +405,7 @@ mod tests {
     fn test_connect_and_stats() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
-        let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
 
         let id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
         let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
@@ -423,13 +423,13 @@ mod tests {
         let path = temp.path().join("testdb");
 
         {
-            let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+            let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
             db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
             db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
         }
 
         // Reopen — should recover from WAL.
-        let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
         let stats = db.stats();
         assert_eq!(stats.entries, 2);
 
@@ -443,7 +443,7 @@ mod tests {
         let path = temp.path().join("testdb");
 
         {
-            let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+            let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
             db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
             db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
             db.checkpoint().unwrap();
@@ -451,7 +451,7 @@ mod tests {
             db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
         }
 
-        let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
         let stats = db.stats();
         assert_eq!(stats.entries, 3);
     }
@@ -460,7 +460,7 @@ mod tests {
     fn test_compact() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
-        let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
 
         db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
         db.compact().unwrap();
@@ -470,7 +470,7 @@ mod tests {
     fn test_remember_with_metadata() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
-        let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
 
         let mut meta = HashMap::new();
         meta.insert("source".to_string(), "test".to_string());
@@ -490,7 +490,7 @@ mod tests {
     fn test_namespace_support() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
-        let db = AgentLite::open(path.to_str().unwrap()).unwrap();
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
 
         let id1 = db.remember_in_namespace("agent_b", vec![0.0, 1.0, 0.0], None).unwrap();
         let _id2 = db.remember_in_namespace("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();

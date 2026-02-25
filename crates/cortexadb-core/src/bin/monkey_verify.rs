@@ -1,18 +1,18 @@
 use std::path::PathBuf;
 
-use agentlite_core::core::memory_entry::MemoryId;
-use agentlite_core::store::AgentLiteStore;
+use cortexadb_core::core::memory_entry::MemoryId;
+use cortexadb_core::store::CortexaDBStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("agentlite_monkey"));
+        .unwrap_or_else(|| std::env::temp_dir().join("cortexadb_monkey"));
 
     let wal = data_dir.join("monkey.wal");
     let seg = data_dir.join("segments");
 
-    let store = AgentLiteStore::recover(&wal, &seg, 3)?;
+    let store = CortexaDBStore::recover(&wal, &seg, 3)?;
     let state = store.state_machine();
 
     let entries = state.len() as u64;

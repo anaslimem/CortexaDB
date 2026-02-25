@@ -1,15 +1,15 @@
 """
-agentlite.providers.openai — OpenAI embedding wrapper.
+cortexadb.providers.openai — OpenAI embedding wrapper.
 
 Requires:
     pip install openai
 
 Usage::
 
-    from agentlite import AgentLite
-    from agentlite.providers.openai import OpenAIEmbedder
+    from cortexadb import CortexaDB
+    from cortexadb.providers.openai import OpenAIEmbedder
 
-    db = AgentLite.open(
+    db = CortexaDB.open(
         "agent.mem",
         embedder=OpenAIEmbedder(api_key="sk-...", model="text-embedding-3-small"),
     )

@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/agentlite-core",
-    "crates/agentlite-py",
+    "crates/cortexadb-core",
+    "crates/cortexadb-py",
 ]
 resolver = "2"

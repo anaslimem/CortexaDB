@@ -7,4 +7,4 @@ pub mod storage;
 pub mod store;
 
 // Re-export the primary facade types for convenience.
-pub use facade::{Memory, AgentLite, AgentLiteConfig, AgentLiteError, Stats};
+pub use facade::{Memory, CortexaDB, CortexaDBConfig, CortexaDBError, Stats};

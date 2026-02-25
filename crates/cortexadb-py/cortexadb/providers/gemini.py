@@ -1,15 +1,15 @@
 """
-agentlite.providers.gemini — Google Gemini embedding wrapper.
+cortexadb.providers.gemini — Google Gemini embedding wrapper.
 
 Requires:
     pip install google-generativeai
 
 Usage::
 
-    from agentlite import AgentLite
-    from agentlite.providers.gemini import GeminiEmbedder
+    from cortexadb import CortexaDB
+    from cortexadb.providers.gemini import GeminiEmbedder
 
-    db = AgentLite.open(
+    db = CortexaDB.open(
         "agent.mem",
         embedder=GeminiEmbedder(api_key="AIza...", model="models/text-embedding-004"),
     )

@@ -1,6 +1,6 @@
-use agentlite_core::core::memory_entry::{MemoryEntry, MemoryId};
-use agentlite_core::query::{QueryEmbedder, QueryOptions};
-use agentlite_core::store::AgentLiteStore;
+use cortexadb_core::core::memory_entry::{MemoryEntry, MemoryId};
+use cortexadb_core::query::{QueryEmbedder, QueryOptions};
+use cortexadb_core::store::CortexaDBStore;
 
 struct DemoEmbedder;
 
@@ -15,7 +15,7 @@ impl QueryEmbedder for DemoEmbedder {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let base = std::env::temp_dir().join("agentlite_manual_demo");
+    let base = std::env::temp_dir().join("cortexadb_manual_demo");
     std::fs::create_dir_all(&base)?;
     let wal = base.join("demo.wal");
     let seg = base.join("segments");
@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::remove_dir_all(&seg)?;
     }
 
-    let store = AgentLiteStore::new(&wal, &seg, 3)?;
+    let store = CortexaDBStore::new(&wal, &seg, 3)?;
 
     store.insert_memory(
         MemoryEntry::new(
@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let out = store.query("rust", options, &DemoEmbedder)?;
 
-    println!("--- AgentLite Manual Demo ---");
+    println!("--- CortexaDB Manual Demo ---");
     println!("WAL length: {}", store.wal_len());
     println!("Indexed embeddings: {}", store.indexed_embeddings());
     println!("Hits: {}", out.hits.len());

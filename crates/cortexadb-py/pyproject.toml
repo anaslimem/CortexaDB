@@ -3,7 +3,7 @@ requires = ["maturin>=1.0"]
 build-backend = "maturin"
 
 [project]
-name = "agentlite"
+name = "cortexadb"
 version = "0.1.0"
 requires-python = ">=3.9"
 description = "Fast, embedded vector + graph memory for AI agents"
@@ -14,10 +14,10 @@ license = { text = "GPL-3.0" }
 readme = "../../README.md"
 
 [project.urls]
-Homepage = "https://github.com/anaslimem/AgentLite"
-Repository = "https://github.com/anaslimem/AgentLite"
-"Bug Tracker" = "https://github.com/anaslimem/AgentLite/issues"
+Homepage = "https://github.com/anaslimem/CortexaDB"
+Repository = "https://github.com/anaslimem/CortexaDB"
+"Bug Tracker" = "https://github.com/anaslimem/CortexaDB/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
-module-name = "agentlite._agentlite"
+module-name = "cortexadb._cortexadb"

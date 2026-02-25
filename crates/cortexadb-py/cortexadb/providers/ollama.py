@@ -1,5 +1,5 @@
 """
-agentlite.providers.ollama — Ollama local embedding wrapper.
+cortexadb.providers.ollama — Ollama local embedding wrapper.
 
 Requires:
     pip install ollama
@@ -7,10 +7,10 @@ Requires:
 
 Usage::
 
-    from agentlite import AgentLite
-    from agentlite.providers.ollama import OllamaEmbedder
+    from cortexadb import CortexaDB
+    from cortexadb.providers.ollama import OllamaEmbedder
 
-    db = AgentLite.open(
+    db = CortexaDB.open(
         "agent.mem",
         embedder=OllamaEmbedder(model="nomic-embed-text"),
     )
@@ -43,7 +43,7 @@ class OllamaEmbedder(Embedder):
 
         # Pull the model first (one-time):
         #   $ ollama pull nomic-embed-text
-        from agentlite.providers.ollama import OllamaEmbedder
+        from cortexadb.providers.ollama import OllamaEmbedder
         embedder = OllamaEmbedder(model="nomic-embed-text")
     """
 

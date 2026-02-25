@@ -1,15 +1,15 @@
 [package]
-name = "agentlite-py"
+name = "cortexadb-py"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "_agentlite"
+name = "_cortexadb"
 crate-type = ["cdylib"]
 
 [dependencies]
-agentlite-core = { path = "../agentlite-core" }
+cortexadb-core = { path = "../cortexadb-core" }
 pyo3 = { version = "0.24", features = ["extension-module"] }
 
 [package.metadata.maturin]
-name = "agentlite"
+name = "cortexadb"

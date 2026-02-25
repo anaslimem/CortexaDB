@@ -1,6 +1,6 @@
-//! PyO3 bindings for AgentLite — embedded vector + graph memory for AI agents.
+//! PyO3 bindings for CortexaDB — embedded vector + graph memory for AI agents.
 //!
-//! Exposes the Rust `facade::AgentLite` as a native Python module.
+//! Exposes the Rust `facade::CortexaDB` as a native Python module.
 
 use std::collections::HashMap;
 
@@ -9,37 +9,37 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use agentlite_core::engine::{CapacityPolicy, SyncPolicy};
-use agentlite_core::facade;
-use agentlite_core::store::CheckpointPolicy;
+use cortexadb_core::engine::{CapacityPolicy, SyncPolicy};
+use cortexadb_core::facade;
+use cortexadb_core::store::CheckpointPolicy;
 
 // ---------------------------------------------------------------------------
 // Custom exception
 // ---------------------------------------------------------------------------
 
-create_exception!(agentlite, AgentLiteError, PyException);
-create_exception!(agentlite, AgentLiteNotFoundError, AgentLiteError);
-create_exception!(agentlite, AgentLiteConfigError, AgentLiteError);
-create_exception!(agentlite, AgentLiteIOError, AgentLiteError);
+create_exception!(cortexadb, CortexaDBError, PyException);
+create_exception!(cortexadb, CortexaDBNotFoundError, CortexaDBError);
+create_exception!(cortexadb, CortexaDBConfigError, CortexaDBError);
+create_exception!(cortexadb, CortexaDBIOError, CortexaDBError);
 
 
-/// Map core AgentLiteError to specific Python exceptions.
-fn map_agentlite_err(e: facade::AgentLiteError) -> PyErr {
+/// Map core CortexaDBError to specific Python exceptions.
+fn map_cortexadb_err(e: facade::CortexaDBError) -> PyErr {
     match e {
-        facade::AgentLiteError::MemoryNotFound(id) => {
-            AgentLiteNotFoundError::new_err(format!("Memory ID {} not found", id))
+        facade::CortexaDBError::MemoryNotFound(id) => {
+            CortexaDBNotFoundError::new_err(format!("Memory ID {} not found", id))
         }
-        facade::AgentLiteError::Io(io_err) => AgentLiteIOError::new_err(io_err.to_string()),
-        facade::AgentLiteError::Store(store_err) => match store_err {
-            agentlite_core::store::AgentLiteStoreError::Vector(
-                agentlite_core::index::vector::VectorError::DimensionMismatch { expected, actual },
-            ) => AgentLiteConfigError::new_err(format!(
+        facade::CortexaDBError::Io(io_err) => CortexaDBIOError::new_err(io_err.to_string()),
+        facade::CortexaDBError::Store(store_err) => match store_err {
+            cortexadb_core::store::CortexaDBStoreError::Vector(
+                cortexadb_core::index::vector::VectorError::DimensionMismatch { expected, actual },
+            ) => CortexaDBConfigError::new_err(format!(
                 "Dimension mismatch: expected {}, got {}",
                 expected, actual
             )),
-            _ => AgentLiteError::new_err(store_err.to_string()),
+            _ => CortexaDBError::new_err(store_err.to_string()),
         },
-        _ => AgentLiteError::new_err(e.to_string()),
+        _ => CortexaDBError::new_err(e.to_string()),
     }
 }
 
@@ -47,7 +47,7 @@ fn map_agentlite_err(e: facade::AgentLiteError) -> PyErr {
 // Hit — lightweight query result
 // ---------------------------------------------------------------------------
 
-/// A scored query hit. Returned by `AgentLite.ask_embedding()`.
+/// A scored query hit. Returned by `CortexaDB.ask_embedding()`.
 ///
 /// Attributes:
 ///     id (int): Memory identifier.
@@ -78,7 +78,7 @@ impl PyHit {
 // Memory — full retrieval object
 // ---------------------------------------------------------------------------
 
-/// A full memory entry. Returned by `AgentLite.get()`.
+/// A full memory entry. Returned by `CortexaDB.get()`.
 ///
 /// Attributes:
 ///     id (int): Memory identifier.
@@ -126,7 +126,7 @@ impl PyMemory {
 // Stats
 // ---------------------------------------------------------------------------
 
-/// Database statistics. Returned by `AgentLite.stats()`.
+/// Database statistics. Returned by `CortexaDB.stats()`.
 ///
 /// Attributes:
 ///     entries (int): Total number of stored memories.
@@ -161,35 +161,35 @@ impl PyStats {
 }
 
 // ---------------------------------------------------------------------------
-// AgentLite — main database handle
+// CortexaDB — main database handle
 // ---------------------------------------------------------------------------
 
 /// Embedded vector + graph memory database for AI agents.
 ///
 /// Example:
-///     >>> db = AgentLite.open("/tmp/agent.mem", dimension=128)
+///     >>> db = CortexaDB.open("/tmp/agent.mem", dimension=128)
 ///     >>> mid = db.remember_embedding([0.1] * 128)
 ///     >>> hits = db.ask_embedding([0.1] * 128, top_k=5)
 ///     >>> print(hits[0].score)
-#[pyclass(name = "AgentLite")]
-struct PyAgentLite {
-    inner: facade::AgentLite,
+#[pyclass(name = "CortexaDB")]
+struct PyCortexaDB {
+    inner: facade::CortexaDB,
     dimension: usize,
 }
 
 #[pymethods]
-impl PyAgentLite {
-    /// Open or create a AgentLite database.
+impl PyCortexaDB {
+    /// Open or create a CortexaDB database.
     ///
     /// Args:
     ///     path: Directory path for the database files.
     ///     dimension: Vector embedding dimension (required).
     ///
     /// Returns:
-    ///     AgentLite: A database handle.
+    ///     CortexaDB: A database handle.
     ///
     /// Raises:
-    ///     AgentLiteError: If the database cannot be opened or the dimension
+    ///     CortexaDBError: If the database cannot be opened or the dimension
     ///         mismatches an existing database.
     #[staticmethod]
     #[pyo3(
@@ -198,20 +198,20 @@ impl PyAgentLite {
     )]
     fn open(path: &str, dimension: usize, sync: String, max_entries: Option<usize>) -> PyResult<Self> {
         if dimension == 0 {
-            return Err(AgentLiteConfigError::new_err("dimension must be > 0"));
+            return Err(CortexaDBConfigError::new_err("dimension must be > 0"));
         }
 
         let sync_policy = match sync.to_lowercase().as_str() {
             "strict" => SyncPolicy::Strict,
             "async"  => SyncPolicy::Async { interval_ms: 10 },
             "batch"  => SyncPolicy::Batch { max_ops: 64, max_delay_ms: 50 },
-            other    => return Err(AgentLiteConfigError::new_err(format!(
+            other    => return Err(CortexaDBConfigError::new_err(format!(
                 "unknown sync policy '{}'. Valid values: 'strict', 'async', 'batch'",
                 other,
             ))),
         };
 
-        let config = facade::AgentLiteConfig {
+        let config = facade::CortexaDBConfig {
             vector_dimension: dimension,
             sync_policy,
             // Disabled: the Drop impl's checkpoint_now() truncates the WAL
@@ -222,18 +222,18 @@ impl PyAgentLite {
             capacity_policy: CapacityPolicy::new(max_entries, None),
         };
 
-        let db = facade::AgentLite::open_with_config(path, config).map_err(map_agentlite_err)?;
+        let db = facade::CortexaDB::open_with_config(path, config).map_err(map_cortexadb_err)?;
 
         // Validate dimension matches existing data.
         let stats = db.stats();
         if stats.entries > 0 && stats.vector_dimension != dimension {
-            return Err(AgentLiteConfigError::new_err(format!(
+            return Err(CortexaDBConfigError::new_err(format!(
                 "dimension mismatch: database has dimension={}, but open() was called with dimension={}",
                 stats.vector_dimension, dimension,
             )));
         }
 
-        Ok(PyAgentLite {
+        Ok(PyCortexaDB {
             inner: db,
             dimension,
         })
@@ -250,7 +250,7 @@ impl PyAgentLite {
     ///     int: The assigned memory ID.
     ///
     /// Raises:
-    ///     AgentLiteError: If the embedding dimension is wrong.
+    ///     CortexaDBError: If the embedding dimension is wrong.
     #[pyo3(
         text_signature = "(self, embedding, *, metadata=None, namespace='default', content='')",
         signature = (embedding, *, metadata=None, namespace="default".to_string(), content="".to_string())
@@ -264,7 +264,7 @@ impl PyAgentLite {
         content: String,
     ) -> PyResult<u64> {
         if embedding.len() != self.dimension {
-            return Err(AgentLiteError::new_err(format!(
+            return Err(CortexaDBError::new_err(format!(
                 "embedding dimension mismatch: expected {}, got {}",
                 self.dimension,
                 embedding.len(),
@@ -277,7 +277,7 @@ impl PyAgentLite {
             } else {
                  self.inner.remember_with_content(&namespace, content.into_bytes(), embedding, metadata)
             }
-        }).map_err(map_agentlite_err)?;
+        }).map_err(map_cortexadb_err)?;
         Ok(id)
     }
 
@@ -291,7 +291,7 @@ impl PyAgentLite {
     ///     list[Hit]: Scored results sorted by descending relevance.
     ///
     /// Raises:
-    ///     AgentLiteError: If the embedding dimension is wrong.
+    ///     CortexaDBError: If the embedding dimension is wrong.
     #[pyo3(
         text_signature = "(self, embedding, *, top_k=5, filter=None)",
         signature = (embedding, *, top_k=5, filter=None)
@@ -304,14 +304,14 @@ impl PyAgentLite {
         filter: Option<HashMap<String, String>>,
     ) -> PyResult<Vec<PyHit>> {
         if embedding.len() != self.dimension {
-            return Err(AgentLiteError::new_err(format!(
+            return Err(CortexaDBError::new_err(format!(
                 "embedding dimension mismatch: expected {}, got {}",
                 self.dimension,
                 embedding.len(),
             )));
         }
 
-        let results = py.allow_threads(|| self.inner.ask(embedding, top_k, filter)).map_err(map_agentlite_err)?;
+        let results = py.allow_threads(|| self.inner.ask(embedding, top_k, filter)).map_err(map_cortexadb_err)?;
         Ok(results
             .into_iter()
             .map(|m| PyHit {
@@ -332,7 +332,7 @@ impl PyAgentLite {
     ///     List of Hit objects ranked by score, scoped to the namespace.
     ///
     /// Raises:
-    ///     AgentLiteError: If the embedding dimension is wrong.
+    ///     CortexaDBError: If the embedding dimension is wrong.
     #[pyo3(
         text_signature = "(self, namespace, embedding, *, top_k=5, filter=None)",
         signature = (namespace, embedding, *, top_k=5, filter=None)
@@ -346,7 +346,7 @@ impl PyAgentLite {
         filter: Option<HashMap<String, String>>,
     ) -> PyResult<Vec<PyHit>> {
         if embedding.len() != self.dimension {
-            return Err(AgentLiteError::new_err(format!(
+            return Err(CortexaDBError::new_err(format!(
                 "embedding dimension mismatch: expected {}, got {}",
                 self.dimension,
                 embedding.len(),
@@ -356,7 +356,7 @@ impl PyAgentLite {
         let ns = namespace.to_string();
         let results = py
             .allow_threads(|| self.inner.ask_in_namespace(&ns, embedding, top_k, filter))
-            .map_err(map_agentlite_err)?;
+            .map_err(map_cortexadb_err)?;
 
         Ok(results
             .into_iter()
@@ -376,10 +376,10 @@ impl PyAgentLite {
     ///     Memory: The full memory entry.
     ///
     /// Raises:
-    ///     AgentLiteError: If the memory ID does not exist.
+    ///     CortexaDBError: If the memory ID does not exist.
     #[pyo3(text_signature = "(self, mid)")]
     fn get(&self, mid: u64) -> PyResult<PyMemory> {
-        let entry = self.inner.get_memory(mid).map_err(map_agentlite_err)?;
+        let entry = self.inner.get_memory(mid).map_err(map_cortexadb_err)?;
 
         Ok(PyMemory {
             id: entry.id,
@@ -397,10 +397,10 @@ impl PyAgentLite {
     ///     mid: Memory identifier.
     ///
     /// Raises:
-    ///     AgentLiteError: If the memory ID does not exist or deletion fails.
+    ///     CortexaDBError: If the memory ID does not exist or deletion fails.
     #[pyo3(text_signature = "(self, mid)")]
     fn delete_memory(&self, py: Python<'_>, mid: u64) -> PyResult<()> {
-        py.allow_threads(|| self.inner.delete_memory(mid)).map_err(map_agentlite_err)
+        py.allow_threads(|| self.inner.delete_memory(mid)).map_err(map_cortexadb_err)
     }
 
     /// Create an edge between two memories.
@@ -411,12 +411,12 @@ impl PyAgentLite {
     ///     relation: Relation label for the edge.
     ///
     /// Raises:
-    ///     AgentLiteError: If either memory ID does not exist.
+    ///     CortexaDBError: If either memory ID does not exist.
     #[pyo3(text_signature = "(self, from_id, to_id, relation)")]
     fn connect(&self, from_id: u64, to_id: u64, relation: &str) -> PyResult<()> {
         self.inner
             .connect(from_id, to_id, relation)
-            .map_err(map_agentlite_err)
+            .map_err(map_cortexadb_err)
     }
 
     /// Retrieve the outgoing graph connections from a specific memory.
@@ -428,36 +428,36 @@ impl PyAgentLite {
     ///     List of ``(target_id, relation_label)`` tuples.
     ///
     /// Raises:
-    ///     AgentLiteError: If the memory ID does not exist.
+    ///     CortexaDBError: If the memory ID does not exist.
     #[pyo3(text_signature = "(self, id)")]
     fn get_neighbors(&self, id: u64) -> PyResult<Vec<(u64, String)>> {
-        self.inner.get_neighbors(id).map_err(map_agentlite_err)
+        self.inner.get_neighbors(id).map_err(map_cortexadb_err)
     }
 
     /// Compact on-disk segment storage (removes tombstoned entries).
     ///
     /// Raises:
-    ///     AgentLiteError: If compaction fails.
+    ///     CortexaDBError: If compaction fails.
     #[pyo3(text_signature = "(self)")]
     fn compact(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| self.inner.compact()).map_err(map_agentlite_err)
+        py.allow_threads(|| self.inner.compact()).map_err(map_cortexadb_err)
     }
 
     /// Flush all pending WAL writes to disk.
     /// Raises:
-    ///     AgentLiteError: If the flush fails.
+    ///     CortexaDBError: If the flush fails.
     #[pyo3(text_signature = "(self)")]
     fn flush(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| self.inner.flush()).map_err(map_agentlite_err)
+        py.allow_threads(|| self.inner.flush()).map_err(map_cortexadb_err)
     }
 
     /// Force a checkpoint (snapshot state + truncate WAL).
     ///
     /// Raises:
-    ///     AgentLiteError: If the checkpoint fails.
+    ///     CortexaDBError: If the checkpoint fails.
     #[pyo3(text_signature = "(self)")]
     fn checkpoint(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| self.inner.checkpoint()).map_err(map_agentlite_err)
+        py.allow_threads(|| self.inner.checkpoint()).map_err(map_cortexadb_err)
     }
 
     /// Get database statistics.
@@ -479,7 +479,7 @@ impl PyAgentLite {
     fn __repr__(&self) -> String {
         let s = self.inner.stats();
         format!(
-            "AgentLite(entries={}, dimension={}, indexed={})",
+            "CortexaDB(entries={}, dimension={}, indexed={})",
             s.entries, self.dimension, s.indexed_embeddings,
         )
     }
@@ -506,16 +506,16 @@ impl PyAgentLite {
 // Module
 // ---------------------------------------------------------------------------
 
-/// AgentLite — embedded vector + graph memory for AI agents.
+/// CortexaDB — embedded vector + graph memory for AI agents.
 #[pymodule]
-fn _agentlite(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PyAgentLite>()?;
+fn _cortexadb(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyCortexaDB>()?;
     m.add_class::<PyHit>()?;
     m.add_class::<PyMemory>()?;
     m.add_class::<PyStats>()?;
-    m.add("AgentLiteError", m.py().get_type::<AgentLiteError>())?;
-    m.add("AgentLiteNotFoundError", m.py().get_type::<AgentLiteNotFoundError>())?;
-    m.add("AgentLiteConfigError", m.py().get_type::<AgentLiteConfigError>())?;
-    m.add("AgentLiteIOError", m.py().get_type::<AgentLiteIOError>())?;
+    m.add("CortexaDBError", m.py().get_type::<CortexaDBError>())?;
+    m.add("CortexaDBNotFoundError", m.py().get_type::<CortexaDBNotFoundError>())?;
+    m.add("CortexaDBConfigError", m.py().get_type::<CortexaDBConfigError>())?;
+    m.add("CortexaDBIOError", m.py().get_type::<CortexaDBIOError>())?;
     Ok(())
 }

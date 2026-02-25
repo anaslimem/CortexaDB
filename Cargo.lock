@@ -3,29 +3,6 @@
 version = 4
 
 [[package]]
-name = "agentlite-core"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "bincode",
- "chrono",
- "crc",
- "proptest",
- "rayon",
- "serde",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "agentlite-py"
-version = "0.1.0"
-dependencies = [
- "agentlite-core",
- "pyo3",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -126,6 +103,29 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "cortexadb-core"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "bincode",
+ "chrono",
+ "crc",
+ "proptest",
+ "rayon",
+ "serde",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "cortexadb-py"
+version = "0.1.0"
+dependencies = [
+ "cortexadb-core",
+ "pyo3",
+]
 
 [[package]]
 name = "crc"
