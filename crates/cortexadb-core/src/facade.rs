@@ -109,11 +109,20 @@ impl QueryEmbedder for StaticEmbedder {
 
 /// Embedded, file-backed agent memory database.
 ///
-/// # Example
-/// ```ignore
-/// let db = CortexaDB::open("agent.mem")?;
+/// `CortexaDB` provides a high-level API for storing and retrieving memories
+/// with vector embeddings, graph relationships, and metadata filtering.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use cortexadb_core::{CortexaDB, CortexaDBConfig};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let db = CortexaDB::open("my_agent.db")?;
 /// let id = db.remember(vec![1.0, 0.0, 0.0], None)?;
-/// let hits = db.ask(vec![1.0, 0.0, 0.0], 5)?;
+/// let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None)?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct CortexaDB {
     inner: CortexaDBStore,
@@ -122,11 +131,20 @@ pub struct CortexaDB {
 
 impl CortexaDB {
     /// Open or create a CortexaDB database at the given path with default config.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`CortexaDBError`] if the directory cannot be created or the
+    /// WAL/segments are corrupted and cannot be recovered.
     pub fn open(path: &str) -> Result<Self> {
         Self::open_with_config(path, CortexaDBConfig::default())
     }
 
     /// Open or create a CortexaDB database with custom configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`CortexaDBError`] if initialization fails.
     pub fn open_with_config(path: &str, config: CortexaDBConfig) -> Result<Self> {
         let base = PathBuf::from(path);
         std::fs::create_dir_all(&base)?;
@@ -171,7 +189,25 @@ impl CortexaDB {
 
     /// Store a new memory with the given embedding and optional metadata.
     ///
-    /// Returns the assigned `MemoryId`.
+    /// The memory is placed in the "default" namespace.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use cortexadb_core::CortexaDB;
+    /// # use std::collections::HashMap;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let db = CortexaDB::open("test")?;
+    /// let mut meta = HashMap::new();
+    /// meta.insert("type".to_string(), "thought".to_string());
+    /// let id = db.remember(vec![0.1, 0.2, 0.3], Some(meta))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CortexaDBError`] if the write-ahead log fails to append the entry.
     pub fn remember(
         &self,
         embedding: Vec<f32>,
@@ -235,8 +271,12 @@ impl CortexaDB {
 
     /// Query the database for the top-k most relevant memories.
     ///
-    /// `query_embedding` is the vector to search for. The returned hits
-    /// are scored and sorted by descending relevance.
+    /// The search uses cosine similarity on the vector embeddings and can optionally
+    /// filter by metadata values.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CortexaDBError`] if the query execution fails.
     pub fn ask(
         &self,
         query_embedding: Vec<f32>,
@@ -331,18 +371,36 @@ impl CortexaDB {
     }
 
     /// Delete a memory by its identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CortexaDBError`] if the deletion cannot be logged.
     pub fn delete_memory(&self, id: u64) -> Result<()> {
         self.inner.delete_memory(MemoryId(id))?;
         Ok(())
     }
 
     /// Create an edge (relationship) between two memories.
+    ///
+    /// Relationships are directed and labeled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CortexaDBError`] if either memory ID does not exist or the
+    /// write-ahead log fails.
     pub fn connect(&self, from: u64, to: u64, relation: &str) -> Result<()> {
         self.inner.add_edge(MemoryId(from), MemoryId(to), relation.to_string())?;
         Ok(())
     }
 
     /// Compact on-disk segment storage (removes tombstoned entries).
+    ///
+    /// This is a maintenance operation that reclaims space on disk. It is
+    /// safe to run while the database is in use.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CortexaDBError`] if IO fails during compaction.
     pub fn compact(&self) -> Result<()> {
         self.inner.compact_segments()?;
         Ok(())
@@ -355,6 +413,13 @@ impl CortexaDB {
     }
 
     /// Force a checkpoint now (snapshot state + truncate WAL).
+    ///
+    /// Checkpoints accelerate future startups by creating a snapshot of the
+    /// current state and clearing the write-ahead log.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CortexaDBError`] if IO fails during checkpointing.
     pub fn checkpoint(&self) -> Result<()> {
         self.inner.checkpoint_now()?;
         Ok(())

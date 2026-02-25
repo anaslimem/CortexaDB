@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Anas Limem <limemanas0@gmail.com>"]
 description = "Fast, embedded vector + graph memory for AI agents"
 repository = "https://github.com/anaslimem/CortexaDB"
-license = "GPL-3.0"
+license = "MIT OR Apache-2.0"
 readme = "../../README.md"
 
 [dependencies]
@@ -20,3 +20,8 @@ arc-swap = "1.8.2"
 [dev-dependencies]
 proptest = "1.4"
 tempfile = "3.8"
+criterion = "0.5"
+
+[[bench]]
+name = "storage_bench"
+harness = false

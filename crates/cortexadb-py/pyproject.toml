@@ -10,7 +10,7 @@ description = "Fast, embedded vector + graph memory for AI agents"
 authors = [
     { name = "Anas Limem", email = "limemanas0@gmail.com" },
 ]
-license = { text = "GPL-3.0" }
+license = { text = "MIT OR Apache-2.0" }
 readme = "../../README.md"
 
 [project.urls]

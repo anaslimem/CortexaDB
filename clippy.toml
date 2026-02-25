@@ -1,0 +1,8 @@
+# Clippy configuration
+# We use standard lints plus some stricter ones for a database project.
+
+# Deny warnings in CI
+# allow-clippy-pedantic-in-test = true
+
+# Specific lints
+warn-on-all-items-with-docs = true
