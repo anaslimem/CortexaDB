@@ -1,267 +1,125 @@
-# Mnemos
+# Mnemos: SQLite for AI Agents
 
 [![Build](https://github.com/anaslimem/Mnemos/actions/workflows/rust.yml/badge.svg)](https://github.com/anaslimem/Mnemos/actions/workflows/rust.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
-[![Status: Experimental](https://img.shields.io/badge/Status-Experimental-orange.svg)](#current-status)
+[![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
 
-> ** Experimental** — Mnemos is under active development (v0.1). APIs may change. See [Known Limitations](KNOWN_LIMITATIONS.md).
+**Mnemos** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
 
-Mnemos is a simple, fast, and reliable vector + graph database for AI agents — like SQLite, but for agent memory.  
-It provides durable memory storage, deterministic replay, and hybrid retrieval across:
+Think of it as **SQLite, but with semantic and relational intelligence for your agents.**
 
-- vector similarity (semantic search),
-- graph relationships (connected memories),
-- temporal constraints (time-aware recall).
+---
 
-Mnemos is built as an **embedded Rust library** — no server required.
+##  Quickstart
 
-## Why Mnemos
+### Python (Recommended)
+Mnemos is designed to be extremely easy to use from Python via high-performance Rust bindings.
 
-General databases are excellent at generic data workloads. Agent memory workloads need extra semantics:
-
-- append-first durability for command replay,
-- memory-native fields (`importance`, `created_at`, embeddings),
-- hybrid retrieval combining meaning + relations + recency,
-- deterministic behavior for reproducible agent runs.
-
-Mnemos is designed specifically for that shape of problem.
-
-## Current Capabilities
-
-- Durable command log (WAL) with checksum validation.
-- Append-only segment storage for memory payloads.
-- Deterministic in-memory state machine.
-- Vector index with cosine similarity (serial + Rayon parallel search).
-- Graph traversal index (BFS/DFS/pathfinding).
-- Temporal index for range and recency operations.
-- Combined weighted retrieval.
-- Capacity/eviction engine (`max_entries`, `max_bytes`) using deterministic delete commands.
-- Segment compaction with atomic directory swap.
-
-## Quickstart
-
-### Rust (Embedded Core)
-```bash
-git clone https://github.com/anaslimem/Mnemos.git
-cd Mnemos
-cargo run -p mnemos-core --bin manual_store
-```
-
-### Python (Native Bindings)
 ```python
 from mnemos import Mnemos
 
-with Mnemos.open("agent.mem", dimension=128) as db:
-    mid = db.remember_embedding([0.1] * 128)
-    hits = db.ask_embedding([0.1] * 128, top_k=5)
-    print(f"Top hit score: {hits[0].score:.3f}")
+# Open database (auto-creates if missing)
+# You can provide a manual dimension or an Embedder instance
+db = Mnemos.open("agent.mem", dimension=1536)
+
+# Store a memory
+mid = db.remember("The user prefers dark mode for the dashboard.", metadata={"type": "preference"})
+
+# Ask a question (Semantic Search)
+hits = db.ask("Does the user have UI preferences?")
+for hit in hits:
+    print(f"ID: {hit.id}, Score: {hit.score}")
+
+# Connect memories (Graph Relationships)
+db.connect(mid1, mid2, "relates_to")
 ```
 
-This runs a local demo that inserts memories, creates edges, queries, and prints scored results.
+---
 
-## Project Layout
+##  Installation
 
-```text
-crates/
-  mnemos-core/
-    src/
-      core/
-        memory_entry.rs      # Memory model
-        command.rs           # Command/event types
-        state_machine.rs     # Deterministic state transitions
-      storage/
-        wal.rs               # Write-ahead log
-        segment.rs           # Segment files + in-memory segment index
-        compaction.rs        # Segment compaction
-        checkpoint.rs        # State checkpoint serialization
-      index/
-        vector.rs            # Cosine similarity index
-        graph.rs             # Graph traversal index
-        temporal.rs          # Time-based index
-        combined.rs          # Hybrid index composition
-      query/
-        planner.rs           # Query planning heuristics
-        executor.rs          # Plan execution + metrics/traces
-        hybrid.rs            # Text-oriented hybrid query engine
-        intent.rs            # Intent-based weight tuning
-      engine.rs              # Core orchestrator (WAL + segments + state)
-      store.rs               # Unified store API (MnemosStore)
-      facade.rs              # Embedded facade (Mnemos — simplified API)
-      bin/
-        manual_store.rs      # Local manual demo binary
-        sync_bench.rs        # Sync policy benchmark
-        startup_bench.rs     # Startup time benchmark
-        monkey_writer.rs     # Crash-safety stress writer
-        monkey_verify.rs     # Recovery verification
-  mnemos-py/
-    src/
-      lib.rs                 # PyO3 Native bindings
-    test_smoke.py            # Python SDK smoke tests
-    test_stress.py           # Python SDK stress tests
-```
-
-## Architecture Overview
-
-Write path:
-
-1. Client issues a command (`InsertMemory`, `DeleteMemory`, `AddEdge`, ...).
-2. Command is appended to WAL.
-3. Memory payload is written to segment storage when applicable.
-4. Data is synced.
-5. State machine applies command.
-
-This ensures recovery can replay the same command sequence deterministically.
-
-Read/query path:
-
-1. Query planner selects execution path (`VectorOnly`, `VectorTemporal`, `VectorGraph`, `WeightedHybrid`), candidate multiplier, and serial/parallel mode.
-2. Query executor runs staged retrieval.
-3. Results are ranked and returned with score breakdowns.
-
-## Storage Details
-
-### WAL
-
-Record format:
-
-```text
-[u32: len][u32: checksum][bytes: bincode(Command)]
-```
-
-- Detects corruption via checksum.
-- Used for crash recovery and deterministic replay.
-
-### Segment Storage
-
-Record format:
-
-```text
-[u32: len][u32: checksum][bytes: bincode(MemoryEntry)]
-```
-
-- Append-only `.seg` files with rotation.
-- In-memory index: `MemoryId -> (segment_id, offset, length)`.
-- Supports logical delete and compaction eligibility analysis.
-
-### Compaction
-
-- Rewrites live entries into a fresh segment directory.
-- Performs atomic swap (`old -> backup`, `new -> old`, delete backup).
-- Rebuilds segment storage index after swap.
-
-## API
-
-### Embedded Facade
-
-```rust
-use mnemos_core::Mnemos;
-
-let db = Mnemos::open("agent.mem")?;
-
-// Store a memory (with pre-computed embedding)
-let id = db.remember(vec![1.0, 0.0, 0.0], None)?;
-
-// Query by vector similarity
-let hits = db.ask(vec![1.0, 0.0, 0.0], 5)?;
-
-// Connect memories
-db.connect(id1, id2, "related")?;
-
-// Compact on-disk storage
-db.compact()?;
-
-// Force checkpoint (snapshot + WAL truncation)
-db.checkpoint()?;
-```
-
-The `Mnemos` struct wraps `MnemosStore` and handles directory layout, auto-incrementing IDs, timestamps, checkpoint/recovery, and WAL truncation transparently.
-
-### Weighted ranking
-
-Hybrid ranking combines:
-
-- semantic similarity,
-- importance,
-- recency.
-
-Weights are configurable and validated to sum to 100.
-
-## Capacity & Eviction
-
-`Engine::enforce_capacity(...)` supports:
-
-- `max_entries`
-- `max_bytes`
-
-Eviction order is deterministic:
-
-1. older first (`created_at` ascending),
-2. less important first (`importance` ascending),
-3. lower `MemoryId` first.
-
-Evictions are issued as `DeleteMemory` commands, so WAL and replay stay consistent.
-
-## Benchmarks
-
-### Startup Time
-
-Measured with `cargo run -p mnemos-core --release --bin startup_bench`:
-
-| Scenario | Entries | Vec Dim | Time (ms) | Target |
-|---|---:|---:|---:|---:|
-| Cold open (full WAL replay) | 1,000 | 128 | **22.9** | < 100 ✅ |
-| Fast open (checkpoint + WAL tail) | 1,000 | 128 | **23.0** | < 100 ✅ |
-
-After a checkpoint, the WAL is truncated so startup only replays recent operations.
-
-### Sync Policy Throughput
-
-Quick local throughput comparison between durability modes:
-
+### Python
+Mnemos is available as a native Python package.
 ```bash
-cargo run -p mnemos-core --bin sync_bench -- --mode strict --ops 20000
-cargo run -p mnemos-core --bin sync_bench -- --mode batch --ops 20000 --batch-max-ops 128 --batch-max-delay-ms 20
-cargo run -p mnemos-core --bin sync_bench -- --mode async --ops 20000 --async-interval-ms 20
+# From source (requires Rust installed)
+git clone https://github.com/anaslimem/Mnemos.git
+cd Mnemos/crates/mnemos-py
+pip install .
 ```
 
-Each run prints ingest/flush/total timing, ops/sec, and a recovery durability check.
-
-Sample local result (`ops=500`, same machine, debug build):
-
-| Mode | Config | Total (ms) | Ops/sec |
-|---|---|---:|---:|
-| Strict | default | 6614 | 75.59 |
-| Batch | `max_ops=64`, `max_delay_ms=10` | 3198 | 156.32 |
-| Async | `interval_ms=10` | 3105 | 160.98 |
-
-These numbers are workload and hardware dependent, but show the expected pattern:
-`batch`/`async` improve write throughput compared with `strict`.
-
-## Test
-
-Run all tests:
-
-```bash
-cargo test --workspace -- --nocapture
+### Rust
+Add Mnemos to your `Cargo.toml`:
+```toml
+[dependencies]
+mnemos-core = { git = "https://github.com/anaslimem/Mnemos.git" }
 ```
 
-## Current Status
+---
 
-Mnemos is usable today for:
+##  Key Features
 
-- single-node agent memory storage/retrieval,
-- deterministic recovery and replay,
-- embedded use via the `Mnemos` facade API,
-- checkpoint + WAL truncation for fast startup (< 100ms),
-- **native Python integration** via PyO3 bindings (`mnemos-py`).
+- **Hybrid Retrieval**: Combine vector similarity (semantic), graph relations (structural), and recency (temporal) in a single query.
+- **Hard Durability**: Write-Ahead Log (WAL) and Segmented logs ensure your agent never forgets, even after a crash.
+- **Multi-Agent Namespaces**: Isolate memories between different agents or workspaces within a single database file.
+- **Deterministic Replay**: Record operations to a log file and replay them exactly to debug agent behavior or migrate data.
+- **Automatic Capacity Management**: Set `max_entries` or `max_bytes` and let Mnemos handle LRU/Importance-based eviction automatically.
+- **Crash-Safe Compaction**: Background maintenance that keeps your storage lean without risking data loss.
 
-Areas under active development (see [Roadmap](ROADMAP.md)):
+---
 
-- multi-agent namespace model,
-- deterministic replay export/import,
-- built-in chunking/embedding pipeline.
+##  API Guide
 
-## Documentation
+### Core Operations
 
-- [ROADMAP.md](ROADMAP.md) — project roadmap and phased development plan
-- [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) — current constraints and caveats
+| Method | Description |
+|--------|-------------|
+| `Mnemos.open(path, ...)` | Opens or creates a database at the specified path. |
+| `.remember(text, ...)` | Stores a new memory. Auto-embeds if an embedder is configured. |
+| `.ask(query, ...)` | Performs a hybrid search across vectors, graphs, and time. |
+| `.connect(id1, id2, rel)` | Creates a directed edge between two memory entries. |
+| `.namespace(name)` | Returns a scoped view of the database for a specific agent/context. |
+| `.delete_memory(id)` | Permanently removes a memory and updates all indexes. |
+| `.compact()` | Reclaims space by removing deleted entries from disk. |
+| `.checkpoint()` | Truncates the WAL and snapshots the current state for fast startup. |
+
+### Configuration Options
+When calling `Mnemos.open()`, you can tune the behavior:
+- `sync`: `"strict"` (safest), `"async"` (fastest), or `"batch"` (balanced).
+- `max_entries`: Limits the total number of memories (triggers auto-eviction).
+- `record`: Path to a log file for capturing the entire session for replay.
+
+---
+
+##  Technical Essentials: How it's built
+
+<details>
+<summary><b>Click to see the Rust Architecture</b></summary>
+
+### Why Rust?
+Mnemos is written in Rust to provide **memory safety without a garbage collector**, ensuring predictable performance (sub-100ms startup) and low resource overhead—critical for "embedded" use cases where the DB runs inside your agent's process.
+
+### The Storage Engine
+Mnemos follows a **Log-Structured** design:
+1. **WAL (Write-Ahead Log)**: Every command is first appended to a durable log with CRC32 checksums.
+2. **Segment Storage**: Large memory payloads are stored in append-only segments.
+3. **Deterministic State Machine**: On startup, the database replays the log into an in-memory state machine. This ensures 100% consistency between the disk and your queries.
+
+### Hybrid Query Engine
+Unlike standard vector DBs, Mnemos doesn't just look at distance. Our query planner can:
+- **Vector**: Find semantic matches using Cosine Similarity.
+- **Graph**: Discover related concepts by traversing edges created with `.connect()`.
+- **Temporal**: Boost or filter results based on when they were "remembered".
+
+### Versioned Serialization
+We use a custom versioned serialization layer (with a "magic-byte" header). This allows us to update the Mnemos engine without breaking your existing database files—it knows how to read "legacy" data while writing new records in the latest format.
+
+</details>
+
+---
+
+##  License & Status
+Mnemos is currently in **Beta (v0.1)**. It is released under the **GPL-3.0 License**.  
+We are actively refining the API and welcome feedback!
+
+---
+> *Mnemos — Because agents shouldn't have to choose between speed and a soul (memory).*
