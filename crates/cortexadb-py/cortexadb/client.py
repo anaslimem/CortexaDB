@@ -1,9 +1,18 @@
 import typing as t
 
-from ._cortexadb import CortexaDBError, Hit, Memory, Stats, CortexaDBNotFoundError, CortexaDBConfigError, CortexaDBIOError
+from ._cortexadb import (
+    CortexaDBError,
+    Hit,
+    Memory,
+    Stats,
+    CortexaDBNotFoundError,
+    CortexaDBConfigError,
+    CortexaDBIOError,
+)
 from . import _cortexadb
 from .embedder import Embedder
-from .chunker import chunk_text
+from .chunker import chunk_text, chunk
+from .loader import load_file, get_file_metadata
 from .replay import ReplayWriter, ReplayReader
 import time
 
@@ -149,7 +158,9 @@ class CortexaDB:
         self._embedder = embedder
         self._recorder = _recorder
         try:
-            self._inner = _cortexadb.CortexaDB.open(path, dimension=dimension, sync=sync, max_entries=max_entries)
+            self._inner = _cortexadb.CortexaDB.open(
+                path, dimension=dimension, sync=sync, max_entries=max_entries
+            )
         except Exception as e:
             if isinstance(e, CortexaDBError):
                 raise
@@ -192,9 +203,7 @@ class CortexaDB:
                 "Provide either 'dimension' or 'embedder', not both."
             )
         if embedder is None and dimension is None:
-            raise CortexaDBConfigError(
-                "One of 'dimension' or 'embedder' is required."
-            )
+            raise CortexaDBConfigError("One of 'dimension' or 'embedder' is required.")
 
         dim = embedder.dimension if embedder is not None else dimension
 
@@ -272,9 +281,9 @@ class CortexaDB:
 
             elif op == "connect":
                 old_from = record["from_id"]
-                old_to   = record["to_id"]
+                old_to = record["to_id"]
                 new_from = id_map.get(old_from, old_from)
-                new_to   = id_map.get(old_to, old_to)
+                new_to = id_map.get(old_to, old_to)
                 try:
                     db._inner.connect(new_from, new_to, record["relation"])
                 except Exception:
@@ -401,7 +410,9 @@ class CortexaDB:
 
         # 1. Base vector search
         if namespaces is None:
-            base_hits = self._inner.ask_embedding(embedding=vec, top_k=top_k, filter=filter)
+            base_hits = self._inner.ask_embedding(
+                embedding=vec, top_k=top_k, filter=filter
+            )
         elif len(namespaces) == 1:
             base_hits = self._inner.ask_in_namespace(
                 namespace=namespaces[0], embedding=vec, top_k=top_k, filter=filter
@@ -410,7 +421,9 @@ class CortexaDB:
             seen_ids: t.Set[int] = set()
             base_hits = []
             for ns in namespaces:
-                for hit in self._inner.ask_in_namespace(namespace=ns, embedding=vec, top_k=top_k, filter=filter):
+                for hit in self._inner.ask_in_namespace(
+                    namespace=ns, embedding=vec, top_k=top_k, filter=filter
+                ):
                     if hit.id not in seen_ids:
                         seen_ids.add(hit.id)
                         base_hits.append(hit)
@@ -426,22 +439,21 @@ class CortexaDB:
             for hit in base_hits:
                 try:
                     neighbors = self._inner.get_neighbors(hit.id)
-                    for (target_id, relation) in neighbors:
+                    for target_id, relation in neighbors:
                         # Edge weight factor (e.g. 0.9 penalty for 1 hop)
                         neighbor_score = hit.score * 0.9
-                        
+
                         # Take the best score among multiple paths to the same neighbor
                         current_best = neighbor_candidates_scores.get(target_id, 0.0)
                         if neighbor_score > current_best:
                             neighbor_candidates_scores[target_id] = neighbor_score
                 except Exception:
                     pass  # missing ID handle gracefully
-            
+
             # Mix neighbors in; if already found by vector search, take the max score
             for target_id, score in neighbor_candidates_scores.items():
                 scored_candidates[target_id] = max(
-                    scored_candidates.get(target_id, 0.0),
-                    score
+                    scored_candidates.get(target_id, 0.0), score
                 )
 
         # 3. Recency Bias (Phase 3.3)
@@ -473,7 +485,115 @@ class CortexaDB:
         """
         self._inner.connect(from_id, to_id, relation)
         if self._recorder is not None:
-            self._recorder.record_connect(from_id=from_id, to_id=to_id, relation=relation)
+            self._recorder.record_connect(
+                from_id=from_id, to_id=to_id, relation=relation
+            )
+
+    def ingest(
+        self,
+        text: str,
+        *,
+        strategy: str = "recursive",
+        chunk_size: int = 512,
+        overlap: int = 50,
+        namespace: str = "default",
+        metadata: t.Optional[t.Dict[str, str]] = None,
+    ) -> t.List[int]:
+        """
+        Ingest text with smart chunking and store in database.
+
+        This is the simplified API for ingesting text content.
+
+        Args:
+            text: Text content to ingest.
+            strategy: Chunking strategy - "fixed", "recursive", "semantic", "markdown", "json".
+                      Default: "recursive"
+            chunk_size: Target size of each chunk (for fixed/recursive). Default: 512
+            overlap: Number of words to overlap between chunks. Default: 50
+            namespace: Namespace to store in. Default: "default"
+            metadata: Optional metadata dict.
+
+        Returns:
+            List of memory IDs.
+
+        Requires:
+            An embedder must be configured (via embedder=... when opening).
+        """
+        if self._embedder is None:
+            raise CortexaDBConfigError(
+                "ingest() requires an embedder. Open the database with 'embedder=...'"
+            )
+
+        chunks = chunk(text, strategy=strategy, chunk_size=chunk_size, overlap=overlap)
+        if not chunks:
+            return []
+
+        chunk_texts = [c["text"] for c in chunks]
+        embeddings = self._embedder.embed_batch(chunk_texts)
+
+        ids: t.List[int] = []
+        for chunk_result, vec in zip(chunks, embeddings):
+            meta: t.Dict[str, str] = {}
+            if metadata:
+                meta = {k: str(v) for k, v in metadata.items()}
+            if chunk_result.get("metadata"):
+                for k, v in chunk_result["metadata"].items():
+                    meta[k] = str(v)
+
+            mid = self._remember_inner(
+                text=chunk_result["text"],
+                embedding=vec,
+                metadata=meta if meta else None,
+                namespace=namespace,
+            )
+            ids.append(mid)
+        return ids
+
+    def load(
+        self,
+        path: str,
+        *,
+        strategy: str = "recursive",
+        chunk_size: int = 512,
+        overlap: int = 50,
+        namespace: str = "default",
+        metadata: t.Optional[t.Dict[str, str]] = None,
+    ) -> t.List[int]:
+        """
+        Load a file and ingest its content.
+
+        Automatically detects file format (.txt, .md, .json, .docx, .pdf).
+
+        Args:
+            path: Path to the file.
+            strategy: Chunking strategy. Default: "recursive"
+            chunk_size: Target chunk size. Default: 512
+            overlap: Chunk overlap. Default: 50
+            namespace: Namespace to store in. Default: "default"
+            metadata: Optional metadata to merge with file metadata.
+
+        Returns:
+            List of memory IDs.
+
+        Raises:
+            FileNotFoundError: If file does not exist.
+            ValueError: If file format not supported.
+        """
+        content = load_file(path)
+        file_metadata = get_file_metadata(path)
+
+        meta = dict(file_metadata)
+        if metadata:
+            meta.update(metadata)
+
+        return self.ingest(
+            content,
+            strategy=strategy,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            namespace=namespace,
+            metadata=meta,
+        )
 
     def ingest_document(
         self,
@@ -535,6 +655,7 @@ class CortexaDB:
         dim = stats.vector_dimension
 
         import os
+
         # Truncate any existing file so we start fresh.
         if os.path.exists(log_path):
             os.remove(log_path)
@@ -553,7 +674,9 @@ class CortexaDB:
                     # Retrieve the stored embedding via ask with dimension probe
                     hits = self._inner.ask_in_namespace(
                         namespace=mem.namespace,
-                        embedding=mem.embedding if hasattr(mem, "embedding") else [0.0] * dim,
+                        embedding=mem.embedding
+                        if hasattr(mem, "embedding")
+                        else [0.0] * dim,
                         top_k=1,
                     )
                     writer.record_remember(
@@ -576,12 +699,12 @@ class CortexaDB:
     def delete_memory(self, mid: int) -> None:
         """
         Delete a memory by ID.
-        
+
         If recording is enabled, the operation is appended to the log.
         """
         self._inner.delete_memory(mid)
         if self._recorder is not None:
-             self._recorder.record_delete(mid)
+            self._recorder.record_delete(mid)
 
     def compact(self) -> None:
         """Compact on-disk segment storage (removes tombstoned entries)."""
