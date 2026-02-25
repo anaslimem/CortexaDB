@@ -277,6 +277,51 @@ impl PyMnemos {
             .collect())
     }
 
+    /// Search within a single namespace, filtering in Rust before returning results.
+    ///
+    /// Args:
+    ///     namespace: Namespace string to filter by.
+    ///     embedding: Query vector (must match configured dimension).
+    ///     top_k:     Maximum number of hits to return (default 5).
+    ///
+    /// Returns:
+    ///     List of Hit objects ranked by score, scoped to the namespace.
+    ///
+    /// Raises:
+    ///     MnemosError: If the embedding dimension is wrong.
+    #[pyo3(
+        text_signature = "(self, namespace, embedding, *, top_k=5)",
+        signature = (namespace, embedding, *, top_k=5)
+    )]
+    fn ask_in_namespace(
+        &self,
+        py: Python<'_>,
+        namespace: &str,
+        embedding: Vec<f32>,
+        top_k: usize,
+    ) -> PyResult<Vec<PyHit>> {
+        if embedding.len() != self.dimension {
+            return Err(MnemosError::new_err(format!(
+                "embedding dimension mismatch: expected {}, got {}",
+                self.dimension,
+                embedding.len(),
+            )));
+        }
+
+        let ns = namespace.to_string();
+        let results = py
+            .allow_threads(|| self.inner.ask_in_namespace(&ns, embedding, top_k))
+            .map_err(to_py_err)?;
+
+        Ok(results
+            .into_iter()
+            .map(|m| PyHit {
+                id: m.id,
+                score: m.score,
+            })
+            .collect())
+    }
+
     /// Retrieve a full memory by ID.
     ///
     /// Args:

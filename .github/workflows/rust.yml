@@ -29,7 +29,6 @@ jobs:
         cd crates/mnemos-py
         python3 -m venv .venv
         source .venv/bin/activate
-        pip install maturin
+        pip install maturin pytest
         maturin develop --release
-        python3 test_smoke.py
-        python3 test_stress.py
+        pytest test_smoke.py test_stress.py -v

@@ -9,24 +9,41 @@ from .chunker import chunk_text
 class Namespace:
     """
     A scoped context for Mnemos operations.
-    Automatically applies the namespace name to all store/query operations.
+
+    Obtained via ``db.namespace(name)``.  All store and query operations
+    automatically apply this namespace.
+
+    Args:
+        db:       Parent :class:`Mnemos` instance.
+        name:     Namespace identifier string.
+        readonly: When *True*, ``remember()`` and ``ingest_document()`` raise
+                  :class:`MnemosError` — useful for shared read-only views.
     """
-    def __init__(self, db: "Mnemos", name: str):
+
+    def __init__(self, db: "Mnemos", name: str, *, readonly: bool = False):
         self._db = db
         self.name = name
+        self._readonly = readonly
+
+    def _check_writable(self) -> None:
+        if self._readonly:
+            raise MnemosError(
+                f"Namespace '{self.name}' is read-only. "
+                "Open it without readonly=True to write."
+            )
 
     def remember(
         self,
         text: str,
-        embedding: t.Union[t.List[float], None] = None,
-        metadata: t.Union[t.Dict[str, str], None] = None,
+        embedding: t.Optional[t.List[float]] = None,
+        metadata: t.Optional[t.Dict[str, str]] = None,
     ) -> int:
         """
         Store a new memory in this namespace.
 
-        If the database was opened with an embedder, *embedding* is optional
-        and will be generated automatically from *text*.
+        If the database was opened with an embedder, *embedding* is optional.
         """
+        self._check_writable()
         return self._db._remember_inner(
             text=text,
             embedding=embedding,
@@ -37,26 +54,21 @@ class Namespace:
     def ask(
         self,
         query: str,
-        embedding: t.Union[t.List[float], None] = None,
+        embedding: t.Optional[t.List[float]] = None,
         top_k: int = 5,
     ) -> t.List[Hit]:
         """
-        Query for memories in this namespace.
+        Query for memories scoped to this namespace.
 
-        If the database was opened with an embedder, *embedding* is optional
-        and will be generated automatically from *query*.
+        Uses the fast Rust-side namespace filter (``ask_in_namespace``).
         """
         vec = self._db._resolve_embedding(query, embedding)
-        # Ask globally then filter by namespace
-        all_hits = self._db._inner.ask_embedding(embedding=vec, top_k=top_k * 4)
-        filtered: t.List[Hit] = []
-        for hit in all_hits:
-            m = self._db._inner.get(hit.id)
-            if m.namespace == self.name:
-                filtered.append(hit)
-                if len(filtered) == top_k:
-                    break
-        return filtered
+        results = self._db._inner.ask_in_namespace(
+            namespace=self.name,
+            embedding=vec,
+            top_k=top_k,
+        )
+        return results
 
     def ingest_document(
         self,
@@ -64,12 +76,13 @@ class Namespace:
         *,
         chunk_size: int = 512,
         overlap: int = 50,
-        metadata: t.Union[t.Dict[str, str], None] = None,
+        metadata: t.Optional[t.Dict[str, str]] = None,
     ) -> t.List[int]:
         """
         Split *text* into chunks and store each one in this namespace.
         Requires an embedder to be set on the database.
         """
+        self._check_writable()
         return self._db.ingest_document(
             text,
             chunk_size=chunk_size,
@@ -77,6 +90,10 @@ class Namespace:
             namespace=self.name,
             metadata=metadata,
         )
+
+    def __repr__(self) -> str:
+        mode = "readonly" if self._readonly else "readwrite"
+        return f"Namespace(name={self.name!r}, mode={mode})"
 
 
 class Mnemos:
@@ -94,6 +111,20 @@ class Mnemos:
         db = Mnemos.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
         mid = db.remember("We chose Stripe for payments")
         hits = db.ask("payment provider?")
+
+    Multi-agent namespace model::
+
+        agent_a = db.namespace("agent_a")
+        agent_b = db.namespace("agent_b")
+        shared  = db.namespace("shared")
+
+        agent_a.remember("My private memory")
+        shared.remember("Shared team knowledge")
+
+        # Read shared memory without being able to write to it:
+        shared_ro = db.namespace("shared", readonly=True)
+        shared_ro.ask("team knowledge?")   # works
+        shared_ro.remember("...")          # raises MnemosError
     """
 
     def __init__(
@@ -123,10 +154,10 @@ class Mnemos:
 
         Args:
             path:      Directory path for the database files.
-            dimension: Vector embedding dimension.  Use when you supply your
-                       own pre-computed embeddings.
-            embedder:  An :class:`~mnemos.Embedder` instance.  The dimension
-                       is inferred automatically from ``embedder.dimension``.
+            dimension: Vector embedding dimension. Use when supplying your own
+                       pre-computed embeddings.
+            embedder:  An :class:`~mnemos.Embedder` instance. The dimension is
+                       inferred from ``embedder.dimension`` automatically.
 
         Raises:
             MnemosError: If neither or both of *dimension* and *embedder* are
@@ -182,9 +213,21 @@ class Mnemos:
     # Public API
     # ------------------------------------------------------------------
 
-    def namespace(self, name: str) -> Namespace:
-        """Return a scoped :class:`Namespace` context (scoped remember/ask/ingest)."""
-        return Namespace(self, name)
+    def namespace(self, name: str, *, readonly: bool = False) -> Namespace:
+        """
+        Return a scoped :class:`Namespace` for partitioned memory access.
+
+        Args:
+            name:     Namespace identifier (e.g. ``"agent_a"``, ``"shared"``).
+            readonly: If *True*, writes to this namespace raise
+                      :class:`MnemosError` — useful for a shared read-only view.
+
+        Example::
+
+            agent_a = db.namespace("agent_a")
+            shared  = db.namespace("shared", readonly=True)
+        """
+        return Namespace(self, name, readonly=readonly)
 
     def remember(
         self,
@@ -211,15 +254,56 @@ class Mnemos:
         query: str,
         embedding: t.Optional[t.List[float]] = None,
         top_k: int = 5,
+        namespaces: t.Optional[t.List[str]] = None,
     ) -> t.List[Hit]:
         """
         Query the database by vector similarity.
 
-        If an embedder is configured, *embedding* is optional — the embedder
-        will be called automatically on *query*.
+        Args:
+            query:      Query string (auto-embedded if embedder is configured).
+            embedding:  Pre-computed query vector (overrides auto-embed).
+            top_k:      Maximum number of hits to return (default 5).
+            namespaces: If given, restrict search to these namespaces.
+
+                        * ``None`` → global search (all namespaces, default)
+                        * ``["agent_a"]`` → single namespace (fast Rust path)
+                        * ``["agent_a", "shared"]`` → cross-namespace fan-out
+                          (merges + re-ranks by score across multiple searches)
+
+        Returns:
+            List of :class:`Hit` objects ranked by descending score.
         """
         vec = self._resolve_embedding(query, embedding)
-        return self._inner.ask_embedding(embedding=vec, top_k=top_k)
+
+        if namespaces is None:
+            # Global search — no namespace filter.
+            return self._inner.ask_embedding(embedding=vec, top_k=top_k)
+
+        if len(namespaces) == 1:
+            # Single namespace — use the fast Rust path.
+            return self._inner.ask_in_namespace(
+                namespace=namespaces[0],
+                embedding=vec,
+                top_k=top_k,
+            )
+
+        # Cross-namespace fan-out: query each namespace, merge, re-rank.
+        seen_ids: t.Set[int] = set()
+        merged: t.List[Hit] = []
+        for ns in namespaces:
+            ns_hits = self._inner.ask_in_namespace(
+                namespace=ns,
+                embedding=vec,
+                top_k=top_k,
+            )
+            for hit in ns_hits:
+                if hit.id not in seen_ids:
+                    seen_ids.add(hit.id)
+                    merged.append(hit)
+
+        # Sort by descending score and return top_k.
+        merged.sort(key=lambda h: h.score, reverse=True)
+        return merged[:top_k]
 
     def ingest_document(
         self,
@@ -233,12 +317,11 @@ class Mnemos:
         """
         Split *text* into chunks and store each one as a separate memory.
 
-        Requires an embedder to be configured. Uses
-        :func:`~mnemos.chunker.chunk_text` internally.
+        Requires an embedder to be configured.
 
         Args:
             text:       The document text to ingest.
-            chunk_size: Target size of each chunk in characters (default 512).
+            chunk_size: Target chunk size in characters (default 512).
             overlap:    Character overlap between consecutive chunks (default 50).
             namespace:  Namespace to store chunks in (default ``"default"``).
             metadata:   Optional metadata dict applied to every chunk.
@@ -259,16 +342,15 @@ class Mnemos:
         if not chunks:
             return []
 
-        # Use embed_batch for efficiency (providers may parallelise this).
         embeddings = self._embedder.embed_batch(chunks)
 
         ids: t.List[int] = []
-        for chunk_text_str, vec in zip(chunks, embeddings):
+        for chunk_str, vec in zip(chunks, embeddings):
             mid = self._inner.remember_embedding(
                 embedding=vec,
                 metadata=metadata,
                 namespace=namespace,
-                content=chunk_text_str,
+                content=chunk_str,
             )
             ids.append(mid)
 

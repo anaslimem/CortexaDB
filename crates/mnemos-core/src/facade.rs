@@ -247,6 +247,47 @@ impl Mnemos {
         Ok(results)
     }
 
+    /// Query the database scoped to a specific namespace.
+    ///
+    /// Over-fetches by 4× top_k globally, then filters by namespace and
+    /// returns the top *top_k* results. This avoids a separate index per
+    /// namespace while keeping the filter inside Rust (no GIL round-trips).
+    pub fn ask_in_namespace(
+        &self,
+        namespace: &str,
+        query_embedding: Vec<f32>,
+        top_k: usize,
+    ) -> Result<Vec<Hit>> {
+        let embedder = StaticEmbedder {
+            embedding: query_embedding,
+        };
+        // Over-fetch so namespace filtering still yields top_k results.
+        let options = QueryOptions::with_top_k(top_k * 4);
+        let execution = self.inner.query("", options, &embedder)?;
+
+        let sm = self.inner.state_machine();
+        let memories = sm.all_memories();
+
+        // Build a lookup: MemoryId → namespace
+        let ns_map: std::collections::HashMap<u64, &str> = memories
+            .iter()
+            .map(|m| (m.id.0, m.namespace.as_str()))
+            .collect();
+
+        let results: Vec<Hit> = execution
+            .hits
+            .into_iter()
+            .filter(|hit| ns_map.get(&hit.id.0).copied() == Some(namespace))
+            .take(top_k)
+            .map(|hit| Hit {
+                id: hit.id.0,
+                score: hit.final_score,
+            })
+            .collect();
+
+        Ok(results)
+    }
+
     /// Retrieve a full memory by its identifier.
     pub fn get_memory(&self, id: u64) -> Result<Memory> {
         let snapshot = self.inner.snapshot();

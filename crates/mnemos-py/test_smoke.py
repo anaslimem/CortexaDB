@@ -79,9 +79,9 @@ def test_mnemos_error_handling():
     with pytest.raises(MnemosError, match="No embedder"):
         db.remember("No embedding")
 
-    # Wrong dimension on open — must first write something with dim=3
+    # Wrong dimension on open — the mismatch check uses in-memory stats (entries > 0)
+    # so no checkpoint is required.
     mid = db.remember("Seed", embedding=[1.0, 0.0, 0.0])
-    db.checkpoint()  # flush so the mismatch check sees entries > 0
     with pytest.raises(MnemosError, match="(?i)dimension mismatch"):
         Mnemos.open(DB_PATH, dimension=4)
 
@@ -170,3 +170,100 @@ def test_namespace_auto_embed():
     hits = ns.ask("agent A")
     assert any(h.id == mid for h in hits)
 
+
+# ---------------------------------------------------------------------------
+# Phase 3.1 — Namespace Model
+# ---------------------------------------------------------------------------
+
+def test_namespace_isolation():
+    """Memories in namespace A should not appear in namespace B results."""
+    emb = HashEmbedder(dimension=32)
+    db = Mnemos.open(DB_PATH, embedder=emb)
+
+    agent_a = db.namespace("agent_a")
+    agent_b = db.namespace("agent_b")
+
+    mid_a = agent_a.remember("I am agent A, secret info")
+    mid_b = agent_b.remember("I am agent B, different info")
+
+    hits_a = agent_a.ask("agent A", top_k=10)
+    hits_b = agent_b.ask("agent B", top_k=10)
+
+    a_ids = {h.id for h in hits_a}
+    b_ids = {h.id for h in hits_b}
+
+    assert mid_a in a_ids,  "Agent A memory not found in agent_a namespace"
+    assert mid_b not in a_ids, "Agent B memory leaked into agent_a namespace"
+    assert mid_b in b_ids,  "Agent B memory not found in agent_b namespace"
+    assert mid_a not in b_ids, "Agent A memory leaked into agent_b namespace"
+
+
+def test_namespaced_ask_param():
+    """db.ask(query, namespaces=[...]) should scope results correctly."""
+    emb = HashEmbedder(dimension=32)
+    db = Mnemos.open(DB_PATH, embedder=emb)
+
+    mid_a = db.remember("Agent A private", namespace="agent_a")
+    mid_b = db.remember("Agent B private", namespace="agent_b")
+    mid_s = db.remember("Shared knowledge", namespace="shared")
+
+    # Single namespace via namespaces= param
+    hits = db.ask("knowledge", namespaces=["shared"])
+    ids = {h.id for h in hits}
+    assert mid_s in ids
+    assert mid_a not in ids
+    assert mid_b not in ids
+
+
+def test_cross_namespace_fan_out():
+    """namespaces=[a, b] should return merged re-ranked results from both."""
+    emb = HashEmbedder(dimension=32)
+    db = Mnemos.open(DB_PATH, embedder=emb)
+
+    mid_a = db.remember("Agent A knowledge", namespace="agent_a")
+    mid_s = db.remember("Shared knowledge",  namespace="shared")
+    db.remember("Agent B only",              namespace="agent_b")
+
+    hits = db.ask("knowledge", namespaces=["agent_a", "shared"], top_k=10)
+    ids = {h.id for h in hits}
+
+    # Both agent_a and shared results must be present.
+    assert mid_a in ids
+    assert mid_s in ids
+
+
+def test_global_ask_returns_all_namespaces():
+    """db.ask(query) with no namespaces= should search globally."""
+    emb = HashEmbedder(dimension=32)
+    db = Mnemos.open(DB_PATH, embedder=emb)
+
+    mid_a = db.remember("Agent A fact", namespace="agent_a")
+    mid_b = db.remember("Agent B fact", namespace="agent_b")
+    mid_s = db.remember("Shared fact",  namespace="shared")
+
+    hits = db.ask("fact", top_k=10)
+    ids = {h.id for h in hits}
+    assert mid_a in ids
+    assert mid_b in ids
+    assert mid_s in ids
+
+
+def test_readonly_namespace():
+    """A readonly namespace should allow ask() but reject remember()."""
+    emb = HashEmbedder(dimension=32)
+    db = Mnemos.open(DB_PATH, embedder=emb)
+
+    # Write to shared normally.
+    mid = db.namespace("shared").remember("Public knowledge")
+
+    # Read from a readonly view.
+    ro = db.namespace("shared", readonly=True)
+    hits = ro.ask("Public knowledge")
+    assert any(h.id == mid for h in hits)
+
+    # Writes must be rejected.
+    with pytest.raises(MnemosError, match="read-only"):
+        ro.remember("Trying to write")
+
+    with pytest.raises(MnemosError, match="read-only"):
+        ro.ingest_document("Document text")
