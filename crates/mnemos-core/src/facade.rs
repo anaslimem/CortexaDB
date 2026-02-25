@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
+use crate::core::state_machine::StateMachineError;
 use crate::engine::SyncPolicy;
 use crate::query::hybrid::{QueryEmbedder, QueryOptions};
 use crate::store::{CheckpointPolicy, MnemosStore, MnemosStoreError};
@@ -76,6 +77,8 @@ impl Default for MnemosConfig {
 pub enum MnemosError {
     #[error("Store error: {0}")]
     Store(#[from] MnemosStoreError),
+    #[error("State machine error: {0}")]
+    StateMachine(#[from] StateMachineError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Memory not found: {0}")]
@@ -245,6 +248,14 @@ impl Mnemos {
             });
         }
         Ok(results)
+    }
+
+    /// Retrieve the outgoing graph connections from a specific memory.
+    ///
+    /// Returns a list of `(target_id, relation_label)` tuples.
+    pub fn get_neighbors(&self, id: u64) -> Result<Vec<(u64, String)>> {
+        let neighbors = self.inner.state_machine().get_neighbors(MemoryId(id))?;
+        Ok(neighbors.into_iter().map(|(target_id, relation)| (target_id.0, relation)).collect())
     }
 
     /// Query the database scoped to a specific namespace.

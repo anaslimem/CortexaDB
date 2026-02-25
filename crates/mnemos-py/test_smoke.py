@@ -369,3 +369,36 @@ def test_replay_reader_header():
 
     # Cleanup
     os.remove(LOG_PATH)
+
+def test_hybrid_use_graph():
+    import mnemos
+    db = mnemos.Mnemos.open(DB_PATH, dimension=2, sync="strict")
+    id1 = db.remember("Node A", embedding=[1.0, 0.0])
+    id2 = db.remember("Node B", embedding=[0.0, 1.0])  # Orthogonal
+    db.connect(id1, id2, "links_to")
+
+    # Vector only: expects id1 with high score, id2 with score ~0
+    hits_normal = db.ask("test", embedding=[1.0, 0.0], top_k=2)
+    assert hits_normal[0].id == id1
+    assert hits_normal[1].id == id2
+    assert hits_normal[0].score > 0.9
+    assert hits_normal[1].score <= 0.501
+
+    # Graph mixed query: id2 gets pulled up via id1's edge (score * 0.9)
+    hits_graph = db.ask("test", embedding=[1.0, 0.0], top_k=2, use_graph=True)
+    assert hits_graph[0].id == id1
+    assert hits_graph[1].id == id2
+    # The score of id2 should be updated because of graph neighbor logic
+    assert hits_graph[1].score >= hits_normal[0].score * 0.89
+
+def test_hybrid_recency_bias():
+    import mnemos
+    db = mnemos.Mnemos.open(DB_PATH, dimension=2, sync="strict")
+    id1 = db.remember("Node A", embedding=[1.0, 0.0])
+
+    hits_normal = db.ask("test", embedding=[1.0, 0.0], top_k=1)
+    hits_recent = db.ask("test", embedding=[1.0, 0.0], top_k=1, recency_bias=True)
+
+    # With exactly 0 delay, the boost is exactly 1.2x.
+    assert hits_recent[0].score > hits_normal[0].score
+    assert abs(hits_recent[0].score - (hits_normal[0].score * 1.2)) < 0.05

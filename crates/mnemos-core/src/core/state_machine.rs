@@ -194,12 +194,13 @@ impl StateMachine {
         result
     }
 
-    /// Get neighbors of a memory (memories it points to)
     pub fn get_neighbors(&self, id: MemoryId) -> Result<Vec<(MemoryId, String)>> {
-        let edges = self
-            .graph
-            .get(&id)
-            .ok_or(StateMachineError::MemoryNotFound(id))?;
+        if !self.memories.contains_key(&id) {
+            return Err(StateMachineError::MemoryNotFound(id));
+        }
+        let Some(edges) = self.graph.get(&id) else {
+            return Ok(Vec::new());
+        };
         let mut neighbors: Vec<_> = edges.iter().map(|e| (e.to, e.relation.clone())).collect();
         neighbors.sort_by_key(|n| (n.0, n.1.clone()));
         Ok(neighbors)

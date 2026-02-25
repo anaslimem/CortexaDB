@@ -44,6 +44,12 @@ struct PyHit {
 
 #[pymethods]
 impl PyHit {
+    #[new]
+    #[pyo3(signature = (id, score))]
+    fn new(id: u64, score: f32) -> Self {
+        Self { id, score }
+    }
+
     fn __repr__(&self) -> String {
         format!("Hit(id={}, score={:.4})", self.id, self.score)
     }
@@ -372,6 +378,21 @@ impl PyMnemos {
         self.inner
             .connect(from_id, to_id, relation)
             .map_err(to_py_err)
+    }
+
+    /// Retrieve the outgoing graph connections from a specific memory.
+    ///
+    /// Args:
+    ///     id: Source memory ID.
+    ///
+    /// Returns:
+    ///     List of ``(target_id, relation_label)`` tuples.
+    ///
+    /// Raises:
+    ///     MnemosError: If the memory ID does not exist.
+    #[pyo3(text_signature = "(self, id)")]
+    fn get_neighbors(&self, id: u64) -> PyResult<Vec<(u64, String)>> {
+        self.inner.get_neighbors(id).map_err(to_py_err)
     }
 
     /// Compact on-disk segment storage (removes tombstoned entries).

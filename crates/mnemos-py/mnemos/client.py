@@ -5,6 +5,7 @@ from . import _mnemos
 from .embedder import Embedder
 from .chunker import chunk_text
 from .replay import ReplayWriter, ReplayReader
+import time
 
 
 class Namespace:
@@ -57,6 +58,9 @@ class Namespace:
         query: str,
         embedding: t.Optional[t.List[float]] = None,
         top_k: int = 5,
+        *,
+        use_graph: bool = False,
+        recency_bias: bool = False,
     ) -> t.List[Hit]:
         """
         Query for memories scoped to this namespace.
@@ -64,10 +68,14 @@ class Namespace:
         Uses the fast Rust-side namespace filter (``ask_in_namespace``).
         """
         vec = self._db._resolve_embedding(query, embedding)
-        return self._db._inner.ask_in_namespace(
-            namespace=self.name,
+        # Note: We use the global ask() so hybrid query logic isn't duplicated.
+        return self._db.ask(
+            query=query,
             embedding=vec,
             top_k=top_k,
+            namespaces=[self.name],
+            use_graph=use_graph,
+            recency_bias=recency_bias,
         )
 
     def ingest_document(
@@ -349,36 +357,88 @@ class Mnemos:
         embedding: t.Optional[t.List[float]] = None,
         top_k: int = 5,
         namespaces: t.Optional[t.List[str]] = None,
+        *,
+        use_graph: bool = False,
+        recency_bias: bool = False,
     ) -> t.List[Hit]:
         """
-        Query by vector similarity.
+        Query by vector similarity, with optional hybrid capabilities.
 
         Args:
-            query:      Query string (auto-embedded if embedder is configured).
-            embedding:  Pre-computed query vector (overrides auto-embed).
-            top_k:      Maximum hits to return (default 5).
-            namespaces: Restrict search to these namespaces. ``None`` → global.
+            query:        Query string (auto-embedded if embedder is configured).
+            embedding:    Pre-computed query vector (overrides auto-embed).
+            top_k:        Maximum hits to return (default 5).
+            namespaces:   Restrict search to these namespaces. ``None`` → global.
+            use_graph:    If *True*, augments vector results with graph neighbors.
+            recency_bias: If *True*, boosts scores of recently created memories.
         """
         vec = self._resolve_embedding(query, embedding)
 
+        # 1. Base vector search
         if namespaces is None:
-            return self._inner.ask_embedding(embedding=vec, top_k=top_k)
-
-        if len(namespaces) == 1:
-            return self._inner.ask_in_namespace(
+            base_hits = self._inner.ask_embedding(embedding=vec, top_k=top_k)
+        elif len(namespaces) == 1:
+            base_hits = self._inner.ask_in_namespace(
                 namespace=namespaces[0], embedding=vec, top_k=top_k,
             )
+        else:
+            seen_ids: t.Set[int] = set()
+            base_hits = []
+            for ns in namespaces:
+                for hit in self._inner.ask_in_namespace(namespace=ns, embedding=vec, top_k=top_k):
+                    if hit.id not in seen_ids:
+                        seen_ids.add(hit.id)
+                        base_hits.append(hit)
+            base_hits.sort(key=lambda h: h.score, reverse=True)
+            base_hits = base_hits[:top_k]
 
-        seen_ids: t.Set[int] = set()
-        merged: t.List[Hit] = []
-        for ns in namespaces:
-            for hit in self._inner.ask_in_namespace(namespace=ns, embedding=vec, top_k=top_k):
-                if hit.id not in seen_ids:
-                    seen_ids.add(hit.id)
-                    merged.append(hit)
+        scored_candidates: t.Dict[int, float] = {h.id: h.score for h in base_hits}
 
-        merged.sort(key=lambda h: h.score, reverse=True)
-        return merged[:top_k]
+        # 2. Graph Traversal (Phase 3.3)
+        if use_graph:
+            # For each hit, pull its neighbors and score them slightly lower than the source
+            neighbor_candidates_scores = {}
+            for hit in base_hits:
+                try:
+                    neighbors = self._inner.get_neighbors(hit.id)
+                    for (target_id, relation) in neighbors:
+                        # Edge weight factor (e.g. 0.9 penalty for 1 hop)
+                        neighbor_score = hit.score * 0.9
+                        
+                        # Take the best score among multiple paths to the same neighbor
+                        current_best = neighbor_candidates_scores.get(target_id, 0.0)
+                        if neighbor_score > current_best:
+                            neighbor_candidates_scores[target_id] = neighbor_score
+                except Exception:
+                    pass  # missing ID handle gracefully
+            
+            # Mix neighbors in; if already found by vector search, take the max score
+            for target_id, score in neighbor_candidates_scores.items():
+                scored_candidates[target_id] = max(
+                    scored_candidates.get(target_id, 0.0),
+                    score
+                )
+
+        # 3. Recency Bias (Phase 3.3)
+        if recency_bias:
+            now = time.time()
+            for obj_id in scored_candidates:
+                try:
+                    mem = self.get(obj_id)
+                    age_seconds = max(0, now - mem.created_at)
+                    # 30-day half-life decay
+                    decay_factor = 0.5 ** (age_seconds / (30 * 86400))
+                    # Boost final score by up to 20%
+                    recency_boost = 1.0 + (0.2 * decay_factor)
+                    scored_candidates[obj_id] *= recency_boost
+                except Exception:
+                    pass
+
+        # 4. Final Re-ranking and Truncation
+        # Convert dictionary back to Hit objects (for neighbors we don't have the original Hit, so we recreate it)
+        final_hits = [Hit(id=mid, score=s) for mid, s in scored_candidates.items()]
+        final_hits.sort(key=lambda h: h.score, reverse=True)
+        return final_hits[:top_k]
 
     def connect(self, from_id: int, to_id: int, relation: str) -> None:
         """
