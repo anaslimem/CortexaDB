@@ -57,11 +57,8 @@ pub fn save_checkpoint<P: AsRef<Path>>(
 
     let tmp_path = path.with_extension("ckpt.tmp");
     {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&tmp_path)?;
+        let mut file =
+            OpenOptions::new().create(true).write(true).truncate(true).open(&tmp_path)?;
         file.write_all(&bytes)?;
         file.flush()?;
         file.sync_all()?;
@@ -109,12 +106,7 @@ mod tests {
 
         let mut state = StateMachine::new();
         state
-            .insert_memory(MemoryEntry::new(
-                MemoryId(1),
-                "ns".to_string(),
-                b"hello".to_vec(),
-                1000,
-            ))
+            .insert_memory(MemoryEntry::new(MemoryId(1), "ns".to_string(), b"hello".to_vec(), 1000))
             .unwrap();
 
         save_checkpoint(&path, &state, 42).unwrap();

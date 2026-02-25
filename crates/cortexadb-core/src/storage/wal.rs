@@ -14,11 +14,7 @@ pub enum WalError {
     #[error("Serialization error: {0}")]
     SerializationError(#[from] bincode::Error),
     #[error("Checksum mismatch at entry {entry_id}: expected {expected:x}, got {actual:x}")]
-    ChecksumMismatch {
-        entry_id: u64,
-        expected: u32,
-        actual: u32,
-    },
+    ChecksumMismatch { entry_id: u64, expected: u32, actual: u32 },
     #[error("Invalid entry format at position {position}")]
     InvalidFormat { position: u64 },
 }
@@ -65,11 +61,7 @@ impl WriteAheadLog {
         // Count existing entries
         let entries_count = Self::count_entries(&path)?;
 
-        Ok(Self {
-            path,
-            file: BufWriter::new(file),
-            entries_count,
-        })
+        Ok(Self { path, file: BufWriter::new(file), entries_count })
     }
 
     /// Count existing entries in WAL without fully parsing
@@ -223,11 +215,7 @@ impl WriteAheadLog {
             Self::truncate_to(&wal_path, valid_bytes)?;
         }
 
-        Ok(WalReadOutcome {
-            commands,
-            valid_bytes,
-            truncated,
-        })
+        Ok(WalReadOutcome { commands, valid_bytes, truncated })
     }
 
     pub fn truncate_to<P: AsRef<Path>>(path: P, valid_bytes: u64) -> Result<()> {
@@ -249,19 +237,13 @@ impl WriteAheadLog {
         }
 
         let outcome = Self::read_all_tolerant(path)?;
-        let tail: Vec<_> = outcome
-            .commands
-            .into_iter()
-            .filter(|(id, _)| id.0 > keep_after.0)
-            .collect();
+        let tail: Vec<_> =
+            outcome.commands.into_iter().filter(|(id, _)| id.0 > keep_after.0).collect();
 
         let tmp_path = path.with_extension("wal.trunc.tmp");
         {
-            let file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&tmp_path)?;
+            let file =
+                OpenOptions::new().create(true).write(true).truncate(true).open(&tmp_path)?;
             let mut writer = BufWriter::new(file);
             let crc = Crc::<u32>::new(&crc::CRC_32_CKSUM);
 
@@ -466,10 +448,7 @@ mod tests {
         let outcome = WriteAheadLog::read_all_tolerant(&wal_path).unwrap();
         assert!(outcome.truncated);
         assert_eq!(outcome.commands.len(), 2);
-        assert_eq!(
-            std::fs::metadata(&wal_path).unwrap().len(),
-            outcome.valid_bytes
-        );
+        assert_eq!(std::fs::metadata(&wal_path).unwrap().len(), outcome.valid_bytes);
     }
 
     #[test]

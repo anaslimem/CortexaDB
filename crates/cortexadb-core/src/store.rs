@@ -1,9 +1,9 @@
+use arc_swap::ArcSwap;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use arc_swap::ArcSwap;
 
 use thiserror::Error;
 
@@ -50,10 +50,7 @@ pub struct ReadSnapshot {
 
 impl ReadSnapshot {
     fn new(state_machine: StateMachine, indexes: IndexLayer) -> Self {
-        Self {
-            state_machine,
-            indexes,
-        }
+        Self { state_machine, indexes }
     }
 
     pub fn state_machine(&self) -> &StateMachine {
@@ -210,14 +207,13 @@ impl CortexaDBStore {
 
         let loaded_checkpoint = load_checkpoint(&checkpoint_path)?;
         let engine = match loaded_checkpoint {
-            Some(LoadedCheckpoint {
-                last_applied_id,
-                state_machine,
-            }) => Engine::recover_from_checkpoint(
-                &wal_path,
-                &segments_dir,
-                Some((state_machine, CommandId(last_applied_id))),
-            )?,
+            Some(LoadedCheckpoint { last_applied_id, state_machine }) => {
+                Engine::recover_from_checkpoint(
+                    &wal_path,
+                    &segments_dir,
+                    Some((state_machine, CommandId(last_applied_id))),
+                )?
+            }
             None => Engine::recover(&wal_path, &segments_dir)?,
         };
         Self::from_engine(
@@ -248,11 +244,7 @@ impl CortexaDBStore {
 
         let writer = Arc::new(Mutex::new(WriteState { engine, indexes }));
         let sync_control = Arc::new((
-            Mutex::new(SyncRuntime {
-                pending_ops: 0,
-                dirty_since: None,
-                shutdown: false,
-            }),
+            Mutex::new(SyncRuntime { pending_ops: 0, dirty_since: None, shutdown: false }),
             Condvar::new(),
         ));
 
@@ -266,11 +258,7 @@ impl CortexaDBStore {
         };
 
         let checkpoint_control = Arc::new((
-            Mutex::new(CheckpointRuntime {
-                pending_ops: 0,
-                dirty_since: None,
-                shutdown: false,
-            }),
+            Mutex::new(CheckpointRuntime { pending_ops: 0, dirty_since: None, shutdown: false }),
             Condvar::new(),
         ));
         let checkpoint_thread = match checkpoint_policy {
@@ -313,11 +301,7 @@ impl CortexaDBStore {
         let snapshot = self.snapshot();
         let mut writer = self.writer.lock().expect("writer lock poisoned");
         let last_applied_id = writer.engine.last_applied_id().0;
-        save_checkpoint(
-            &self.checkpoint_path,
-            snapshot.state_machine(),
-            last_applied_id,
-        )?;
+        save_checkpoint(&self.checkpoint_path, snapshot.state_machine(), last_applied_id)?;
 
         // Truncate WAL prefix — only keep entries written after the checkpoint.
         let wal_path = writer.engine.wal_path().to_path_buf();
@@ -344,10 +328,7 @@ impl CortexaDBStore {
 
                 match policy {
                     SyncPolicy::Strict => break,
-                    SyncPolicy::Batch {
-                        max_ops,
-                        max_delay_ms,
-                    } => {
+                    SyncPolicy::Batch { max_ops, max_delay_ms } => {
                         let max_ops = max_ops.max(1);
                         let max_delay = Duration::from_millis(max_delay_ms.max(1));
 
@@ -368,9 +349,8 @@ impl CortexaDBStore {
                     }
                     SyncPolicy::Async { interval_ms } => {
                         let wait = Duration::from_millis(interval_ms.max(1));
-                        let (guard, _) = cvar
-                            .wait_timeout(runtime, wait)
-                            .expect("sync runtime wait poisoned");
+                        let (guard, _) =
+                            cvar.wait_timeout(runtime, wait).expect("sync runtime wait poisoned");
                         runtime = guard;
                     }
                 }
@@ -413,10 +393,7 @@ impl CortexaDBStore {
 
                 match checkpoint_policy {
                     CheckpointPolicy::Disabled => break,
-                    CheckpointPolicy::Periodic {
-                        every_ops,
-                        every_ms,
-                    } => {
+                    CheckpointPolicy::Periodic { every_ops, every_ms } => {
                         let every_ops = every_ops.max(1);
                         let max_delay = Duration::from_millis(every_ms.max(1));
                         if runtime.pending_ops < every_ops {
@@ -430,9 +407,8 @@ impl CortexaDBStore {
                                     runtime = guard;
                                 }
                             } else {
-                                runtime = cvar
-                                    .wait(runtime)
-                                    .expect("checkpoint runtime wait poisoned");
+                                runtime =
+                                    cvar.wait(runtime).expect("checkpoint runtime wait poisoned");
                             }
                         }
                     }
@@ -450,12 +426,8 @@ impl CortexaDBStore {
                 drop(runtime);
 
                 let read_snapshot = snapshot.load_full();
-                let last_applied_id = writer
-                    .lock()
-                    .expect("writer lock poisoned")
-                    .engine
-                    .last_applied_id()
-                    .0;
+                let last_applied_id =
+                    writer.lock().expect("writer lock poisoned").engine.last_applied_id().0;
 
                 if let Err(err) = save_checkpoint(
                     &checkpoint_path,
@@ -475,11 +447,8 @@ impl CortexaDBStore {
                         WriteAheadLog::truncate_prefix(&wal_path, CommandId(last_applied_id))
                     {
                         eprintln!("cortexadb WAL truncation error: {err}");
-                    } else if let Err(err) = writer
-                        .lock()
-                        .expect("writer lock poisoned")
-                        .engine
-                        .reopen_wal()
+                    } else if let Err(err) =
+                        writer.lock().expect("writer lock poisoned").engine.reopen_wal()
                     {
                         eprintln!("cortexadb WAL reopen error: {err}");
                     }
@@ -495,9 +464,7 @@ impl CortexaDBStore {
         if let Ok(prev) = writer.engine.get_state_machine().get_memory(effective.id) {
             let content_changed = prev.content != effective.content;
             if content_changed && effective.embedding.is_none() {
-                return Err(CortexaDBStoreError::MissingEmbeddingOnContentChange(
-                    effective.id,
-                ));
+                return Err(CortexaDBStoreError::MissingEmbeddingOnContentChange(effective.id));
             }
 
             // Preserve embedding on metadata-only updates when caller omits embedding.
@@ -613,7 +580,7 @@ impl CortexaDBStore {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
         let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
         let report = Self::enforce_capacity_locked(&mut writer, policy, sync_now)?;
-        
+
         self.publish_snapshot_from_write_state(&writer);
         if !sync_now {
             self.mark_pending_write(report.evicted_ids.len());
@@ -663,11 +630,7 @@ impl CortexaDBStore {
     }
 
     pub fn wal_len(&self) -> u64 {
-        self.writer
-            .lock()
-            .expect("writer lock poisoned")
-            .engine
-            .wal_len()
+        self.writer.lock().expect("writer lock poisoned").engine.wal_len()
     }
 
     fn mark_pending_write(&self, ops: usize) {
@@ -728,13 +691,9 @@ impl CortexaDBStore {
                     }
                 }
                 let id = if sync_now {
-                    writer
-                        .engine
-                        .execute_command(Command::InsertMemory(entry.clone()))?
+                    writer.engine.execute_command(Command::InsertMemory(entry.clone()))?
                 } else {
-                    writer
-                        .engine
-                        .execute_command_unsynced(Command::InsertMemory(entry.clone()))?
+                    writer.engine.execute_command_unsynced(Command::InsertMemory(entry.clone()))?
                 };
                 match entry.embedding {
                     Some(embedding) => writer.indexes.vector_index_mut().index_in_namespace(
@@ -752,18 +711,14 @@ impl CortexaDBStore {
                 let cmd_id = if sync_now {
                     writer.engine.execute_command(Command::DeleteMemory(id))?
                 } else {
-                    writer
-                        .engine
-                        .execute_command_unsynced(Command::DeleteMemory(id))?
+                    writer.engine.execute_command_unsynced(Command::DeleteMemory(id))?
                 };
                 let _ = writer.indexes.vector_index_mut().remove(id);
                 cmd_id
             }
             WriteOp::AddEdge { from, to, relation } => {
                 if sync_now {
-                    writer
-                        .engine
-                        .execute_command(Command::AddEdge { from, to, relation })?
+                    writer.engine.execute_command(Command::AddEdge { from, to, relation })?
                 } else {
                     writer.engine.execute_command_unsynced(Command::AddEdge {
                         from,
@@ -774,13 +729,9 @@ impl CortexaDBStore {
             }
             WriteOp::RemoveEdge { from, to } => {
                 if sync_now {
-                    writer
-                        .engine
-                        .execute_command(Command::RemoveEdge { from, to })?
+                    writer.engine.execute_command(Command::RemoveEdge { from, to })?
                 } else {
-                    writer
-                        .engine
-                        .execute_command_unsynced(Command::RemoveEdge { from, to })?
+                    writer.engine.execute_command_unsynced(Command::RemoveEdge { from, to })?
                 }
             }
         };
@@ -887,15 +838,8 @@ impl Drop for CortexaDBStore {
 enum WriteOp {
     InsertMemory(MemoryEntry),
     DeleteMemory(MemoryId),
-    AddEdge {
-        from: MemoryId,
-        to: MemoryId,
-        relation: String,
-    },
-    RemoveEdge {
-        from: MemoryId,
-        to: MemoryId,
-    },
+    AddEdge { from: MemoryId, to: MemoryId, relation: String },
+    RemoveEdge { from: MemoryId, to: MemoryId },
 }
 
 #[cfg(test)]
@@ -999,10 +943,7 @@ mod tests {
         let changed_content =
             MemoryEntry::new(MemoryId(90), "agent1".to_string(), b"new".to_vec(), 1001);
         let err = store.insert_memory(changed_content).unwrap_err();
-        assert!(matches!(
-            err,
-            CortexaDBStoreError::MissingEmbeddingOnContentChange(MemoryId(90))
-        ));
+        assert!(matches!(err, CortexaDBStoreError::MissingEmbeddingOnContentChange(MemoryId(90))));
     }
 
     #[test]
@@ -1062,24 +1003,11 @@ mod tests {
                 1001,
             ))
             .unwrap_err();
-        assert!(matches!(
-            err,
-            CortexaDBStoreError::MissingEmbeddingOnContentChange(MemoryId(99))
-        ));
+        assert!(matches!(err, CortexaDBStoreError::MissingEmbeddingOnContentChange(MemoryId(99))));
 
         let after = store.snapshot();
-        let old_before = before
-            .state_machine()
-            .get_memory(MemoryId(99))
-            .unwrap()
-            .content
-            .clone();
-        let old_after = after
-            .state_machine()
-            .get_memory(MemoryId(99))
-            .unwrap()
-            .content
-            .clone();
+        let old_before = before.state_machine().get_memory(MemoryId(99)).unwrap().content.clone();
+        let old_after = after.state_machine().get_memory(MemoryId(99)).unwrap().content.clone();
         assert_eq!(old_before, b"old".to_vec());
         assert_eq!(old_after, b"old".to_vec());
     }
@@ -1110,9 +1038,7 @@ mod tests {
                 &plan,
                 snapshot_for_query.state_machine(),
                 snapshot_for_query.indexes(),
-                &SlowEmbedder {
-                    delay: Duration::from_millis(250),
-                },
+                &SlowEmbedder { delay: Duration::from_millis(250) },
             )
             .unwrap()
         });
@@ -1150,10 +1076,7 @@ mod tests {
             &wal,
             &seg,
             3,
-            SyncPolicy::Batch {
-                max_ops: 2,
-                max_delay_ms: 10_000,
-            },
+            SyncPolicy::Batch { max_ops: 2, max_delay_ms: 10_000 },
         )
         .unwrap();
 
@@ -1210,10 +1133,7 @@ mod tests {
                 &seg,
                 3,
                 SyncPolicy::Strict,
-                CheckpointPolicy::Periodic {
-                    every_ops: 1,
-                    every_ms: 10,
-                },
+                CheckpointPolicy::Periodic { every_ops: 1, every_ms: 10 },
                 CapacityPolicy::new(None, None),
             )
             .unwrap();

@@ -61,10 +61,7 @@ impl Default for CortexaDBConfig {
         Self {
             vector_dimension: 3,
             sync_policy: SyncPolicy::Strict,
-            checkpoint_policy: CheckpointPolicy::Periodic {
-                every_ops: 1000,
-                every_ms: 30_000,
-            },
+            checkpoint_policy: CheckpointPolicy::Periodic { every_ops: 1000, every_ms: 30_000 },
             capacity_policy: CapacityPolicy::new(None, None),
         }
     }
@@ -173,18 +170,9 @@ impl CortexaDB {
         };
 
         // Determine next memory ID from existing state.
-        let max_id = store
-            .state_machine()
-            .all_memories()
-            .iter()
-            .map(|e| e.id.0)
-            .max()
-            .unwrap_or(0);
+        let max_id = store.state_machine().all_memories().iter().map(|e| e.id.0).max().unwrap_or(0);
 
-        Ok(Self {
-            inner: store,
-            next_id: std::sync::atomic::AtomicU64::new(max_id + 1),
-        })
+        Ok(Self { inner: store, next_id: std::sync::atomic::AtomicU64::new(max_id + 1) })
     }
 
     /// Store a new memory with the given embedding and optional metadata.
@@ -223,17 +211,11 @@ impl CortexaDB {
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
     ) -> Result<u64> {
-        let id = MemoryId(
-            self.next_id
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        );
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let id = MemoryId(self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
-        let mut entry = MemoryEntry::new(id, namespace.to_string(), Vec::new(), ts)
-            .with_embedding(embedding);
+        let mut entry =
+            MemoryEntry::new(id, namespace.to_string(), Vec::new(), ts).with_embedding(embedding);
         if let Some(meta) = metadata {
             entry.metadata = meta;
         }
@@ -250,17 +232,11 @@ impl CortexaDB {
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
     ) -> Result<u64> {
-        let id = MemoryId(
-            self.next_id
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        );
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let id = MemoryId(self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
-        let mut entry = MemoryEntry::new(id, namespace.to_string(), content, ts)
-            .with_embedding(embedding);
+        let mut entry =
+            MemoryEntry::new(id, namespace.to_string(), content, ts).with_embedding(embedding);
         if let Some(meta) = metadata {
             entry.metadata = meta;
         }
@@ -283,19 +259,14 @@ impl CortexaDB {
         top_k: usize,
         metadata_filter: Option<HashMap<String, String>>,
     ) -> Result<Vec<Hit>> {
-        let embedder = StaticEmbedder {
-            embedding: query_embedding,
-        };
+        let embedder = StaticEmbedder { embedding: query_embedding };
         let mut options = QueryOptions::with_top_k(top_k);
         options.metadata_filter = metadata_filter;
         let execution = self.inner.query("", options, &embedder)?;
 
         let mut results = Vec::with_capacity(execution.hits.len());
         for hit in execution.hits {
-            results.push(Hit {
-                id: hit.id.0,
-                score: hit.final_score,
-            });
+            results.push(Hit { id: hit.id.0, score: hit.final_score });
         }
         Ok(results)
     }
@@ -320,9 +291,7 @@ impl CortexaDB {
         top_k: usize,
         metadata_filter: Option<HashMap<String, String>>,
     ) -> Result<Vec<Hit>> {
-        let embedder = StaticEmbedder {
-            embedding: query_embedding,
-        };
+        let embedder = StaticEmbedder { embedding: query_embedding };
         let mut options = QueryOptions::with_top_k(top_k);
         options.namespace = Some(namespace.to_string());
         options.metadata_filter = metadata_filter;
@@ -332,20 +301,15 @@ impl CortexaDB {
         let memories = sm.all_memories();
 
         // Build a lookup: MemoryId → namespace
-        let ns_map: std::collections::HashMap<u64, &str> = memories
-            .iter()
-            .map(|m| (m.id.0, m.namespace.as_str()))
-            .collect();
+        let ns_map: std::collections::HashMap<u64, &str> =
+            memories.iter().map(|m| (m.id.0, m.namespace.as_str())).collect();
 
         let results: Vec<Hit> = execution
             .hits
             .into_iter()
             .filter(|hit| ns_map.get(&hit.id.0).copied() == Some(namespace))
             .take(top_k)
-            .map(|hit| Hit {
-                id: hit.id.0,
-                score: hit.final_score,
-            })
+            .map(|hit| Hit { id: hit.id.0, score: hit.final_score })
             .collect();
 
         Ok(results)
@@ -543,12 +507,9 @@ mod tests {
 
         let hits = db.ask(vec![1.0, 0.0, 0.0], 1, None).unwrap();
         assert_eq!(hits[0].id, id);
-        
+
         let memory = db.get_memory(id).unwrap();
-        assert_eq!(
-            memory.metadata.get("source").map(|s| s.as_str()),
-            Some("test")
-        );
+        assert_eq!(memory.metadata.get("source").map(|s| s.as_str()), Some("test"));
     }
 
     #[test]
@@ -562,7 +523,7 @@ mod tests {
 
         let stats = db.stats();
         assert_eq!(stats.entries, 2);
-        
+
         let m1 = db.get_memory(id1).unwrap();
         assert_eq!(m1.namespace, "agent_b");
     }

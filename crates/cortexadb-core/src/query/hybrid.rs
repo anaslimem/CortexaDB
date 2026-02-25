@@ -22,11 +22,7 @@ pub enum HybridQueryError {
     #[error(
         "Invalid score weights: similarity={similarity_pct}, importance={importance_pct}, recency={recency_pct}"
     )]
-    InvalidScoreWeights {
-        similarity_pct: u8,
-        importance_pct: u8,
-        recency_pct: u8,
-    },
+    InvalidScoreWeights { similarity_pct: u8, importance_pct: u8, recency_pct: u8 },
     #[error("Invalid time range: start={start}, end={end}")]
     InvalidTimeRange { start: u64, end: u64 },
 }
@@ -47,11 +43,7 @@ pub struct ScoreWeights {
 
 impl ScoreWeights {
     pub const fn new(similarity_pct: u8, importance_pct: u8, recency_pct: u8) -> Self {
-        Self {
-            similarity_pct,
-            importance_pct,
-            recency_pct,
-        }
+        Self { similarity_pct, importance_pct, recency_pct }
     }
 
     fn normalized(self) -> Result<(f32, f32, f32)> {
@@ -103,10 +95,7 @@ pub struct QueryOptions {
 
 impl QueryOptions {
     pub fn with_top_k(top_k: usize) -> Self {
-        Self {
-            top_k,
-            ..Self::default()
-        }
+        Self { top_k, ..Self::default() }
     }
 }
 
@@ -146,11 +135,7 @@ impl<'a> HybridQueryEngine<'a> {
         index_layer: &'a IndexLayer,
         embedder: &'a dyn QueryEmbedder,
     ) -> Self {
-        Self {
-            state_machine,
-            index_layer,
-            embedder,
-        }
+        Self { state_machine, index_layer, embedder }
     }
 
     /// Convenience API
@@ -174,9 +159,7 @@ impl<'a> HybridQueryEngine<'a> {
             return Err(HybridQueryError::InvalidTopK(options.top_k));
         }
         if options.candidate_multiplier == 0 {
-            return Err(HybridQueryError::InvalidCandidateMultiplier(
-                options.candidate_multiplier,
-            ));
+            return Err(HybridQueryError::InvalidCandidateMultiplier(options.candidate_multiplier));
         }
         let (sim_w, imp_w, rec_w) = options.score_weights.normalized()?;
         if let Some((start, end)) = options.time_range {
@@ -185,10 +168,8 @@ impl<'a> HybridQueryEngine<'a> {
             }
         }
 
-        let query_embedding = self
-            .embedder
-            .embed(query_text)
-            .map_err(HybridQueryError::Embedder)?;
+        let query_embedding =
+            self.embedder.embed(query_text).map_err(HybridQueryError::Embedder)?;
 
         let candidate_k = options.top_k.saturating_mul(options.candidate_multiplier);
         let ann_multiplier = options.candidate_multiplier.max(7);
@@ -202,7 +183,8 @@ impl<'a> HybridQueryEngine<'a> {
 
         let mut candidate_scores = HashMap::new();
         for (id, cosine_similarity) in vector_results {
-            if self.matches_filters(id, None, options.time_range, options.metadata_filter.as_ref()) {
+            if self.matches_filters(id, None, options.time_range, options.metadata_filter.as_ref())
+            {
                 candidate_scores.insert(id, cosine_similarity);
             }
         }
@@ -373,8 +355,7 @@ mod tests {
         sm.insert_memory(b).unwrap();
         sm.insert_memory(c).unwrap();
 
-        sm.add_edge(MemoryId(1), MemoryId(2), "linked".to_string())
-            .unwrap();
+        sm.add_edge(MemoryId(1), MemoryId(2), "linked".to_string()).unwrap();
 
         (sm, layer, embedder)
     }
@@ -385,10 +366,7 @@ mod tests {
         let engine = HybridQueryEngine::new(&sm, &layer, &embedder);
 
         let hits = engine.query("hello", 10, Some("agent1")).unwrap();
-        assert!(
-            hits.iter()
-                .all(|h| h.id == MemoryId(1) || h.id == MemoryId(2))
-        );
+        assert!(hits.iter().all(|h| h.id == MemoryId(1) || h.id == MemoryId(2)));
     }
 
     #[test]
@@ -400,10 +378,7 @@ mod tests {
         options.time_range = Some((1500, 3500));
         let hits = engine.query_with_options("hello", options).unwrap();
 
-        assert!(
-            hits.iter()
-                .all(|h| h.id == MemoryId(2) || h.id == MemoryId(3))
-        );
+        assert!(hits.iter().all(|h| h.id == MemoryId(2) || h.id == MemoryId(3)));
     }
 
     #[test]

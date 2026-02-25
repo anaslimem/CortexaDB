@@ -33,10 +33,7 @@ pub fn compact_segment_dir<P: AsRef<Path>>(data_dir: P) -> Result<CompactionRepo
     drop(storage);
 
     if compacted_segments.is_empty() {
-        return Ok(CompactionReport {
-            compacted_segments,
-            live_entries_rewritten: 0,
-        });
+        return Ok(CompactionReport { compacted_segments, live_entries_rewritten: 0 });
     }
 
     // Deterministic rewrite order.
@@ -47,10 +44,7 @@ pub fn compact_segment_dir<P: AsRef<Path>>(data_dir: P) -> Result<CompactionRepo
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "segments".to_string());
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
 
     let tmp_dir = parent.join(format!("{}.compact.{}", data_name, nonce));
     let backup_dir = parent.join(format!("{}.backup.{}", data_name, nonce));
@@ -67,10 +61,7 @@ pub fn compact_segment_dir<P: AsRef<Path>>(data_dir: P) -> Result<CompactionRepo
     std::fs::rename(&tmp_dir, data_dir)?;
     std::fs::remove_dir_all(&backup_dir)?;
 
-    Ok(CompactionReport {
-        compacted_segments,
-        live_entries_rewritten: live_entries.len(),
-    })
+    Ok(CompactionReport { compacted_segments, live_entries_rewritten: live_entries.len() })
 }
 
 pub fn temp_compaction_paths(base: &Path, suffix: &str) -> (PathBuf, PathBuf) {

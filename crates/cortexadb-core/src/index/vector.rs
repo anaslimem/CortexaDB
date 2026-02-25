@@ -150,9 +150,7 @@ struct AnnBackend {
 
 impl VectorSearchBackend for AnnBackend {
     fn mode(&self) -> VectorBackendMode {
-        VectorBackendMode::Ann {
-            ann_search_multiplier: self.ann_search_multiplier,
-        }
+        VectorBackendMode::Ann { ann_search_multiplier: self.ann_search_multiplier }
     }
     fn ann_multiplier_hint(&self) -> usize {
         self.ann_search_multiplier
@@ -207,11 +205,9 @@ impl VectorIndex {
         self.backend_mode = mode;
         self.backend = match mode {
             VectorBackendMode::Exact => Arc::new(ExactBackend),
-            VectorBackendMode::Ann {
-                ann_search_multiplier,
-            } => Arc::new(AnnBackend {
-                ann_search_multiplier: ann_search_multiplier.max(1),
-            }),
+            VectorBackendMode::Ann { ann_search_multiplier } => {
+                Arc::new(AnnBackend { ann_search_multiplier: ann_search_multiplier.max(1) })
+            }
         };
     }
 
@@ -355,9 +351,8 @@ impl VectorIndex {
                 self.search_exact_scoped(query, top_k, namespace, use_parallel)
             }
             VectorBackendMode::Ann { .. } => {
-                let ann_multiplier = ann_candidate_multiplier
-                    .max(self.backend.ann_multiplier_hint())
-                    .max(1);
+                let ann_multiplier =
+                    ann_candidate_multiplier.max(self.backend.ann_multiplier_hint()).max(1);
                 let ann_k = top_k.saturating_mul(ann_multiplier);
                 let approx = self.search_approx_candidates(query, ann_k, namespace)?;
                 if approx.is_empty() {
@@ -426,11 +421,7 @@ impl VectorIndex {
 
     /// Get all indexed memory IDs
     pub fn indexed_ids(&self) -> Vec<MemoryId> {
-        self.id_to_namespace
-            .keys()
-            .copied()
-            .filter(|id| self.has(*id))
-            .collect()
+        self.id_to_namespace.keys().copied().filter(|id| self.has(*id)).collect()
     }
 
     fn compact_partition(partition: &mut NamespacePartition) {
@@ -515,8 +506,7 @@ impl VectorIndex {
         ann_k: usize,
         namespace: Option<&str>,
     ) -> Result<Vec<MemoryId>> {
-        self.ann_provider
-            .candidates(query, ann_k, namespace, &self.partitions)
+        self.ann_provider.candidates(query, ann_k, namespace, &self.partitions)
     }
 
     fn rerank_exact(
@@ -665,12 +655,8 @@ mod tests {
     #[test]
     fn test_vector_search_single_match() {
         let mut index = VectorIndex::new(3);
-        index
-            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
-            .unwrap();
-        index
-            .index(MemoryId(2), create_embedding(&[0.5, 0.6, 0.7]))
-            .unwrap();
+        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
+        index.index(MemoryId(2), create_embedding(&[0.5, 0.6, 0.7])).unwrap();
 
         let results = index.search(&[0.1, 0.2, 0.3], 1).unwrap();
 
@@ -682,15 +668,9 @@ mod tests {
     #[test]
     fn test_vector_search_top_k() {
         let mut index = VectorIndex::new(2);
-        index
-            .index(MemoryId(1), create_embedding(&[1.0, 0.0]))
-            .unwrap();
-        index
-            .index(MemoryId(2), create_embedding(&[0.9, 0.1]))
-            .unwrap();
-        index
-            .index(MemoryId(3), create_embedding(&[0.0, 1.0]))
-            .unwrap();
+        index.index(MemoryId(1), create_embedding(&[1.0, 0.0])).unwrap();
+        index.index(MemoryId(2), create_embedding(&[0.9, 0.1])).unwrap();
+        index.index(MemoryId(3), create_embedding(&[0.0, 1.0])).unwrap();
 
         let results = index.search(&[1.0, 0.0], 2).unwrap();
 
@@ -703,15 +683,9 @@ mod tests {
     #[test]
     fn test_vector_search_sorted_by_similarity() {
         let mut index = VectorIndex::new(2);
-        index
-            .index(MemoryId(1), create_embedding(&[0.0, 1.0]))
-            .unwrap();
-        index
-            .index(MemoryId(2), create_embedding(&[0.5, 0.5]))
-            .unwrap();
-        index
-            .index(MemoryId(3), create_embedding(&[1.0, 0.0]))
-            .unwrap();
+        index.index(MemoryId(1), create_embedding(&[0.0, 1.0])).unwrap();
+        index.index(MemoryId(2), create_embedding(&[0.5, 0.5])).unwrap();
+        index.index(MemoryId(3), create_embedding(&[1.0, 0.0])).unwrap();
 
         let results = index.search(&[1.0, 0.0], 3).unwrap();
 
@@ -748,9 +722,7 @@ mod tests {
     #[test]
     fn test_vector_remove() {
         let mut index = VectorIndex::new(3);
-        index
-            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
-            .unwrap();
+        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
         assert_eq!(index.len(), 1);
 
         index.remove(MemoryId(1)).unwrap();
@@ -775,9 +747,7 @@ mod tests {
     #[test]
     fn test_vector_search_invalid_top_k() {
         let mut index = VectorIndex::new(3);
-        index
-            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
-            .unwrap();
+        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
 
         let result = index.search(&[0.1, 0.2, 0.3], 0);
         assert!(result.is_err());
@@ -786,12 +756,8 @@ mod tests {
     #[test]
     fn test_vector_search_top_k_larger_than_embeddings() {
         let mut index = VectorIndex::new(3);
-        index
-            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
-            .unwrap();
-        index
-            .index(MemoryId(2), create_embedding(&[0.4, 0.5, 0.6]))
-            .unwrap();
+        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
+        index.index(MemoryId(2), create_embedding(&[0.4, 0.5, 0.6])).unwrap();
 
         // Request top 10 but only 2 embeddings
         let results = index.search(&[0.1, 0.2, 0.3], 10).unwrap();
@@ -801,15 +767,9 @@ mod tests {
     #[test]
     fn test_vector_indexed_ids() {
         let mut index = VectorIndex::new(3);
-        index
-            .index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3]))
-            .unwrap();
-        index
-            .index(MemoryId(5), create_embedding(&[0.4, 0.5, 0.6]))
-            .unwrap();
-        index
-            .index(MemoryId(3), create_embedding(&[0.7, 0.8, 0.9]))
-            .unwrap();
+        index.index(MemoryId(1), create_embedding(&[0.1, 0.2, 0.3])).unwrap();
+        index.index(MemoryId(5), create_embedding(&[0.4, 0.5, 0.6])).unwrap();
+        index.index(MemoryId(3), create_embedding(&[0.7, 0.8, 0.9])).unwrap();
 
         let ids = index.indexed_ids();
         assert_eq!(ids.len(), 3);
@@ -838,9 +798,8 @@ mod tests {
 
         // Create 1000 embeddings
         for i in 0..1000 {
-            let embedding: Vec<f32> = (0..100)
-                .map(|j| ((i * 17 + j * 23) as f32).sin().abs())
-                .collect();
+            let embedding: Vec<f32> =
+                (0..100).map(|j| ((i * 17 + j * 23) as f32).sin().abs()).collect();
             index.index(MemoryId(i as u64), embedding).unwrap();
         }
 
@@ -863,9 +822,7 @@ mod tests {
         index.index(MemoryId(3), vec![0.0, 0.0, 1.0]).unwrap();
 
         let candidates: HashSet<MemoryId> = [MemoryId(1), MemoryId(3)].into_iter().collect();
-        let results = index
-            .search_in_ids(&[1.0, 0.0, 0.0], &candidates, 5)
-            .unwrap();
+        let results = index.search_in_ids(&[1.0, 0.0, 0.0], &candidates, 5).unwrap();
 
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, MemoryId(1));
@@ -875,16 +832,10 @@ mod tests {
     #[test]
     fn test_namespace_partition_search_scope() {
         let mut index = VectorIndex::new(3);
-        index
-            .index_in_namespace("agent1", MemoryId(1), vec![1.0, 0.0, 0.0])
-            .unwrap();
-        index
-            .index_in_namespace("agent2", MemoryId(2), vec![1.0, 0.0, 0.0])
-            .unwrap();
+        index.index_in_namespace("agent1", MemoryId(1), vec![1.0, 0.0, 0.0]).unwrap();
+        index.index_in_namespace("agent2", MemoryId(2), vec![1.0, 0.0, 0.0]).unwrap();
 
-        let scoped = index
-            .search_scoped(&[1.0, 0.0, 0.0], 10, Some("agent1"), false, 1)
-            .unwrap();
+        let scoped = index.search_scoped(&[1.0, 0.0, 0.0], 10, Some("agent1"), false, 1).unwrap();
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].0, MemoryId(1));
     }
@@ -892,23 +843,13 @@ mod tests {
     #[test]
     fn test_ann_mode_uses_candidate_expansion_and_exact_rerank() {
         let mut index = VectorIndex::new(3);
-        index.set_backend_mode(VectorBackendMode::Ann {
-            ann_search_multiplier: 7,
-        });
+        index.set_backend_mode(VectorBackendMode::Ann { ann_search_multiplier: 7 });
         for i in 0..30u64 {
-            let emb = if i == 29 {
-                vec![1.0, 0.0, 0.0]
-            } else {
-                vec![0.6, 0.8, 0.0]
-            };
-            index
-                .index_in_namespace("agent1", MemoryId(i), emb)
-                .unwrap();
+            let emb = if i == 29 { vec![1.0, 0.0, 0.0] } else { vec![0.6, 0.8, 0.0] };
+            index.index_in_namespace("agent1", MemoryId(i), emb).unwrap();
         }
 
-        let results = index
-            .search_scoped(&[1.0, 0.0, 0.0], 3, Some("agent1"), false, 7)
-            .unwrap();
+        let results = index.search_scoped(&[1.0, 0.0, 0.0], 3, Some("agent1"), false, 7).unwrap();
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].0, MemoryId(29));
     }
@@ -916,14 +857,10 @@ mod tests {
     #[test]
     fn test_ann_tombstone_compaction_trigger_over_20pct() {
         let mut index = VectorIndex::new(3);
-        index.set_backend_mode(VectorBackendMode::Ann {
-            ann_search_multiplier: 7,
-        });
+        index.set_backend_mode(VectorBackendMode::Ann { ann_search_multiplier: 7 });
 
         for i in 0..10u64 {
-            index
-                .index_in_namespace("agent1", MemoryId(i), vec![1.0, 0.0, 0.0])
-                .unwrap();
+            index.index_in_namespace("agent1", MemoryId(i), vec![1.0, 0.0, 0.0]).unwrap();
         }
         assert_eq!(index.len(), 10);
 
@@ -933,9 +870,7 @@ mod tests {
         index.remove(MemoryId(2)).unwrap();
 
         assert_eq!(index.len(), 7);
-        let results = index
-            .search_scoped(&[1.0, 0.0, 0.0], 20, Some("agent1"), false, 7)
-            .unwrap();
+        let results = index.search_scoped(&[1.0, 0.0, 0.0], 20, Some("agent1"), false, 7).unwrap();
         assert!(results.iter().all(|(id, _)| *id >= MemoryId(3)));
     }
 }

@@ -33,17 +33,12 @@ fn policy_cell() -> &'static RwLock<IntentPolicy> {
 }
 
 pub fn set_intent_policy(policy: IntentPolicy) {
-    let mut guard = policy_cell()
-        .write()
-        .expect("intent policy write lock poisoned");
+    let mut guard = policy_cell().write().expect("intent policy write lock poisoned");
     *guard = policy;
     drop(guard);
     executor::clear_intent_anchor_cache();
 }
 
 pub fn get_intent_policy() -> IntentPolicy {
-    policy_cell()
-        .read()
-        .expect("intent policy read lock poisoned")
-        .clone()
+    policy_cell().read().expect("intent policy read lock poisoned").clone()
 }

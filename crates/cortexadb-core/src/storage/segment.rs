@@ -17,11 +17,7 @@ pub enum SegmentError {
     #[error("Entry not found: {0:?}")]
     EntryNotFound(MemoryId),
     #[error("Checksum mismatch at offset {offset}: expected {expected:x}, got {actual:x}")]
-    ChecksumMismatch {
-        offset: u64,
-        expected: u32,
-        actual: u32,
-    },
+    ChecksumMismatch { offset: u64, expected: u32, actual: u32 },
     #[error("Segment {id} not found")]
     SegmentNotFound { id: u32 },
     #[error("Index error: {0}")]
@@ -96,12 +92,7 @@ impl SegmentStorage {
         let dir = self.data_dir.clone();
         let mut entries = std::fs::read_dir(&dir)?
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .map(|ext| ext == "seg")
-                    .unwrap_or(false)
-            })
+            .filter(|e| e.path().extension().map(|ext| ext == "seg").unwrap_or(false))
             .collect::<Vec<_>>();
 
         // Sort by segment ID to process in order
@@ -185,11 +176,7 @@ impl SegmentStorage {
                     self.index.insert(
                         entry.id,
                         SegmentEntryMeta {
-                            location: SegmentLocation {
-                                segment_id,
-                                offset,
-                                length: len as u32,
-                            },
+                            location: SegmentLocation { segment_id, offset, length: len as u32 },
                             deleted: false,
                         },
                     );
@@ -301,20 +288,10 @@ impl SegmentStorage {
         self.current_segment_size += 4 + 4 + len as u64;
 
         // Create location
-        let location = SegmentLocation {
-            segment_id,
-            offset,
-            length: len,
-        };
+        let location = SegmentLocation { segment_id, offset, length: len };
 
         // Update index
-        self.index.insert(
-            entry.id,
-            SegmentEntryMeta {
-                location,
-                deleted: false,
-            },
-        );
+        self.index.insert(entry.id, SegmentEntryMeta { location, deleted: false });
 
         Ok(location)
     }
@@ -409,9 +386,7 @@ impl SegmentStorage {
 
         // Count live and deleted entries per segment
         for meta in self.index.values() {
-            let entry = segments_state
-                .entry(meta.location.segment_id)
-                .or_insert((0, 0));
+            let entry = segments_state.entry(meta.location.segment_id).or_insert((0, 0));
             if meta.deleted {
                 entry.1 += 1;
             } else {

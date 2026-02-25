@@ -1,3 +1,4 @@
+pub mod chunker;
 pub mod core;
 pub mod engine;
 pub mod facade;
@@ -7,4 +8,5 @@ pub mod storage;
 pub mod store;
 
 // Re-export the primary facade types for convenience.
-pub use facade::{Memory, CortexaDB, CortexaDBConfig, CortexaDBError, Stats};
+pub use chunker::{ChunkMetadata, ChunkResult, ChunkingStrategy, chunk};
+pub use facade::{CortexaDB, CortexaDBConfig, CortexaDBError, Memory, Stats};

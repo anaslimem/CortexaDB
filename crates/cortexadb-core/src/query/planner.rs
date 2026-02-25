@@ -117,10 +117,7 @@ impl QueryPlanner {
             1
         };
 
-        Some(IntentAdjustments {
-            score_weights,
-            graph_hops,
-        })
+        Some(IntentAdjustments { score_weights, graph_hops })
     }
 }
 
@@ -182,14 +179,17 @@ mod tests {
         let semantic = vec![1.0, 0.0, 0.0];
         let recency = vec![0.0, 1.0, 0.0];
         let graph = vec![0.0, 0.0, 1.0];
-        let adj =
-            QueryPlanner::infer_intent_adjustments(&query, &semantic, &recency, &graph, 0.55, 0.80, 20)
-                .unwrap();
+        let adj = QueryPlanner::infer_intent_adjustments(
+            &query, &semantic, &recency, &graph, 0.55, 0.80, 20,
+        )
+        .unwrap();
 
         assert!(adj.graph_hops >= 2);
         assert!(adj.score_weights.recency_pct >= adj.score_weights.similarity_pct);
         assert_eq!(
-            adj.score_weights.similarity_pct + adj.score_weights.importance_pct + adj.score_weights.recency_pct,
+            adj.score_weights.similarity_pct
+                + adj.score_weights.importance_pct
+                + adj.score_weights.recency_pct,
             100
         );
     }

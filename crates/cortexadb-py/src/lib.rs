@@ -9,6 +9,7 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use cortexadb_core::chunker;
 use cortexadb_core::engine::{CapacityPolicy, SyncPolicy};
 use cortexadb_core::facade;
 use cortexadb_core::store::CheckpointPolicy;
@@ -21,7 +22,6 @@ create_exception!(cortexadb, CortexaDBError, PyException);
 create_exception!(cortexadb, CortexaDBNotFoundError, CortexaDBError);
 create_exception!(cortexadb, CortexaDBConfigError, CortexaDBError);
 create_exception!(cortexadb, CortexaDBIOError, CortexaDBError);
-
 
 /// Map core CortexaDBError to specific Python exceptions.
 fn map_cortexadb_err(e: facade::CortexaDBError) -> PyErr {
@@ -154,8 +154,11 @@ impl PyStats {
     fn __repr__(&self) -> String {
         format!(
             "Stats(entries={}, indexed_embeddings={}, wal_length={}, vector_dimension={}, storage_version={})",
-            self.entries, self.indexed_embeddings, self.wal_length,
-            self.vector_dimension, self.storage_version,
+            self.entries,
+            self.indexed_embeddings,
+            self.wal_length,
+            self.vector_dimension,
+            self.storage_version,
         )
     }
 }
@@ -196,19 +199,26 @@ impl PyCortexaDB {
         text_signature = "(path, *, dimension, sync='strict', max_entries=None)",
         signature = (path, *, dimension, sync="strict".to_string(), max_entries=None)
     )]
-    fn open(path: &str, dimension: usize, sync: String, max_entries: Option<usize>) -> PyResult<Self> {
+    fn open(
+        path: &str,
+        dimension: usize,
+        sync: String,
+        max_entries: Option<usize>,
+    ) -> PyResult<Self> {
         if dimension == 0 {
             return Err(CortexaDBConfigError::new_err("dimension must be > 0"));
         }
 
         let sync_policy = match sync.to_lowercase().as_str() {
             "strict" => SyncPolicy::Strict,
-            "async"  => SyncPolicy::Async { interval_ms: 10 },
-            "batch"  => SyncPolicy::Batch { max_ops: 64, max_delay_ms: 50 },
-            other    => return Err(CortexaDBConfigError::new_err(format!(
-                "unknown sync policy '{}'. Valid values: 'strict', 'async', 'batch'",
-                other,
-            ))),
+            "async" => SyncPolicy::Async { interval_ms: 10 },
+            "batch" => SyncPolicy::Batch { max_ops: 64, max_delay_ms: 50 },
+            other => {
+                return Err(CortexaDBConfigError::new_err(format!(
+                    "unknown sync policy '{}'. Valid values: 'strict', 'async', 'batch'",
+                    other,
+                )));
+            }
         };
 
         let config = facade::CortexaDBConfig {
@@ -233,10 +243,7 @@ impl PyCortexaDB {
             )));
         }
 
-        Ok(PyCortexaDB {
-            inner: db,
-            dimension,
-        })
+        Ok(PyCortexaDB { inner: db, dimension })
     }
 
     /// Store a new memory with the given embedding vector.
@@ -271,13 +278,20 @@ impl PyCortexaDB {
             )));
         }
 
-        let id = py.allow_threads(|| {
-            if content.is_empty() {
-                 self.inner.remember_in_namespace(&namespace, embedding, metadata)
-            } else {
-                 self.inner.remember_with_content(&namespace, content.into_bytes(), embedding, metadata)
-            }
-        }).map_err(map_cortexadb_err)?;
+        let id = py
+            .allow_threads(|| {
+                if content.is_empty() {
+                    self.inner.remember_in_namespace(&namespace, embedding, metadata)
+                } else {
+                    self.inner.remember_with_content(
+                        &namespace,
+                        content.into_bytes(),
+                        embedding,
+                        metadata,
+                    )
+                }
+            })
+            .map_err(map_cortexadb_err)?;
         Ok(id)
     }
 
@@ -311,14 +325,10 @@ impl PyCortexaDB {
             )));
         }
 
-        let results = py.allow_threads(|| self.inner.ask(embedding, top_k, filter)).map_err(map_cortexadb_err)?;
-        Ok(results
-            .into_iter()
-            .map(|m| PyHit {
-                id: m.id,
-                score: m.score,
-            })
-            .collect())
+        let results = py
+            .allow_threads(|| self.inner.ask(embedding, top_k, filter))
+            .map_err(map_cortexadb_err)?;
+        Ok(results.into_iter().map(|m| PyHit { id: m.id, score: m.score }).collect())
     }
 
     /// Search within a single namespace, filtering in Rust before returning results.
@@ -358,13 +368,7 @@ impl PyCortexaDB {
             .allow_threads(|| self.inner.ask_in_namespace(&ns, embedding, top_k, filter))
             .map_err(map_cortexadb_err)?;
 
-        Ok(results
-            .into_iter()
-            .map(|m| PyHit {
-                id: m.id,
-                score: m.score,
-            })
-            .collect())
+        Ok(results.into_iter().map(|m| PyHit { id: m.id, score: m.score }).collect())
     }
 
     /// Retrieve a full memory by ID.
@@ -414,9 +418,7 @@ impl PyCortexaDB {
     ///     CortexaDBError: If either memory ID does not exist.
     #[pyo3(text_signature = "(self, from_id, to_id, relation)")]
     fn connect(&self, from_id: u64, to_id: u64, relation: &str) -> PyResult<()> {
-        self.inner
-            .connect(from_id, to_id, relation)
-            .map_err(map_cortexadb_err)
+        self.inner.connect(from_id, to_id, relation).map_err(map_cortexadb_err)
     }
 
     /// Retrieve the outgoing graph connections from a specific memory.
@@ -503,6 +505,88 @@ impl PyCortexaDB {
 }
 
 // ---------------------------------------------------------------------------
+// ChunkResult — chunking result
+// ---------------------------------------------------------------------------
+
+#[pyclass(frozen, name = "ChunkResult")]
+#[derive(Clone)]
+struct PyChunkResult {
+    #[pyo3(get)]
+    text: String,
+    #[pyo3(get)]
+    index: usize,
+    #[pyo3(get)]
+    metadata: Option<HashMap<String, String>>,
+}
+
+#[pymethods]
+impl PyChunkResult {
+    fn __repr__(&self) -> String {
+        format!(
+            "ChunkResult(index={}, text='{}...')",
+            self.index,
+            &self.text[..self.text.len().min(50)]
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Chunking function
+// ---------------------------------------------------------------------------
+
+/// Chunk text using the specified strategy.
+///
+/// Args:
+///     text: The input text to chunk.
+///     strategy: Chunking strategy - "fixed", "recursive", "semantic", "markdown", or "json".
+///     chunk_size: Target size of each chunk (for fixed/recursive).
+///     overlap: Number of words to overlap between chunks.
+///
+/// Returns:
+///     List of ChunkResult objects.
+#[pyfunction]
+#[pyo3(text_signature = "(text, strategy='recursive', *, chunk_size=512, overlap=50)")]
+fn chunk(
+    text: &str,
+    strategy: &str,
+    chunk_size: usize,
+    overlap: usize,
+) -> PyResult<Vec<PyChunkResult>> {
+    let chunk_strategy = match strategy.to_lowercase().as_str() {
+        "fixed" => chunker::ChunkingStrategy::Fixed { chunk_size, overlap },
+        "recursive" => chunker::ChunkingStrategy::Recursive { chunk_size, overlap },
+        "semantic" => chunker::ChunkingStrategy::Semantic { overlap },
+        "markdown" => chunker::ChunkingStrategy::Markdown { preserve_headers: true, overlap },
+        "json" => chunker::ChunkingStrategy::Json { overlap },
+        _ => {
+            return Err(CortexaDBError::new_err(format!(
+                "Unknown chunking strategy '{}'. Valid values: 'fixed', 'recursive', 'semantic', 'markdown', 'json'",
+                strategy
+            )));
+        }
+    };
+
+    let results = chunker::chunk(text, chunk_strategy);
+
+    Ok(results
+        .into_iter()
+        .map(|c| {
+            let metadata = c.metadata.map(|m| {
+                let mut map = HashMap::new();
+                if let Some(key) = m.key {
+                    map.insert("key".to_string(), key);
+                }
+                if let Some(value) = m.value {
+                    map.insert("value".to_string(), value);
+                }
+                map
+            });
+            PyChunkResult { text: c.text, index: c.index, metadata }
+        })
+        .collect())
+}
+
+// ---------------------------------------------------------------------------
 // Module
 // ---------------------------------------------------------------------------
 
@@ -513,6 +597,8 @@ fn _cortexadb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHit>()?;
     m.add_class::<PyMemory>()?;
     m.add_class::<PyStats>()?;
+    m.add_class::<PyChunkResult>()?;
+    m.add_function(wrap_pyfunction!(chunk, m)?)?;
     m.add("CortexaDBError", m.py().get_type::<CortexaDBError>())?;
     m.add("CortexaDBNotFoundError", m.py().get_type::<CortexaDBNotFoundError>())?;
     m.add("CortexaDBConfigError", m.py().get_type::<CortexaDBConfigError>())?;

@@ -47,12 +47,8 @@ mod tests {
 
     #[test]
     fn test_memory_entry_creation() {
-        let entry = MemoryEntry::new(
-            MemoryId(1),
-            "default".to_string(),
-            b"test content".to_vec(),
-            1000,
-        );
+        let entry =
+            MemoryEntry::new(MemoryId(1), "default".to_string(), b"test content".to_vec(), 1000);
         assert_eq!(entry.id, MemoryId(1));
         assert_eq!(entry.namespace, "default");
         assert_eq!(entry.importance, 0.0);
