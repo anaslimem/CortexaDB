@@ -138,12 +138,13 @@ class Mnemos:
         dimension: t.Optional[int],
         embedder: t.Optional[Embedder] = None,
         sync: str = "strict",
+        max_entries: t.Optional[int] = None,
         _recorder: t.Optional[ReplayWriter] = None,
     ):
         self._embedder = embedder
         self._recorder = _recorder
         try:
-            self._inner = _mnemos.Mnemos.open(path, dimension=dimension, sync=sync)
+            self._inner = _mnemos.Mnemos.open(path, dimension=dimension, sync=sync, max_entries=max_entries)
         except Exception as e:
             raise MnemosError(str(e))
 
@@ -155,6 +156,7 @@ class Mnemos:
         dimension: t.Optional[int] = None,
         embedder: t.Optional[Embedder] = None,
         sync: str = "strict",
+        max_entries: t.Optional[int] = None,
         record: t.Optional[str] = None,
     ) -> "Mnemos":
         """
@@ -193,7 +195,14 @@ class Mnemos:
         if record is not None:
             recorder = ReplayWriter(record, dimension=dim, sync=sync)
 
-        return cls(path, dimension=dim, embedder=embedder, sync=sync, _recorder=recorder)
+        return cls(
+            path,
+            dimension=dim,
+            embedder=embedder,
+            sync=sync,
+            max_entries=max_entries,
+            _recorder=recorder,
+        )
 
     @classmethod
     def replay(

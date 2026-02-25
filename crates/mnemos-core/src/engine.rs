@@ -87,6 +87,8 @@ impl Engine {
         let wal_path = wal_path.as_ref();
         let segments_dir = segments_dir.as_ref();
 
+        Self::recover_compaction_state(segments_dir);
+
         // Check if we need to recover from existing WAL
         if wal_path.exists() {
             Self::recover(wal_path, segments_dir)
@@ -122,6 +124,10 @@ impl Engine {
     ) -> Result<Self> {
         let wal_path = wal_path.as_ref();
         let segments_dir = segments_dir.as_ref();
+
+        // recover_compaction_state is now called by new() or recover() 
+        // before calling this, but we keep it here for direct calls to recover_from_checkpoint.
+        Self::recover_compaction_state(segments_dir);
 
         // Load segments (this rebuilds the index from segment files)
         let mut segments = SegmentStorage::new(segments_dir)?;
@@ -188,6 +194,48 @@ impl Engine {
             state_machine,
             last_applied_id: last_id,
         })
+    }
+
+    fn recover_compaction_state(segments_dir: &Path) {
+        let parent = segments_dir.parent().unwrap_or_else(|| Path::new("."));
+        let data_name = segments_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "segments".to_string());
+
+        let prefix_compact = format!("{}.compact.", data_name);
+        let prefix_backup = format!("{}.backup.", data_name);
+
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            let mut backups = Vec::new();
+            let mut compacts = Vec::new();
+
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with(&prefix_backup) {
+                    backups.push(entry.path());
+                } else if name.starts_with(&prefix_compact) {
+                    compacts.push(entry.path());
+                }
+            }
+
+            // 1. Rollback if data_dir is missing but backup exists
+            if !segments_dir.exists() && !backups.is_empty() {
+                let backup_path = &backups[0];
+                let _ = std::fs::rename(backup_path, segments_dir);
+                backups.remove(0);
+            }
+
+            // 2. Delete any remaining backups (cleanup from successful compaction, or extras)
+            for backup in backups {
+                let _ = std::fs::remove_dir_all(&backup);
+            }
+
+            // 3. Delete any temp compact dirs (failed mid-compaction)
+            for compact in compacts {
+                let _ = std::fs::remove_dir_all(&compact);
+            }
+        }
     }
 
     fn rebuild_segments_from_state<P: AsRef<Path>>(
@@ -925,5 +973,43 @@ mod tests {
                 .get_memory(MemoryId(0))
                 .is_ok()
         ); // Should exist
+    }
+
+    #[test]
+    fn test_recovery_compaction_orphans() {
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("engine.wal");
+        let seg_dir = temp_dir.path().join("segments");
+
+        // 1. Create a dummy backup dir (simulates crash after rename(data, backup))
+        let backup_dir = temp_dir.path().join("segments.backup.123");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        std::fs::write(backup_dir.join("000000.seg"), b"dummy backup data").unwrap();
+
+        // 2. Create a dummy compact dir (simulates orphaned temp dir)
+        let compact_dir = temp_dir.path().join("segments.compact.456");
+        std::fs::create_dir_all(&compact_dir).unwrap();
+        std::fs::write(compact_dir.join("000001.seg"), b"dummy compact data").unwrap();
+
+        // Case A: data_dir missing, backup exists -> should rollback
+        assert!(!seg_dir.exists());
+        let _ = Engine::new(&wal_path, &seg_dir).unwrap();
+
+        assert!(seg_dir.exists());
+        assert!(!backup_dir.exists());
+        assert!(!compact_dir.exists());
+        assert!(seg_dir.join("000000.seg").exists());
+
+        // Case B: data_dir exists, backup exists -> should delete backup
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        std::fs::create_dir_all(&compact_dir).unwrap();
+        
+        // We need the WAL to exists for Engine::new to call recover
+        std::fs::write(&wal_path, b"").unwrap();
+
+        let _ = Engine::new(&wal_path, &seg_dir).unwrap();
+        assert!(seg_dir.exists());
+        assert!(!backup_dir.exists());
+        assert!(!compact_dir.exists());
     }
 }

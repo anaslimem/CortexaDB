@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+use arc_swap::ArcSwap;
 
 use thiserror::Error;
 
@@ -99,7 +100,7 @@ struct CheckpointRuntime {
 /// - snapshot reads (`Arc<ReadSnapshot>`) for isolated concurrent queries
 pub struct MnemosStore {
     writer: Arc<Mutex<WriteState>>,
-    snapshot: Arc<RwLock<Arc<ReadSnapshot>>>,
+    snapshot: Arc<ArcSwap<ReadSnapshot>>,
     sync_policy: SyncPolicy,
     sync_control: Arc<(Mutex<SyncRuntime>, Condvar)>,
     sync_thread: Option<JoinHandle<()>>,
@@ -107,6 +108,7 @@ pub struct MnemosStore {
     checkpoint_path: std::path::PathBuf,
     checkpoint_control: Arc<(Mutex<CheckpointRuntime>, Condvar)>,
     checkpoint_thread: Option<JoinHandle<()>>,
+    capacity_policy: CapacityPolicy,
 }
 
 impl MnemosStore {
@@ -121,6 +123,7 @@ impl MnemosStore {
             vector_dimension,
             SyncPolicy::Strict,
             CheckpointPolicy::Disabled,
+            CapacityPolicy::new(None, None),
         )
     }
 
@@ -136,6 +139,7 @@ impl MnemosStore {
             vector_dimension,
             sync_policy,
             CheckpointPolicy::Disabled,
+            CapacityPolicy::new(None, None),
         )
     }
 
@@ -145,6 +149,7 @@ impl MnemosStore {
         vector_dimension: usize,
         sync_policy: SyncPolicy,
         checkpoint_policy: CheckpointPolicy,
+        capacity_policy: CapacityPolicy,
     ) -> Result<Self> {
         let wal_path = wal_path.as_ref().to_path_buf();
         let segments_dir = segments_dir.as_ref().to_path_buf();
@@ -155,6 +160,7 @@ impl MnemosStore {
             vector_dimension,
             sync_policy,
             checkpoint_policy,
+            capacity_policy,
             checkpoint_path,
         )
     }
@@ -170,6 +176,7 @@ impl MnemosStore {
             vector_dimension,
             SyncPolicy::Strict,
             CheckpointPolicy::Disabled,
+            CapacityPolicy::new(None, None),
         )
     }
 
@@ -185,6 +192,7 @@ impl MnemosStore {
             vector_dimension,
             sync_policy,
             CheckpointPolicy::Disabled,
+            CapacityPolicy::new(None, None),
         )
     }
 
@@ -194,6 +202,7 @@ impl MnemosStore {
         vector_dimension: usize,
         sync_policy: SyncPolicy,
         checkpoint_policy: CheckpointPolicy,
+        capacity_policy: CapacityPolicy,
     ) -> Result<Self> {
         let wal_path = wal_path.as_ref().to_path_buf();
         let segments_dir = segments_dir.as_ref().to_path_buf();
@@ -216,6 +225,7 @@ impl MnemosStore {
             vector_dimension,
             sync_policy,
             checkpoint_policy,
+            capacity_policy,
             checkpoint_path,
         )
     }
@@ -225,18 +235,18 @@ impl MnemosStore {
         vector_dimension: usize,
         sync_policy: SyncPolicy,
         checkpoint_policy: CheckpointPolicy,
+        capacity_policy: CapacityPolicy,
         checkpoint_path: std::path::PathBuf,
     ) -> Result<Self> {
         let indexes = Self::build_vector_index(engine.get_state_machine(), vector_dimension)?;
         Self::assert_vector_index_in_sync_inner(engine.get_state_machine(), &indexes)?;
 
-        let snapshot = Arc::new(ReadSnapshot::new(
+        let snapshot = Arc::new(ArcSwap::from_pointee(ReadSnapshot::new(
             engine.get_state_machine().clone(),
             indexes.clone(),
-        ));
+        )));
 
         let writer = Arc::new(Mutex::new(WriteState { engine, indexes }));
-        let snapshot = Arc::new(RwLock::new(snapshot));
         let sync_control = Arc::new((
             Mutex::new(SyncRuntime {
                 pending_ops: 0,
@@ -284,14 +294,12 @@ impl MnemosStore {
             checkpoint_path,
             checkpoint_control,
             checkpoint_thread,
+            capacity_policy,
         })
     }
 
     pub fn snapshot(&self) -> Arc<ReadSnapshot> {
-        self.snapshot
-            .read()
-            .expect("snapshot lock poisoned")
-            .clone()
+        self.snapshot.load_full()
     }
 
     pub fn flush(&self) -> Result<()> {
@@ -390,7 +398,7 @@ impl MnemosStore {
 
     fn spawn_checkpoint_thread(
         writer: Arc<Mutex<WriteState>>,
-        snapshot: Arc<RwLock<Arc<ReadSnapshot>>>,
+        snapshot: Arc<ArcSwap<ReadSnapshot>>,
         checkpoint_control: Arc<(Mutex<CheckpointRuntime>, Condvar)>,
         checkpoint_path: std::path::PathBuf,
         checkpoint_policy: CheckpointPolicy,
@@ -441,7 +449,7 @@ impl MnemosStore {
                 runtime.dirty_since = None;
                 drop(runtime);
 
-                let read_snapshot = snapshot.read().expect("snapshot lock poisoned").clone();
+                let read_snapshot = snapshot.load_full();
                 let last_applied_id = writer
                     .lock()
                     .expect("writer lock poisoned")
@@ -604,6 +612,23 @@ impl MnemosStore {
     pub fn enforce_capacity(&self, policy: CapacityPolicy) -> Result<EvictionReport> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
         let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
+        let report = Self::enforce_capacity_locked(&mut writer, policy, sync_now)?;
+        
+        self.publish_snapshot_from_write_state(&writer);
+        if !sync_now {
+            self.mark_pending_write(report.evicted_ids.len());
+        } else {
+            self.clear_pending_sync_state();
+        }
+        self.mark_pending_checkpoint(report.evicted_ids.len().max(1));
+        Ok(report)
+    }
+
+    fn enforce_capacity_locked(
+        writer: &mut WriteState,
+        policy: CapacityPolicy,
+        sync_now: bool,
+    ) -> Result<EvictionReport> {
         let report = if sync_now {
             writer.engine.enforce_capacity(policy)?
         } else {
@@ -617,13 +642,6 @@ impl MnemosStore {
             writer.engine.get_state_machine(),
             &writer.indexes,
         )?;
-        self.publish_snapshot_from_write_state(&writer);
-        if !sync_now {
-            self.mark_pending_write(report.evicted_ids.len());
-        } else {
-            self.clear_pending_sync_state();
-        }
-        self.mark_pending_checkpoint(report.evicted_ids.len().max(1));
         Ok(report)
     }
 
@@ -767,17 +785,23 @@ impl MnemosStore {
             }
         };
 
+        let mut evicted = 0;
+        if self.capacity_policy.max_entries.is_some() || self.capacity_policy.max_bytes.is_some() {
+            let report = Self::enforce_capacity_locked(writer, self.capacity_policy, sync_now)?;
+            evicted = report.evicted_ids.len();
+        }
+
         Self::assert_vector_index_in_sync_inner(
             writer.engine.get_state_machine(),
             &writer.indexes,
         )?;
         self.publish_snapshot_from_write_state(writer);
         if !sync_now {
-            self.mark_pending_write(1);
+            self.mark_pending_write(1 + evicted);
         } else {
             self.clear_pending_sync_state();
         }
-        self.mark_pending_checkpoint(1);
+        self.mark_pending_checkpoint(1 + evicted);
         Ok(cmd_id)
     }
 
@@ -786,7 +810,7 @@ impl MnemosStore {
             writer.engine.get_state_machine().clone(),
             writer.indexes.clone(),
         ));
-        *self.snapshot.write().expect("snapshot lock poisoned") = new_snapshot;
+        self.snapshot.store(new_snapshot);
     }
 
     fn build_vector_index(
@@ -1190,6 +1214,7 @@ mod tests {
                     every_ops: 1,
                     every_ms: 10,
                 },
+                CapacityPolicy::new(None, None),
             )
             .unwrap();
 
@@ -1209,6 +1234,7 @@ mod tests {
             3,
             SyncPolicy::Strict,
             CheckpointPolicy::Disabled,
+            CapacityPolicy::new(None, None),
         )
         .unwrap();
         assert_eq!(recovered.state_machine().len(), 1);

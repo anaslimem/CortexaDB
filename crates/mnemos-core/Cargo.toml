@@ -10,6 +10,7 @@ rayon = "1.7"
 thiserror = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 crc = "3.0"
+arc-swap = "1.8.2"
 
 [dev-dependencies]
 proptest = "1.4"

@@ -9,7 +9,7 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use mnemos_core::engine::SyncPolicy;
+use mnemos_core::engine::{CapacityPolicy, SyncPolicy};
 use mnemos_core::facade;
 use mnemos_core::store::CheckpointPolicy;
 
@@ -174,10 +174,10 @@ impl PyMnemos {
     ///         mismatches an existing database.
     #[staticmethod]
     #[pyo3(
-        text_signature = "(path, *, dimension, sync='strict')",
-        signature = (path, *, dimension, sync="strict".to_string())
+        text_signature = "(path, *, dimension, sync='strict', max_entries=None)",
+        signature = (path, *, dimension, sync="strict".to_string(), max_entries=None)
     )]
-    fn open(path: &str, dimension: usize, sync: String) -> PyResult<Self> {
+    fn open(path: &str, dimension: usize, sync: String, max_entries: Option<usize>) -> PyResult<Self> {
         if dimension == 0 {
             return Err(MnemosError::new_err("dimension must be > 0"));
         }
@@ -200,6 +200,7 @@ impl PyMnemos {
             // few entries. Disabling checkpoint avoids WAL truncation on Drop;
             // the user can still call checkpoint() explicitly when safe.
             checkpoint_policy: CheckpointPolicy::Disabled,
+            capacity_policy: CapacityPolicy::new(max_entries, None),
         };
 
         let db = facade::Mnemos::open_with_config(path, config).map_err(to_py_err)?;

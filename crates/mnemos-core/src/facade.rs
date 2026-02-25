@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
 use crate::core::state_machine::StateMachineError;
-use crate::engine::SyncPolicy;
+use crate::engine::{CapacityPolicy, SyncPolicy};
 use crate::query::hybrid::{QueryEmbedder, QueryOptions};
 use crate::store::{CheckpointPolicy, MnemosStore, MnemosStoreError};
 
@@ -53,6 +53,7 @@ pub struct MnemosConfig {
     pub vector_dimension: usize,
     pub sync_policy: SyncPolicy,
     pub checkpoint_policy: CheckpointPolicy,
+    pub capacity_policy: CapacityPolicy,
 }
 
 impl Default for MnemosConfig {
@@ -64,6 +65,7 @@ impl Default for MnemosConfig {
                 every_ops: 1000,
                 every_ms: 30_000,
             },
+            capacity_policy: CapacityPolicy::new(None, None),
         }
     }
 }
@@ -139,6 +141,7 @@ impl Mnemos {
                 config.vector_dimension,
                 config.sync_policy,
                 config.checkpoint_policy,
+                config.capacity_policy,
             )?
         } else {
             MnemosStore::new_with_policies(
@@ -147,6 +150,7 @@ impl Mnemos {
                 config.vector_dimension,
                 config.sync_policy,
                 config.checkpoint_policy,
+                config.capacity_policy,
             )?
         };
 
@@ -475,7 +479,7 @@ mod tests {
         let db = Mnemos::open(path.to_str().unwrap()).unwrap();
 
         let id1 = db.remember_in_namespace("agent_b", vec![0.0, 1.0, 0.0], None).unwrap();
-        let id2 = db.remember_in_namespace("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();
+        let _id2 = db.remember_in_namespace("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();
 
         let stats = db.stats();
         assert_eq!(stats.entries, 2);

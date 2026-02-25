@@ -3,7 +3,7 @@
 //! Measures cold open time, snapshot load time, and WAL replay time
 //! against the <100ms target for small/medium databases.
 
-use mnemos_core::engine::SyncPolicy;
+use mnemos_core::engine::{CapacityPolicy, SyncPolicy};
 use mnemos_core::facade::{Mnemos, MnemosConfig};
 use mnemos_core::store::CheckpointPolicy;
 use std::time::Instant;
@@ -45,6 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 max_delay_ms: 50,
             },
             checkpoint_policy: CheckpointPolicy::Disabled,
+            capacity_policy: CapacityPolicy::new(None, None),
         };
         let db = Mnemos::open_with_config(db_path_str, config)?;
 
@@ -71,6 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Disabled,
+            capacity_policy: CapacityPolicy::new(None, None),
         };
         let db = Mnemos::open_with_config(db_path_str, config)?;
         assert_eq!(db.stats().entries, entry_count);
@@ -88,6 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Disabled,
+            capacity_policy: CapacityPolicy::new(None, None),
         };
         let db = Mnemos::open_with_config(db_path_str, config)?;
         db.checkpoint()?;
@@ -107,6 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Disabled,
+            capacity_policy: CapacityPolicy::new(None, None),
         };
         let db = Mnemos::open_with_config(db_path_str, config)?;
         for i in 0..tail_count {
@@ -126,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Disabled,
+            capacity_policy: CapacityPolicy::new(None, None),
         };
         let db = Mnemos::open_with_config(db_path_str, config)?;
         assert_eq!(db.stats().entries, entry_count + tail_count);

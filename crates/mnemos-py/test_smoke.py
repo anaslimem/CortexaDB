@@ -402,3 +402,23 @@ def test_hybrid_recency_bias():
     # With exactly 0 delay, the boost is exactly 1.2x.
     assert hits_recent[0].score > hits_normal[0].score
     assert abs(hits_recent[0].score - (hits_normal[0].score * 1.2)) < 0.05
+
+def test_capacity_max_entries(tmp_path):
+    import mnemos
+    db_path = str(tmp_path / "capacity_test")
+    db = mnemos.Mnemos.open(db_path, dimension=2, sync="strict", max_entries=5)
+
+    # Insert 8 memories.
+    for i in range(8):
+        db.remember(f"Content {i}", embedding=[1.0, 0.0])
+
+    # Should evict the oldest 3.
+    stats = db.stats()
+    assert stats.entries == 5
+    assert stats.indexed_embeddings == 5
+
+    # Reopen to verify eviction persisted
+    db = mnemos.Mnemos.open(db_path, dimension=2, sync="strict")
+    stats = db.stats()
+    assert stats.entries == 5
+    assert stats.indexed_embeddings == 5
