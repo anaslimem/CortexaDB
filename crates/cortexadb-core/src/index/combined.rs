@@ -18,11 +18,7 @@ pub enum CombinedError {
     #[error(
         "Invalid ranking weights: vector={vector_pct}, recency={recency_pct}, graph={graph_pct}"
     )]
-    InvalidWeights {
-        vector_pct: u8,
-        recency_pct: u8,
-        graph_pct: u8,
-    },
+    InvalidWeights { vector_pct: u8, recency_pct: u8, graph_pct: u8 },
 }
 
 pub type Result<T> = std::result::Result<T, CombinedError>;
@@ -39,11 +35,7 @@ pub struct RankingWeights {
 
 impl RankingWeights {
     pub const fn new(vector_pct: u8, recency_pct: u8, graph_pct: u8) -> Self {
-        Self {
-            vector_pct,
-            recency_pct,
-            graph_pct,
-        }
+        Self { vector_pct, recency_pct, graph_pct }
     }
 
     fn normalized(self) -> Result<(f32, f32, f32)> {
@@ -82,9 +74,7 @@ pub struct IndexLayer {
 impl IndexLayer {
     /// Create new index layer
     pub fn new(vector_dimension: usize) -> Self {
-        Self {
-            vector: VectorIndex::new(vector_dimension),
-        }
+        Self { vector: VectorIndex::new(vector_dimension) }
     }
 
     /// Search similar embeddings within a time range
@@ -103,9 +93,7 @@ impl IndexLayer {
         let candidates: HashSet<MemoryId> = temporal_results.into_iter().collect();
 
         // Step 2: Search similarity only among candidates
-        self.vector
-            .search_in_ids(query, &candidates, top_k)
-            .map_err(Into::into)
+        self.vector.search_in_ids(query, &candidates, top_k).map_err(Into::into)
     }
 
     /// Search similar embeddings connected to a specific memory
@@ -124,9 +112,7 @@ impl IndexLayer {
         let candidates: HashSet<MemoryId> = graph_results.into_iter().collect();
 
         // Step 2: Search similarity only among connected memories
-        self.vector
-            .search_in_ids(query, &candidates, top_k)
-            .map_err(Into::into)
+        self.vector.search_in_ids(query, &candidates, top_k).map_err(Into::into)
     }
 
     /// Search similar embeddings within time range AND connected to a memory
@@ -155,9 +141,7 @@ impl IndexLayer {
         let combined: HashSet<MemoryId> = temporal_set.intersection(&graph_set).copied().collect();
 
         // Step 4: Search similarity in intersection only
-        self.vector
-            .search_in_ids(query, &combined, top_k)
-            .map_err(Into::into)
+        self.vector.search_in_ids(query, &combined, top_k).map_err(Into::into)
     }
 
     /// Weighted combined ranking over Vector + Temporal + Graph.
@@ -213,9 +197,7 @@ impl IndexLayer {
         }
 
         // Step 2: vector similarity for all candidates.
-        let vector_results = self
-            .vector
-            .search_in_ids(query, &candidates, candidates.len())?;
+        let vector_results = self.vector.search_in_ids(query, &candidates, candidates.len())?;
         if vector_results.is_empty() {
             return Ok(Vec::new());
         }
@@ -320,16 +302,11 @@ mod tests {
         }
 
         // Create edges: 0→1, 0→2, 1→3, 2→3, 3→4
-        sm.add_edge(MemoryId(0), MemoryId(1), "points".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(0), MemoryId(2), "refers".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(1), MemoryId(3), "links".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(2), MemoryId(3), "connects".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(3), MemoryId(4), "leads".to_string())
-            .unwrap();
+        sm.add_edge(MemoryId(0), MemoryId(1), "points".to_string()).unwrap();
+        sm.add_edge(MemoryId(0), MemoryId(2), "refers".to_string()).unwrap();
+        sm.add_edge(MemoryId(1), MemoryId(3), "links".to_string()).unwrap();
+        sm.add_edge(MemoryId(2), MemoryId(3), "connects".to_string()).unwrap();
+        sm.add_edge(MemoryId(3), MemoryId(4), "leads".to_string()).unwrap();
 
         (sm, layer)
     }
@@ -339,9 +316,7 @@ mod tests {
         let (sm, layer) = setup_combined();
 
         let query = vec![0.1, 0.2, 0.3]; // Non-zero vector
-        let results = layer
-            .search_similar_in_range(&sm, &query, 1000, 3000, 2)
-            .unwrap();
+        let results = layer.search_similar_in_range(&sm, &query, 1000, 3000, 2).unwrap();
 
         // Should find memories within time range
         assert!(results.len() <= 2);
@@ -356,9 +331,7 @@ mod tests {
         let (sm, layer) = setup_combined();
 
         let query = vec![0.1, 0.2, 0.3]; // Non-zero vector
-        let results = layer
-            .search_similar_connected_to(&sm, &query, MemoryId(0), 2, 3)
-            .unwrap();
+        let results = layer.search_similar_connected_to(&sm, &query, MemoryId(0), 2, 3).unwrap();
 
         // Should find connected memories
         for (id, _score) in results {
@@ -400,32 +373,21 @@ mod tests {
         // In-range candidate (should be returned even if globally lower-ranked)
         let in_range = MemoryEntry::new(MemoryId(1), "test".to_string(), b"a".to_vec(), 1000)
             .with_embedding(vec![0.5, 0.5]);
-        layer
-            .vector_index_mut()
-            .index(MemoryId(1), in_range.embedding.clone().unwrap())
-            .unwrap();
+        layer.vector_index_mut().index(MemoryId(1), in_range.embedding.clone().unwrap()).unwrap();
         sm.insert_memory(in_range).unwrap();
 
         // Out-of-range but highly similar vectors
         let out_1 = MemoryEntry::new(MemoryId(2), "test".to_string(), b"b".to_vec(), 9000)
             .with_embedding(vec![1.0, 0.0]);
-        layer
-            .vector_index_mut()
-            .index(MemoryId(2), out_1.embedding.clone().unwrap())
-            .unwrap();
+        layer.vector_index_mut().index(MemoryId(2), out_1.embedding.clone().unwrap()).unwrap();
         sm.insert_memory(out_1).unwrap();
 
         let out_2 = MemoryEntry::new(MemoryId(3), "test".to_string(), b"c".to_vec(), 9000)
             .with_embedding(vec![0.99, 0.01]);
-        layer
-            .vector_index_mut()
-            .index(MemoryId(3), out_2.embedding.clone().unwrap())
-            .unwrap();
+        layer.vector_index_mut().index(MemoryId(3), out_2.embedding.clone().unwrap()).unwrap();
         sm.insert_memory(out_2).unwrap();
 
-        let results = layer
-            .search_similar_in_range(&sm, &[1.0, 0.0], 1000, 1000, 1)
-            .unwrap();
+        let results = layer.search_similar_in_range(&sm, &[1.0, 0.0], 1000, 1000, 1).unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, MemoryId(1));
@@ -446,22 +408,16 @@ mod tests {
             .with_embedding(vec![1.0, 0.0]);
 
         for entry in [&origin, &close_old, &mid, &far_new] {
-            layer
-                .vector_index_mut()
-                .index(entry.id, entry.embedding.clone().unwrap())
-                .unwrap();
+            layer.vector_index_mut().index(entry.id, entry.embedding.clone().unwrap()).unwrap();
         }
         sm.insert_memory(origin).unwrap();
         sm.insert_memory(close_old).unwrap();
         sm.insert_memory(mid).unwrap();
         sm.insert_memory(far_new).unwrap();
 
-        sm.add_edge(MemoryId(0), MemoryId(1), "to".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(0), MemoryId(3), "to".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(3), MemoryId(2), "to".to_string())
-            .unwrap();
+        sm.add_edge(MemoryId(0), MemoryId(1), "to".to_string()).unwrap();
+        sm.add_edge(MemoryId(0), MemoryId(3), "to".to_string()).unwrap();
+        sm.add_edge(MemoryId(3), MemoryId(2), "to".to_string()).unwrap();
 
         let results = layer
             .search_weighted_in_range_connected_to(&sm, &[1.0, 0.0], 2000, 10000, MemoryId(0), 2, 1)

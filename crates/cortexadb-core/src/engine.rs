@@ -24,10 +24,7 @@ pub enum EngineError {
     #[error(
         "Checkpoint/WAL gap detected: checkpoint_last_applied={checkpoint_last_applied}, wal_highest={wal_highest:?}"
     )]
-    CheckpointWalGap {
-        checkpoint_last_applied: u64,
-        wal_highest: Option<u64>,
-    },
+    CheckpointWalGap { checkpoint_last_applied: u64, wal_highest: Option<u64> },
     #[error("Engine not recovered properly")]
     NotRecovered,
 }
@@ -50,10 +47,7 @@ pub struct CapacityPolicy {
 
 impl CapacityPolicy {
     pub const fn new(max_entries: Option<usize>, max_bytes: Option<u64>) -> Self {
-        Self {
-            max_entries,
-            max_bytes,
-        }
+        Self { max_entries, max_bytes }
     }
 }
 
@@ -98,12 +92,7 @@ impl Engine {
             let segments = SegmentStorage::new(segments_dir)?;
             let state_machine = StateMachine::new();
 
-            Ok(Engine {
-                wal,
-                segments,
-                state_machine,
-                last_applied_id: CommandId(0),
-            })
+            Ok(Engine { wal, segments, state_machine, last_applied_id: CommandId(0) })
         }
     }
 
@@ -125,7 +114,7 @@ impl Engine {
         let wal_path = wal_path.as_ref();
         let segments_dir = segments_dir.as_ref();
 
-        // recover_compaction_state is now called by new() or recover() 
+        // recover_compaction_state is now called by new() or recover()
         // before calling this, but we keep it here for direct calls to recover_from_checkpoint.
         Self::recover_compaction_state(segments_dir);
 
@@ -188,12 +177,7 @@ impl Engine {
         // Open WAL for appending new commands
         let wal = WriteAheadLog::new(wal_path)?;
 
-        Ok(Engine {
-            wal,
-            segments,
-            state_machine,
-            last_applied_id: last_id,
-        })
+        Ok(Engine { wal, segments, state_machine, last_applied_id: last_id })
     }
 
     fn recover_compaction_state(segments_dir: &Path) {
@@ -386,24 +370,14 @@ impl Engine {
         }
 
         let (entries_after, bytes_after) = self.current_usage();
-        Ok(EvictionReport {
-            evicted_ids,
-            entries_before,
-            entries_after,
-            bytes_before,
-            bytes_after,
-        })
+        Ok(EvictionReport { evicted_ids, entries_before, entries_after, bytes_before, bytes_after })
     }
 
     /// Return current live memory count and deterministic byte estimate.
     pub fn current_usage(&self) -> (usize, u64) {
         let entries = self.state_machine.len();
-        let bytes = self
-            .state_machine
-            .all_memories()
-            .into_iter()
-            .map(Self::estimate_memory_bytes)
-            .sum();
+        let bytes =
+            self.state_machine.all_memories().into_iter().map(Self::estimate_memory_bytes).sum();
         (entries, bytes)
     }
 
@@ -424,16 +398,9 @@ impl Engine {
     fn estimate_memory_bytes(entry: &MemoryEntry) -> u64 {
         let namespace_bytes = entry.namespace.len() as u64;
         let content_bytes = entry.content.len() as u64;
-        let embedding_bytes = entry
-            .embedding
-            .as_ref()
-            .map(|v| (v.len() as u64) * 4)
-            .unwrap_or(0);
-        let metadata_bytes: u64 = entry
-            .metadata
-            .iter()
-            .map(|(k, v)| (k.len() + v.len()) as u64)
-            .sum();
+        let embedding_bytes = entry.embedding.as_ref().map(|v| (v.len() as u64) * 4).unwrap_or(0);
+        let metadata_bytes: u64 =
+            entry.metadata.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum();
         namespace_bytes + content_bytes + embedding_bytes + metadata_bytes
     }
 
@@ -553,15 +520,11 @@ mod tests {
                 .with_importance(0.2),
         ];
         for entry in entries {
-            engine
-                .execute_command(Command::InsertMemory(entry))
-                .unwrap();
+            engine.execute_command(Command::InsertMemory(entry)).unwrap();
         }
         let wal_before = engine.wal_len();
 
-        let report = engine
-            .enforce_capacity(CapacityPolicy::new(Some(2), None))
-            .unwrap();
+        let report = engine.enforce_capacity(CapacityPolicy::new(Some(2), None)).unwrap();
 
         assert_eq!(report.entries_before, 3);
         assert_eq!(report.entries_after, 2);
@@ -594,9 +557,7 @@ mod tests {
             .unwrap();
 
         let (_, bytes_before) = engine.current_usage();
-        let report = engine
-            .enforce_capacity(CapacityPolicy::new(None, Some(50)))
-            .unwrap();
+        let report = engine.enforce_capacity(CapacityPolicy::new(None, Some(50))).unwrap();
 
         assert!(bytes_before > 50);
         assert!(report.bytes_after <= 50);
@@ -621,38 +582,19 @@ mod tests {
                     1000 + i as u64,
                 )
                 .with_importance(i as f32);
-                engine
-                    .execute_command(Command::InsertMemory(entry))
-                    .unwrap();
+                engine.execute_command(Command::InsertMemory(entry)).unwrap();
             }
 
-            let report = engine
-                .enforce_capacity(CapacityPolicy::new(Some(1), None))
-                .unwrap();
+            let report = engine.enforce_capacity(CapacityPolicy::new(Some(1), None)).unwrap();
             assert_eq!(report.entries_after, 1);
             assert_eq!(report.evicted_ids.len(), 2);
         }
 
         let recovered = Engine::recover(&wal_path, &seg_dir).unwrap();
         assert_eq!(recovered.get_state_machine().len(), 1);
-        assert!(
-            recovered
-                .get_state_machine()
-                .get_memory(MemoryId(2))
-                .is_ok()
-        );
-        assert!(
-            recovered
-                .get_state_machine()
-                .get_memory(MemoryId(0))
-                .is_err()
-        );
-        assert!(
-            recovered
-                .get_state_machine()
-                .get_memory(MemoryId(1))
-                .is_err()
-        );
+        assert!(recovered.get_state_machine().get_memory(MemoryId(2)).is_ok());
+        assert!(recovered.get_state_machine().get_memory(MemoryId(0)).is_err());
+        assert!(recovered.get_state_machine().get_memory(MemoryId(1)).is_err());
     }
 
     #[test]
@@ -701,14 +643,10 @@ mod tests {
                 format!("content_{}", i).into_bytes(),
                 1000 + i as u64,
             );
-            engine
-                .execute_command(Command::InsertMemory(entry))
-                .unwrap();
+            engine.execute_command(Command::InsertMemory(entry)).unwrap();
         }
         for id in [0_u64, 1, 2, 3] {
-            engine
-                .execute_command(Command::DeleteMemory(MemoryId(id)))
-                .unwrap();
+            engine.execute_command(Command::DeleteMemory(MemoryId(id))).unwrap();
         }
 
         let report = engine.compact_segments().unwrap();
@@ -767,9 +705,7 @@ mod tests {
         {
             let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
             let entry = MemoryEntry::new(MemoryId(1), "ns".to_string(), b"a".to_vec(), 1000);
-            engine
-                .execute_command(Command::InsertMemory(entry))
-                .unwrap();
+            engine.execute_command(Command::InsertMemory(entry)).unwrap();
         }
 
         // Simulate: checkpoint says last_applied=10, but WAL only has 1 entry.
@@ -837,9 +773,7 @@ mod tests {
                     b"data".to_vec(),
                     1000 + i as u64,
                 );
-                engine
-                    .execute_command(Command::InsertMemory(entry))
-                    .unwrap();
+                engine.execute_command(Command::InsertMemory(entry)).unwrap();
             }
 
             // Add edges in specific order
@@ -863,17 +797,11 @@ mod tests {
         // Recover and verify edges are in order
         let recovered = Engine::recover(&wal_path, &seg_dir).unwrap();
 
-        let neighbors_0 = recovered
-            .get_state_machine()
-            .get_neighbors(MemoryId(0))
-            .unwrap();
+        let neighbors_0 = recovered.get_state_machine().get_neighbors(MemoryId(0)).unwrap();
         assert_eq!(neighbors_0.len(), 1);
         assert_eq!(neighbors_0[0].0, MemoryId(1));
 
-        let neighbors_1 = recovered
-            .get_state_machine()
-            .get_neighbors(MemoryId(1))
-            .unwrap();
+        let neighbors_1 = recovered.get_state_machine().get_neighbors(MemoryId(1)).unwrap();
         assert_eq!(neighbors_1.len(), 1);
         assert_eq!(neighbors_1[0].0, MemoryId(2));
     }
@@ -911,10 +839,7 @@ mod tests {
 
         // Verify specific entries
         for i in [0, 25, 50, 75, 99] {
-            let memory = recovered
-                .get_state_machine()
-                .get_memory(MemoryId(i as u64))
-                .unwrap();
+            let memory = recovered.get_state_machine().get_memory(MemoryId(i as u64)).unwrap();
             assert_eq!(memory.id, MemoryId(i as u64));
         }
     }
@@ -933,9 +858,7 @@ mod tests {
             for i in 0..5 {
                 let entry =
                     MemoryEntry::new(MemoryId(i as u64), "ns".to_string(), b"data".to_vec(), 1000);
-                engine
-                    .execute_command(Command::InsertMemory(entry))
-                    .unwrap();
+                engine.execute_command(Command::InsertMemory(entry)).unwrap();
             }
 
             // Add edges
@@ -950,9 +873,7 @@ mod tests {
             }
 
             // Delete one memory
-            engine
-                .execute_command(Command::DeleteMemory(MemoryId(2)))
-                .unwrap();
+            engine.execute_command(Command::DeleteMemory(MemoryId(2))).unwrap();
 
             assert_eq!(engine.get_state_machine().len(), 4); // 5 - 1
         }
@@ -961,18 +882,8 @@ mod tests {
         let recovered = Engine::recover(&wal_path, &seg_dir).unwrap();
 
         assert_eq!(recovered.get_state_machine().len(), 4);
-        assert!(
-            recovered
-                .get_state_machine()
-                .get_memory(MemoryId(2))
-                .is_err()
-        ); // Should be deleted
-        assert!(
-            recovered
-                .get_state_machine()
-                .get_memory(MemoryId(0))
-                .is_ok()
-        ); // Should exist
+        assert!(recovered.get_state_machine().get_memory(MemoryId(2)).is_err()); // Should be deleted
+        assert!(recovered.get_state_machine().get_memory(MemoryId(0)).is_ok()); // Should exist
     }
 
     #[test]
@@ -1003,7 +914,7 @@ mod tests {
         // Case B: data_dir exists, backup exists -> should delete backup
         std::fs::create_dir_all(&backup_dir).unwrap();
         std::fs::create_dir_all(&compact_dir).unwrap();
-        
+
         // We need the WAL to exists for Engine::new to call recover
         std::fs::write(&wal_path, b"").unwrap();
 

@@ -10,11 +10,7 @@ pub enum Command {
     /// Delete a memory entry by ID
     DeleteMemory(MemoryId),
     /// Add an edge between two memories with a relation type
-    AddEdge {
-        from: MemoryId,
-        to: MemoryId,
-        relation: String,
-    },
+    AddEdge { from: MemoryId, to: MemoryId, relation: String },
     /// Remove an edge between two memories
     RemoveEdge { from: MemoryId, to: MemoryId },
 }

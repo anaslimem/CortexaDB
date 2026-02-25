@@ -1,12 +1,57 @@
 """
-cortexadb.chunker — deterministic fixed-window text splitter.
+cortexadb.chunker — text chunking utilities.
 
-No external dependencies. Splits on character boundaries with word-boundary snapping
-so that chunks never cut mid-word.
+Wraps the Rust chunker for multiple strategies:
+- fixed: Character-based with word-boundary snapping
+- recursive: Paragraph → sentence → word (general purpose)
+- semantic: Split by paragraphs
+- markdown: Preserve headers, lists, code blocks
+- json: Flatten JSON to key-value pairs
 """
 
 from __future__ import annotations
-from typing import List
+from typing import List, Dict, Any, Optional
+import typing as t
+
+from . import _cortexadb
+
+
+def chunk(
+    text: str,
+    strategy: str = "recursive",
+    chunk_size: int = 512,
+    overlap: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    Split text using the specified chunking strategy.
+
+    Args:
+        text: The input text to chunk.
+        strategy: Chunking strategy - "fixed", "recursive", "semantic", "markdown", or "json".
+                  Default: "recursive"
+        chunk_size: Target size of each chunk in characters (for fixed/recursive).
+                    Default: 512
+        overlap: Number of words to overlap between consecutive chunks.
+                 Default: 50
+
+    Returns:
+        List of ChunkResult dictionaries with keys:
+        - text: The chunk text
+        - index: Chunk index
+        - metadata: Optional dict with additional info (e.g., key/value for json strategy)
+
+    Raises:
+        CortexaDBError: If strategy is invalid.
+    """
+    results = _cortexadb.chunk(text, strategy, chunk_size=chunk_size, overlap=overlap)
+    return [
+        {
+            "text": r.text,
+            "index": r.index,
+            "metadata": dict(r.metadata) if r.metadata else None,
+        }
+        for r in results
+    ]
 
 
 def chunk_text(
@@ -15,53 +60,8 @@ def chunk_text(
     overlap: int = 50,
 ) -> List[str]:
     """
-    Split *text* into overlapping fixed-size windows.
-
-    The splitter works on characters (model-agnostic). It snaps to the nearest
-    whitespace so chunks never split a word in two.
-
-    Args:
-        text:       The input text to chunk.
-        chunk_size: Target size of each chunk in characters (default 512).
-        overlap:    Number of characters shared between consecutive chunks
-                    (default 50). Must be < chunk_size.
-
-    Returns:
-        A list of non-empty string chunks.
-
-    Raises:
-        ValueError: If chunk_size <= 0 or overlap >= chunk_size.
+    Legacy function for backward compatibility.
+    Use chunk() for more strategies.
     """
-    if chunk_size <= 0:
-        raise ValueError(f"chunk_size must be > 0, got {chunk_size}")
-    if overlap < 0:
-        raise ValueError(f"overlap must be >= 0, got {overlap}")
-    if overlap >= chunk_size:
-        raise ValueError(
-            f"overlap ({overlap}) must be < chunk_size ({chunk_size})"
-        )
-
-    text = text.strip()
-    if not text:
-        return []
-
-    chunks: List[str] = []
-    start = 0
-    step = chunk_size - overlap
-
-    while start < len(text):
-        end = start + chunk_size
-
-        if end < len(text):
-            # Snap backwards to the nearest whitespace to avoid mid-word cuts.
-            snap = text.rfind(" ", start, end)
-            if snap > start:
-                end = snap
-
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-
-        start += step
-
-    return chunks
+    results = chunk(text, strategy="fixed", chunk_size=chunk_size, overlap=overlap)
+    return [r["text"] for r in results]

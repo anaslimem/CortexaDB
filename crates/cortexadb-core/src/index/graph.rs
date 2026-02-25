@@ -53,9 +53,8 @@ impl GraphIndex {
         }
 
         // Verify start memory exists
-        let start_entry = state_machine
-            .get_memory(start)
-            .map_err(|_| GraphError::MemoryNotFound(start))?;
+        let start_entry =
+            state_machine.get_memory(start).map_err(|_| GraphError::MemoryNotFound(start))?;
         if let Some(ns) = namespace {
             if start_entry.namespace != ns {
                 return Ok(HashMap::new());
@@ -111,9 +110,7 @@ impl GraphIndex {
         }
 
         // Verify start memory exists
-        state_machine
-            .get_memory(start)
-            .map_err(|_| GraphError::MemoryNotFound(start))?;
+        state_machine.get_memory(start).map_err(|_| GraphError::MemoryNotFound(start))?;
 
         let mut paths = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -184,12 +181,8 @@ impl GraphIndex {
         to: MemoryId,
     ) -> Result<Option<Vec<MemoryId>>> {
         // Verify both memories exist
-        state_machine
-            .get_memory(from)
-            .map_err(|_| GraphError::MemoryNotFound(from))?;
-        state_machine
-            .get_memory(to)
-            .map_err(|_| GraphError::MemoryNotFound(to))?;
+        state_machine.get_memory(from).map_err(|_| GraphError::MemoryNotFound(from))?;
+        state_machine.get_memory(to).map_err(|_| GraphError::MemoryNotFound(to))?;
 
         if from == to {
             return Ok(Some(vec![from]));
@@ -238,9 +231,8 @@ impl GraphIndex {
 
     /// Get all neighbors (one hop away)
     pub fn get_neighbors(state_machine: &StateMachine, id: MemoryId) -> Result<Vec<MemoryId>> {
-        let neighbors = state_machine
-            .get_neighbors(id)
-            .map_err(|_| GraphError::MemoryNotFound(id))?;
+        let neighbors =
+            state_machine.get_neighbors(id).map_err(|_| GraphError::MemoryNotFound(id))?;
 
         let ids: Vec<MemoryId> = neighbors.iter().map(|(id, _)| *id).collect();
         Ok(ids)
@@ -294,16 +286,11 @@ mod tests {
         }
 
         // Create edges: 0→1, 0→2, 1→3, 2→3, 3→4
-        sm.add_edge(MemoryId(0), MemoryId(1), "points".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(0), MemoryId(2), "refers".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(1), MemoryId(3), "links".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(2), MemoryId(3), "connects".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(3), MemoryId(4), "leads".to_string())
-            .unwrap();
+        sm.add_edge(MemoryId(0), MemoryId(1), "points".to_string()).unwrap();
+        sm.add_edge(MemoryId(0), MemoryId(2), "refers".to_string()).unwrap();
+        sm.add_edge(MemoryId(1), MemoryId(3), "links".to_string()).unwrap();
+        sm.add_edge(MemoryId(2), MemoryId(3), "connects".to_string()).unwrap();
+        sm.add_edge(MemoryId(3), MemoryId(4), "leads".to_string()).unwrap();
 
         sm
     }
@@ -450,51 +437,26 @@ mod tests {
         let mut sm = StateMachine::new();
         sm.insert_memory(create_entry(0)).unwrap();
         sm.insert_memory(create_entry(1)).unwrap();
-        sm.add_edge(MemoryId(0), MemoryId(1), "to".to_string())
-            .unwrap();
-        sm.add_edge(MemoryId(1), MemoryId(0), "back".to_string())
-            .unwrap();
+        sm.add_edge(MemoryId(0), MemoryId(1), "to".to_string()).unwrap();
+        sm.add_edge(MemoryId(1), MemoryId(0), "back".to_string()).unwrap();
 
         let paths = GraphIndex::dfs(&sm, MemoryId(0), 3).unwrap();
-        assert!(
-            paths
-                .iter()
-                .all(|path| path.iter().filter(|&&id| id == MemoryId(0)).count() == 1)
-        );
+        assert!(paths.iter().all(|path| path.iter().filter(|&&id| id == MemoryId(0)).count() == 1));
     }
 
     #[test]
     fn test_bfs_in_namespace_filters_neighbors() {
         let mut sm = StateMachine::new();
-        sm.insert_memory(MemoryEntry::new(
-            MemoryId(1),
-            "agent1".to_string(),
-            b"a".to_vec(),
-            1000,
-        ))
-        .unwrap();
-        sm.insert_memory(MemoryEntry::new(
-            MemoryId(2),
-            "agent1".to_string(),
-            b"b".to_vec(),
-            1001,
-        ))
-        .unwrap();
-        sm.insert_memory(MemoryEntry::new(
-            MemoryId(3),
-            "agent2".to_string(),
-            b"c".to_vec(),
-            1002,
-        ))
-        .unwrap();
-
-        sm.add_edge(MemoryId(1), MemoryId(2), "ok".to_string())
+        sm.insert_memory(MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"a".to_vec(), 1000))
             .unwrap();
+        sm.insert_memory(MemoryEntry::new(MemoryId(2), "agent1".to_string(), b"b".to_vec(), 1001))
+            .unwrap();
+        sm.insert_memory(MemoryEntry::new(MemoryId(3), "agent2".to_string(), b"c".to_vec(), 1002))
+            .unwrap();
+
+        sm.add_edge(MemoryId(1), MemoryId(2), "ok".to_string()).unwrap();
         // Cross namespace should be rejected by state machine, so no leakage via edges.
-        assert!(
-            sm.add_edge(MemoryId(2), MemoryId(3), "bad".to_string())
-                .is_err()
-        );
+        assert!(sm.add_edge(MemoryId(2), MemoryId(3), "bad".to_string()).is_err());
 
         let scoped = GraphIndex::bfs_in_namespace(&sm, MemoryId(1), 3, "agent1").unwrap();
         assert!(scoped.contains_key(&MemoryId(1)));

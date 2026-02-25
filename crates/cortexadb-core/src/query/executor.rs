@@ -76,11 +76,7 @@ fn load_or_build_intent_anchors(
     if semantic.len() != dim || recency.len() != dim || graph.len() != dim {
         return Err("intent anchor embedding dimension mismatch".to_string());
     }
-    let anchors = IntentAnchors {
-        semantic,
-        recency,
-        graph,
-    };
+    let anchors = IntentAnchors { semantic, recency, graph };
     let mut guard = cache.lock().expect("intent anchor cache lock poisoned");
     guard.insert(dim, anchors.clone());
     Ok(anchors)
@@ -112,23 +108,16 @@ impl QueryExecutor {
             return Err(HybridQueryError::InvalidTopK(options.top_k));
         }
         if options.candidate_multiplier == 0 {
-            return Err(HybridQueryError::InvalidCandidateMultiplier(
-                options.candidate_multiplier,
-            ));
+            return Err(HybridQueryError::InvalidCandidateMultiplier(options.candidate_multiplier));
         }
 
         if let Some((start_ts, end_ts)) = options.time_range {
             if start_ts > end_ts {
-                return Err(HybridQueryError::InvalidTimeRange {
-                    start: start_ts,
-                    end: end_ts,
-                });
+                return Err(HybridQueryError::InvalidTimeRange { start: start_ts, end: end_ts });
             }
         }
 
-        let query_embedding = embedder
-            .embed(query_text)
-            .map_err(HybridQueryError::Embedder)?;
+        let query_embedding = embedder.embed(query_text).map_err(HybridQueryError::Embedder)?;
         if let Some(cb) = &mut trace {
             cb(StageTrace::Embedded);
         }
@@ -185,9 +174,7 @@ impl QueryExecutor {
             plan.ann_candidate_multiplier,
         )?;
         if let Some(cb) = &mut trace {
-            cb(StageTrace::VectorScored {
-                candidates: vector_results.len(),
-            });
+            cb(StageTrace::VectorScored { candidates: vector_results.len() });
         }
 
         let mut candidate_scores: HashMap<MemoryId, f32> = vector_results
@@ -203,15 +190,10 @@ impl QueryExecutor {
             })
             .collect();
         if let Some(cb) = &mut trace {
-            cb(StageTrace::Filtered {
-                candidates: candidate_scores.len(),
-            });
+            cb(StageTrace::Filtered { candidates: candidate_scores.len() });
         }
 
-        if matches!(
-            plan.path,
-            ExecutionPath::VectorGraph | ExecutionPath::WeightedHybrid
-        ) {
+        if matches!(plan.path, ExecutionPath::VectorGraph | ExecutionPath::WeightedHybrid) {
             if let Some(expansion) = options.graph_expansion {
                 if expansion.hops > 0 {
                     let mut expanded_ids = HashSet::new();
@@ -244,9 +226,7 @@ impl QueryExecutor {
                         candidate_scores = HashMap::new();
                     }
                     if let Some(cb) = &mut trace {
-                        cb(StageTrace::GraphExpanded {
-                            candidates: candidate_scores.len(),
-                        });
+                        cb(StageTrace::GraphExpanded { candidates: candidate_scores.len() });
                     }
                 }
             }
@@ -262,9 +242,7 @@ impl QueryExecutor {
             rec_w,
         );
         if let Some(cb) = &mut trace {
-            cb(StageTrace::Ranked {
-                results: hits.len(),
-            });
+            cb(StageTrace::Ranked { results: hits.len() });
         }
 
         let metrics = ExecutionMetrics {
@@ -360,13 +338,7 @@ fn build_ranked_hits(
             similarity_score
         };
 
-        hits.push(QueryHit {
-            id,
-            final_score,
-            similarity_score,
-            importance_score,
-            recency_score,
-        });
+        hits.push(QueryHit { id, final_score, similarity_score, importance_score, recency_score });
     }
 
     hits.sort_by(|a, b| {
@@ -404,15 +376,11 @@ mod tests {
             .with_embedding(vec![0.9, 0.1, 0.0])
             .with_importance(0.9);
         for entry in [&a, &b] {
-            layer
-                .vector_index_mut()
-                .index(entry.id, entry.embedding.clone().unwrap())
-                .unwrap();
+            layer.vector_index_mut().index(entry.id, entry.embedding.clone().unwrap()).unwrap();
         }
         sm.insert_memory(a).unwrap();
         sm.insert_memory(b).unwrap();
-        sm.add_edge(MemoryId(1), MemoryId(2), "next".to_string())
-            .unwrap();
+        sm.add_edge(MemoryId(1), MemoryId(2), "next".to_string()).unwrap();
 
         (sm, layer, TestEmbedder)
     }
