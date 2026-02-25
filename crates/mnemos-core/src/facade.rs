@@ -199,9 +199,10 @@ impl Mnemos {
         Ok(id.0)
     }
 
-    /// Store a memory with explicit content bytes.
+    /// Store a memory with explicit content bytes optionally in a namespace.
     pub fn remember_with_content(
         &self,
+        namespace: &str,
         content: Vec<u8>,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
@@ -215,7 +216,7 @@ impl Mnemos {
             .unwrap_or_default()
             .as_secs();
 
-        let mut entry = MemoryEntry::new(id, "default".to_string(), content, ts)
+        let mut entry = MemoryEntry::new(id, namespace.to_string(), content, ts)
             .with_embedding(embedding);
         if let Some(meta) = metadata {
             entry.metadata = meta;

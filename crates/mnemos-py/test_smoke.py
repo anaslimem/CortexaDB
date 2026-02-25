@@ -1,63 +1,85 @@
-from mnemos import Mnemos
+import pytest
+import os
+import shutil
+from mnemos import Mnemos, MnemosError
 
-def test_mnemos():
-    print("Testing Mnemos PyO3 bindings...")
-    
+DB_PATH = "/tmp/mnemos_test_py"
+
+@pytest.fixture(autouse=True)
+def cleanup():
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+    yield
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+
+def test_mnemos_basic_flow():
     # 1. Open with dimension 3
-    db = Mnemos.open("/tmp/mnemos_test_py", dimension=3)
+    db = Mnemos.open(DB_PATH, dimension=3)
     
     # 2. Store memory
-    mid = db.remember_embedding([1.0, 0.0, 0.0])
-    print(f"Stored memory: {mid}")
+    mid = db.remember("Hello world", embedding=[1.0, 0.0, 0.0])
     
     # 3. Ask
-    hits = db.ask_embedding([1.0, 0.0, 0.0])
-    print(f"Found {len(hits)} hits, top score={hits[0].score:.3f}")
+    hits = db.ask("world", embedding=[1.0, 0.0, 0.0])
+    assert len(hits) == 1
     assert hits[0].id == mid
     
     # 4. Get full memory
     mem = db.get(mid)
-    print(f"Memory: {mem}")
     assert mem.namespace == "default"
     assert mem.id == mid
+    assert bytes(mem.content).decode("utf-8") == "Hello world"
 
     # 5. Connect
-    mid2 = db.remember_embedding([0.0, 1.0, 0.0])
+    mid2 = db.remember("Goodbye", embedding=[0.0, 1.0, 0.0])
     db.connect(mid, mid2, "related")
-    print(f"Connected {mid} -> {mid2}")
 
-    # 6. Stats
+    # 6. Stats & Len
     stats = db.stats()
-    print(f"Stats: {stats}")
     assert stats.vector_dimension == 3
     assert stats.entries == 2
+    assert len(db) == 2
 
-    # 7. Stress - error handling
-    try:
-        db.remember_embedding([1.0, 0.0]) # Wrong dimension
-        assert False, "Should have raised an error"
-    except Exception as e:
-        print(f"Caught expected error: {e}")
-
-    try:
-        db2 = Mnemos.open("/tmp/mnemos_test_py", dimension=4) # Dimension mismatch on open
-        assert False, "Should have raised an error"
-    except Exception as e:
-        print(f"Caught expected error: {e}")
-
-    # 8. Compact
+    # 7. Compact and Checkpoint
     db.compact()
-    print("Compacted successfully")
-
-    # 9. Checkpoint
     db.checkpoint()
-    print("Checkpointed successfully")
 
-    print("All tests passed!")
 
-if __name__ == "__main__":
-    import shutil
-    import os
-    if os.path.exists("/tmp/mnemos_test_py"):
-        shutil.rmtree("/tmp/mnemos_test_py")
-    test_mnemos()
+def test_mnemos_namespaces():
+    db = Mnemos.open(DB_PATH, dimension=3)
+    
+    agent_a = db.namespace("agent_a")
+    agent_b = db.namespace("agent_b")
+
+    id_a = agent_a.remember("I am Agent A", embedding=[1.0, 0.0, 0.0])
+    agent_b.remember("I am Agent B", embedding=[0.0, 1.0, 0.0])
+
+    assert db.get(id_a).namespace == "agent_a"
+    
+    # Test ask filters by namespace using the wrapper
+    hits_a = agent_a.ask("Agent A", embedding=[1.0, 0.0, 0.0])
+    assert len(hits_a) == 1
+    assert hits_a[0].id == id_a
+
+    # Context manager test
+    with Mnemos.open(DB_PATH, dimension=3) as db_ctx:
+        assert len(db_ctx) == 2
+
+
+def test_mnemos_error_handling():
+    db = Mnemos.open(DB_PATH, dimension=3)
+
+    # Wrong dimension map
+    with pytest.raises(MnemosError, match="embedding dimension mismatch"):
+        db.remember("Wrong dim", embedding=[1.0, 0.0])
+        
+    # Missing embedding required
+    with pytest.raises(MnemosError, match="Embedding is currently required natively"):
+        db.remember("No embedding")
+
+    # Wrong dimension on open — must first write something with dim=3
+    mid = db.remember("Seed", embedding=[1.0, 0.0, 0.0])
+    db.checkpoint()  # flush so the mismatch check sees entries > 0
+    with pytest.raises(MnemosError, match="(?i)dimension mismatch"):
+        Mnemos.open(DB_PATH, dimension=4)

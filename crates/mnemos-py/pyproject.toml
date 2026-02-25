@@ -11,3 +11,4 @@ license = { text = "GPL-3.0" }
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+module-name = "mnemos._mnemos"

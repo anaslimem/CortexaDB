@@ -214,8 +214,8 @@ impl PyMnemos {
     /// Raises:
     ///     MnemosError: If the embedding dimension is wrong.
     #[pyo3(
-        text_signature = "(self, embedding, *, metadata=None, namespace='default')",
-        signature = (embedding, *, metadata=None, namespace="default".to_string())
+        text_signature = "(self, embedding, *, metadata=None, namespace='default', content='')",
+        signature = (embedding, *, metadata=None, namespace="default".to_string(), content="".to_string())
     )]
     fn remember_embedding(
         &self,
@@ -223,6 +223,7 @@ impl PyMnemos {
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
         namespace: String,
+        content: String,
     ) -> PyResult<u64> {
         if embedding.len() != self.dimension {
             return Err(MnemosError::new_err(format!(
@@ -233,8 +234,11 @@ impl PyMnemos {
         }
 
         let id = py.allow_threads(|| {
-            self.inner
-                .remember_in_namespace(&namespace, embedding, metadata)
+            if content.is_empty() {
+                 self.inner.remember_in_namespace(&namespace, embedding, metadata)
+            } else {
+                 self.inner.remember_with_content(&namespace, content.into_bytes(), embedding, metadata)
+            }
         }).map_err(to_py_err)?;
         Ok(id)
     }
@@ -379,7 +383,7 @@ impl PyMnemos {
 
 /// Mnemos — embedded vector + graph memory for AI agents.
 #[pymodule]
-fn mnemos(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _mnemos(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMnemos>()?;
     m.add_class::<PyHit>()?;
     m.add_class::<PyMemory>()?;
