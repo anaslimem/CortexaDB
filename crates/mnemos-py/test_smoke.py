@@ -1,7 +1,8 @@
 import pytest
 import os
 import shutil
-from mnemos import Mnemos, MnemosError
+from mnemos import Mnemos, MnemosError, HashEmbedder
+from mnemos.chunker import chunk_text
 
 DB_PATH = "/tmp/mnemos_test_py"
 
@@ -75,7 +76,7 @@ def test_mnemos_error_handling():
         db.remember("Wrong dim", embedding=[1.0, 0.0])
         
     # Missing embedding required
-    with pytest.raises(MnemosError, match="Embedding is currently required natively"):
+    with pytest.raises(MnemosError, match="No embedder"):
         db.remember("No embedding")
 
     # Wrong dimension on open — must first write something with dim=3
@@ -83,3 +84,89 @@ def test_mnemos_error_handling():
     db.checkpoint()  # flush so the mismatch check sees entries > 0
     with pytest.raises(MnemosError, match="(?i)dimension mismatch"):
         Mnemos.open(DB_PATH, dimension=4)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.3 — Chunker
+# ---------------------------------------------------------------------------
+
+def test_chunk_text_basic():
+    text = "Hello world foo bar baz " * 40   # ~1000 chars
+    chunks = chunk_text(text, chunk_size=200, overlap=20)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert len(c) <= 200
+
+def test_chunk_text_empty():
+    assert chunk_text("") == []
+    assert chunk_text("   ") == []
+
+def test_chunk_text_single_chunk():
+    """Short text fits in one chunk."""
+    chunks = chunk_text("Short sentence.", chunk_size=512, overlap=50)
+    assert len(chunks) == 1
+    assert chunks[0] == "Short sentence."
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.4 — HashEmbedder + auto-embed
+# ---------------------------------------------------------------------------
+
+def test_hash_embedder_basic():
+    emb = HashEmbedder(dimension=16)
+    assert emb.dimension == 16
+    vec = emb.embed("hello")
+    assert len(vec) == 16
+    # L2 norm should be ≈ 1
+    norm = sum(v * v for v in vec) ** 0.5
+    assert abs(norm - 1.0) < 1e-5
+
+def test_hash_embedder_deterministic():
+    emb = HashEmbedder(dimension=32)
+    assert emb.embed("same") == emb.embed("same")
+    assert emb.embed("a") != emb.embed("b")
+
+def test_open_with_embedder():
+    emb = HashEmbedder(dimension=32)
+    db = Mnemos.open(DB_PATH, embedder=emb)
+    # remember without explicit embedding
+    mid = db.remember("Auto-embedded text")
+    assert mid > 0
+    hits = db.ask("Auto-embedded text")
+    assert len(hits) >= 1
+
+def test_open_requires_one_of_dimension_or_embedder():
+    with pytest.raises(MnemosError, match="required"):
+        Mnemos.open(DB_PATH)  # neither
+
+    with pytest.raises(MnemosError, match="not both"):
+        Mnemos.open(DB_PATH, dimension=16, embedder=HashEmbedder(16))
+
+def test_remember_without_embedder_requires_embedding():
+    db = Mnemos.open(DB_PATH, dimension=3)
+    with pytest.raises(MnemosError, match="No embedder"):
+        db.remember("No embedding provided")
+
+def test_ingest_document():
+    emb = HashEmbedder(dimension=32)
+    db = Mnemos.open(DB_PATH, embedder=emb)
+    long_text = ("The quick brown fox jumps over the lazy dog. " * 30).strip()
+    ids = db.ingest_document(long_text, chunk_size=100, overlap=20)
+    assert len(ids) > 1
+    assert len(set(ids)) == len(ids)   # all IDs unique
+    assert db.stats().entries == len(ids)
+
+def test_ingest_document_requires_embedder():
+    db = Mnemos.open(DB_PATH, dimension=16)
+    with pytest.raises(MnemosError, match="ingest_document"):
+        db.ingest_document("some text")
+
+def test_namespace_auto_embed():
+    emb = HashEmbedder(dimension=32)
+    db = Mnemos.open(DB_PATH, embedder=emb)
+    ns = db.namespace("agent_a")
+    mid = ns.remember("I am agent A")
+    assert db.get(mid).namespace == "agent_a"
+    hits = ns.ask("agent A")
+    assert any(h.id == mid for h in hits)
+
