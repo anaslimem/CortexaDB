@@ -237,11 +237,17 @@ impl Mnemos {
     ///
     /// `query_embedding` is the vector to search for. The returned hits
     /// are scored and sorted by descending relevance.
-    pub fn ask(&self, query_embedding: Vec<f32>, top_k: usize) -> Result<Vec<Hit>> {
+    pub fn ask(
+        &self,
+        query_embedding: Vec<f32>,
+        top_k: usize,
+        metadata_filter: Option<HashMap<String, String>>,
+    ) -> Result<Vec<Hit>> {
         let embedder = StaticEmbedder {
             embedding: query_embedding,
         };
-        let options = QueryOptions::with_top_k(top_k);
+        let mut options = QueryOptions::with_top_k(top_k);
+        options.metadata_filter = metadata_filter;
         let execution = self.inner.query("", options, &embedder)?;
 
         let mut results = Vec::with_capacity(execution.hits.len());
@@ -272,12 +278,14 @@ impl Mnemos {
         namespace: &str,
         query_embedding: Vec<f32>,
         top_k: usize,
+        metadata_filter: Option<HashMap<String, String>>,
     ) -> Result<Vec<Hit>> {
         let embedder = StaticEmbedder {
             embedding: query_embedding,
         };
-        // Over-fetch so namespace filtering still yields top_k results.
-        let options = QueryOptions::with_top_k(top_k * 4);
+        let mut options = QueryOptions::with_top_k(top_k);
+        options.namespace = Some(namespace.to_string());
+        options.metadata_filter = metadata_filter;
         let execution = self.inner.query("", options, &embedder)?;
 
         let sm = self.inner.state_machine();
@@ -320,6 +328,12 @@ impl Mnemos {
             created_at: entry.created_at,
             importance: entry.importance,
         })
+    }
+
+    /// Delete a memory by its identifier.
+    pub fn delete_memory(&self, id: u64) -> Result<()> {
+        self.inner.delete_memory(MemoryId(id))?;
+        Ok(())
     }
 
     /// Create an edge (relationship) between two memories.

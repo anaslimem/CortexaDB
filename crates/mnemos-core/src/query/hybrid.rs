@@ -98,6 +98,7 @@ pub struct QueryOptions {
     pub graph_expansion: Option<GraphExpansionOptions>,
     pub candidate_multiplier: usize,
     pub score_weights: ScoreWeights,
+    pub metadata_filter: Option<HashMap<String, String>>,
 }
 
 impl QueryOptions {
@@ -119,6 +120,7 @@ impl Default for QueryOptions {
             graph_expansion: Some(GraphExpansionOptions::new(1)),
             candidate_multiplier: 5,
             score_weights: ScoreWeights::default(),
+            metadata_filter: None,
         }
     }
 }
@@ -200,7 +202,7 @@ impl<'a> HybridQueryEngine<'a> {
 
         let mut candidate_scores = HashMap::new();
         for (id, cosine_similarity) in vector_results {
-            if self.matches_filters(id, None, options.time_range) {
+            if self.matches_filters(id, None, options.time_range, options.metadata_filter.as_ref()) {
                 candidate_scores.insert(id, cosine_similarity);
             }
         }
@@ -216,7 +218,12 @@ impl<'a> HybridQueryEngine<'a> {
                         GraphIndex::bfs(self.state_machine, id, expansion.hops)?
                     };
                     for reachable_id in reachable.keys().copied() {
-                        if self.matches_filters(reachable_id, options.namespace.as_deref(), None) {
+                        if self.matches_filters(
+                            reachable_id,
+                            options.namespace.as_deref(),
+                            None,
+                            options.metadata_filter.as_ref(),
+                        ) {
                             expanded_ids.insert(reachable_id);
                         }
                     }
@@ -296,6 +303,7 @@ impl<'a> HybridQueryEngine<'a> {
         id: MemoryId,
         namespace: Option<&str>,
         time_range: Option<(u64, u64)>,
+        metadata_filter: Option<&HashMap<String, String>>,
     ) -> bool {
         let entry = match self.state_machine.get_memory(id) {
             Ok(entry) => entry,
@@ -311,6 +319,15 @@ impl<'a> HybridQueryEngine<'a> {
         if let Some((start, end)) = time_range {
             if entry.created_at < start || entry.created_at > end {
                 return false;
+            }
+        }
+
+        if let Some(filter) = metadata_filter {
+            for (key, val) in filter {
+                match entry.metadata.get(key) {
+                    Some(entry_val) if entry_val == val => continue,
+                    _ => return false,
+                }
             }
         }
 

@@ -78,6 +78,11 @@ class Namespace:
             recency_bias=recency_bias,
         )
 
+    def delete_memory(self, mid: int) -> None:
+        """Delete a memory by ID."""
+        self._check_writable()
+        self._db.delete_memory(mid)
+
     def ingest_document(
         self,
         text: str,
@@ -271,8 +276,13 @@ class Mnemos:
                 except Exception:
                     pass  # non-fatal: IDs may not exist if log is partial
 
-            elif op == "compact":
-                db._inner.compact()
+            elif op == "delete":
+                old_id = record.get("id")
+                new_id = id_map.get(old_id, old_id)
+                try:
+                    db._inner.delete_memory(new_id)
+                except Exception:
+                    pass
 
             elif op == "checkpoint":
                 try:
@@ -367,6 +377,7 @@ class Mnemos:
         top_k: int = 5,
         namespaces: t.Optional[t.List[str]] = None,
         *,
+        filter: t.Optional[t.Dict[str, str]] = None,
         use_graph: bool = False,
         recency_bias: bool = False,
     ) -> t.List[Hit]:
@@ -378,6 +389,7 @@ class Mnemos:
             embedding:    Pre-computed query vector (overrides auto-embed).
             top_k:        Maximum hits to return (default 5).
             namespaces:   Restrict search to these namespaces. ``None`` → global.
+            filter:       Optional metadata filter dict (e.g. {"type": "note"}).
             use_graph:    If *True*, augments vector results with graph neighbors.
             recency_bias: If *True*, boosts scores of recently created memories.
         """
@@ -385,16 +397,16 @@ class Mnemos:
 
         # 1. Base vector search
         if namespaces is None:
-            base_hits = self._inner.ask_embedding(embedding=vec, top_k=top_k)
+            base_hits = self._inner.ask_embedding(embedding=vec, top_k=top_k, filter=filter)
         elif len(namespaces) == 1:
             base_hits = self._inner.ask_in_namespace(
-                namespace=namespaces[0], embedding=vec, top_k=top_k,
+                namespace=namespaces[0], embedding=vec, top_k=top_k, filter=filter
             )
         else:
             seen_ids: t.Set[int] = set()
             base_hits = []
             for ns in namespaces:
-                for hit in self._inner.ask_in_namespace(namespace=ns, embedding=vec, top_k=top_k):
+                for hit in self._inner.ask_in_namespace(namespace=ns, embedding=vec, top_k=top_k, filter=filter):
                     if hit.id not in seen_ids:
                         seen_ids.add(hit.id)
                         base_hits.append(hit)
@@ -556,6 +568,16 @@ class Mnemos:
     def get(self, mid: int) -> Memory:
         """Retrieve a full memory by ID."""
         return self._inner.get(mid)
+
+    def delete_memory(self, mid: int) -> None:
+        """
+        Delete a memory by ID.
+        
+        If recording is enabled, the operation is appended to the log.
+        """
+        self._inner.delete_memory(mid)
+        if self._recorder is not None:
+             self._recorder.record_delete(mid)
 
     def compact(self) -> None:
         """Compact on-disk segment storage (removes tombstoned entries)."""

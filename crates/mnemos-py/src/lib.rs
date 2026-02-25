@@ -274,10 +274,16 @@ impl PyMnemos {
     /// Raises:
     ///     MnemosError: If the embedding dimension is wrong.
     #[pyo3(
-        text_signature = "(self, embedding, *, top_k=5)",
-        signature = (embedding, *, top_k=5)
+        text_signature = "(self, embedding, *, top_k=5, filter=None)",
+        signature = (embedding, *, top_k=5, filter=None)
     )]
-    fn ask_embedding(&self, py: Python<'_>, embedding: Vec<f32>, top_k: usize) -> PyResult<Vec<PyHit>> {
+    fn ask_embedding(
+        &self,
+        py: Python<'_>,
+        embedding: Vec<f32>,
+        top_k: usize,
+        filter: Option<HashMap<String, String>>,
+    ) -> PyResult<Vec<PyHit>> {
         if embedding.len() != self.dimension {
             return Err(MnemosError::new_err(format!(
                 "embedding dimension mismatch: expected {}, got {}",
@@ -286,7 +292,7 @@ impl PyMnemos {
             )));
         }
 
-        let results = py.allow_threads(|| self.inner.ask(embedding, top_k)).map_err(to_py_err)?;
+        let results = py.allow_threads(|| self.inner.ask(embedding, top_k, filter)).map_err(to_py_err)?;
         Ok(results
             .into_iter()
             .map(|m| PyHit {
@@ -309,8 +315,8 @@ impl PyMnemos {
     /// Raises:
     ///     MnemosError: If the embedding dimension is wrong.
     #[pyo3(
-        text_signature = "(self, namespace, embedding, *, top_k=5)",
-        signature = (namespace, embedding, *, top_k=5)
+        text_signature = "(self, namespace, embedding, *, top_k=5, filter=None)",
+        signature = (namespace, embedding, *, top_k=5, filter=None)
     )]
     fn ask_in_namespace(
         &self,
@@ -318,6 +324,7 @@ impl PyMnemos {
         namespace: &str,
         embedding: Vec<f32>,
         top_k: usize,
+        filter: Option<HashMap<String, String>>,
     ) -> PyResult<Vec<PyHit>> {
         if embedding.len() != self.dimension {
             return Err(MnemosError::new_err(format!(
@@ -329,7 +336,7 @@ impl PyMnemos {
 
         let ns = namespace.to_string();
         let results = py
-            .allow_threads(|| self.inner.ask_in_namespace(&ns, embedding, top_k))
+            .allow_threads(|| self.inner.ask_in_namespace(&ns, embedding, top_k, filter))
             .map_err(to_py_err)?;
 
         Ok(results
@@ -363,6 +370,18 @@ impl PyMnemos {
             content: entry.content.clone(),
             metadata_inner: entry.metadata.clone(),
         })
+    }
+
+    /// Delete a memory by ID.
+    ///
+    /// Args:
+    ///     mid: Memory identifier.
+    ///
+    /// Raises:
+    ///     MnemosError: If the memory ID does not exist or deletion fails.
+    #[pyo3(text_signature = "(self, mid)")]
+    fn delete_memory(&self, py: Python<'_>, mid: u64) -> PyResult<()> {
+        py.allow_threads(|| self.inner.delete_memory(mid)).map_err(to_py_err)
     }
 
     /// Create an edge between two memories.

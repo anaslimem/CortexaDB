@@ -192,7 +192,15 @@ impl QueryExecutor {
 
         let mut candidate_scores: HashMap<MemoryId, f32> = vector_results
             .into_iter()
-            .filter(|(id, _)| matches_filters(state_machine, *id, None, options.time_range))
+            .filter(|(id, _)| {
+                matches_filters(
+                    state_machine,
+                    *id,
+                    None,
+                    options.time_range,
+                    options.metadata_filter.as_ref(),
+                )
+            })
             .collect();
         if let Some(cb) = &mut trace {
             cb(StageTrace::Filtered {
@@ -219,17 +227,22 @@ impl QueryExecutor {
                                 neighbor,
                                 options.namespace.as_deref(),
                                 None,
+                                options.metadata_filter.as_ref(),
                             ) {
                                 expanded_ids.insert(neighbor);
                             }
                         }
                     }
-                    let rescored = index_layer.vector.search_in_ids(
-                        &query_embedding,
-                        &expanded_ids,
-                        expanded_ids.len(),
-                    )?;
-                    candidate_scores = rescored.into_iter().collect();
+                    if !expanded_ids.is_empty() {
+                        let rescored = index_layer.vector.search_in_ids(
+                            &query_embedding,
+                            &expanded_ids,
+                            expanded_ids.len(),
+                        )?;
+                        candidate_scores = rescored.into_iter().collect();
+                    } else {
+                        candidate_scores = HashMap::new();
+                    }
                     if let Some(cb) = &mut trace {
                         cb(StageTrace::GraphExpanded {
                             candidates: candidate_scores.len(),
@@ -272,6 +285,7 @@ fn matches_filters(
     id: MemoryId,
     namespace: Option<&str>,
     time_range: Option<(u64, u64)>,
+    metadata_filter: Option<&HashMap<String, String>>,
 ) -> bool {
     let entry = match state_machine.get_memory(id) {
         Ok(entry) => entry,
@@ -288,6 +302,16 @@ fn matches_filters(
             return false;
         }
     }
+
+    if let Some(filter) = metadata_filter {
+        for (key, val) in filter {
+            match entry.metadata.get(key) {
+                Some(entry_val) if entry_val == val => continue,
+                _ => return false,
+            }
+        }
+    }
+
     true
 }
 

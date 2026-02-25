@@ -109,6 +109,10 @@ class ReplayWriter:
         """Append a ``checkpoint`` operation."""
         self._write({"op": "checkpoint"})
 
+    def record_delete(self, id: int) -> None:
+        """Append a ``delete`` operation."""
+        self._write({"op": "delete", "id": id})
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
