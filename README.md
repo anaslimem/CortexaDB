@@ -1,6 +1,5 @@
 # CortexaDB: SQLite for AI Agents
 
-[![Build](https://github.com/anaslimem/CortexaDB/actions/workflows/rust.yml/badge.svg)](https://github.com/anaslimem/CortexaDB/actions/workflows/rust.yml)
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
 
