@@ -167,17 +167,28 @@ impl PyMnemos {
     ///     MnemosError: If the database cannot be opened or the dimension
     ///         mismatches an existing database.
     #[staticmethod]
-    #[pyo3(text_signature = "(path, *, dimension)")]
-    fn open(path: &str, dimension: usize) -> PyResult<Self> {
+    #[pyo3(
+        text_signature = "(path, *, dimension, sync='strict')",
+        signature = (path, *, dimension, sync="strict".to_string())
+    )]
+    fn open(path: &str, dimension: usize, sync: String) -> PyResult<Self> {
         if dimension == 0 {
             return Err(MnemosError::new_err("dimension must be > 0"));
         }
 
+        let sync_policy = match sync.to_lowercase().as_str() {
+            "strict" => SyncPolicy::Strict,
+            "async"  => SyncPolicy::Async { interval_ms: 10 },
+            "batch"  => SyncPolicy::Batch { max_ops: 64, max_delay_ms: 50 },
+            other    => return Err(MnemosError::new_err(format!(
+                "unknown sync policy '{}'. Valid values: 'strict', 'async', 'batch'",
+                other,
+            ))),
+        };
+
         let config = facade::MnemosConfig {
             vector_dimension: dimension,
-            sync_policy: SyncPolicy::Async {
-                interval_ms: 10,
-            },
+            sync_policy,
             checkpoint_policy: CheckpointPolicy::Periodic {
                 every_ops: 1000,
                 every_ms: 30_000,

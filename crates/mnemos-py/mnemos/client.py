@@ -132,10 +132,11 @@ class Mnemos:
         path: str,
         dimension: t.Optional[int],
         embedder: t.Optional[Embedder] = None,
+        sync: str = "strict",
     ):
         self._embedder = embedder
         try:
-            self._inner = _mnemos.Mnemos.open(path, dimension=dimension)
+            self._inner = _mnemos.Mnemos.open(path, dimension=dimension, sync=sync)
         except Exception as e:
             raise MnemosError(str(e))
 
@@ -146,6 +147,7 @@ class Mnemos:
         *,
         dimension: t.Optional[int] = None,
         embedder: t.Optional[Embedder] = None,
+        sync: str = "strict",
     ) -> "Mnemos":
         """
         Open or create a Mnemos database.
@@ -158,6 +160,15 @@ class Mnemos:
                        pre-computed embeddings.
             embedder:  An :class:`~mnemos.Embedder` instance. The dimension is
                        inferred from ``embedder.dimension`` automatically.
+            sync:      Write durability policy. One of:
+
+                       * ``"strict"`` *(default)* — every write is fsynced immediately.
+                         Safe against crashes, slightly lower throughput.
+                       * ``"async"`` — writes are fsynced every 10 ms in the
+                         background. Higher throughput but may lose the last few
+                         writes on unclean shutdown.
+                       * ``"batch"`` — fsync every 64 writes or 50 ms, whichever
+                         comes first. A middle ground.
 
         Raises:
             MnemosError: If neither or both of *dimension* and *embedder* are
@@ -173,7 +184,7 @@ class Mnemos:
             )
 
         dim = embedder.dimension if embedder is not None else dimension
-        return cls(path, dimension=dim, embedder=embedder)
+        return cls(path, dimension=dim, embedder=embedder, sync=sync)
 
     # ------------------------------------------------------------------
     # Internal helpers
