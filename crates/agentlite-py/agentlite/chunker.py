@@ -1,5 +1,5 @@
 """
-mnemos.chunker — deterministic fixed-window text splitter.
+agentlite.chunker — deterministic fixed-window text splitter.
 
 No external dependencies. Splits on character boundaries with word-boundary snapping
 so that chunks never cut mid-word.

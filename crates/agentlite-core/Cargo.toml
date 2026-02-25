@@ -1,7 +1,12 @@
 [package]
-name = "mnemos-core"
+name = "agentlite-core"
 version = "0.1.0"
 edition = "2024"
+authors = ["Anas Limem <limemanas0@gmail.com>"]
+description = "Fast, embedded vector + graph memory for AI agents"
+repository = "https://github.com/anaslimem/AgentLite"
+license = "GPL-3.0"
+readme = "../../README.md"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

@@ -1,5 +1,5 @@
 """
-mnemos.providers.ollama — Ollama local embedding wrapper.
+agentlite.providers.ollama — Ollama local embedding wrapper.
 
 Requires:
     pip install ollama
@@ -7,10 +7,10 @@ Requires:
 
 Usage::
 
-    from mnemos import Mnemos
-    from mnemos.providers.ollama import OllamaEmbedder
+    from agentlite import AgentLite
+    from agentlite.providers.ollama import OllamaEmbedder
 
-    db = Mnemos.open(
+    db = AgentLite.open(
         "agent.mem",
         embedder=OllamaEmbedder(model="nomic-embed-text"),
     )
@@ -43,7 +43,7 @@ class OllamaEmbedder(Embedder):
 
         # Pull the model first (one-time):
         #   $ ollama pull nomic-embed-text
-        from mnemos.providers.ollama import OllamaEmbedder
+        from agentlite.providers.ollama import OllamaEmbedder
         embedder = OllamaEmbedder(model="nomic-embed-text")
     """
 

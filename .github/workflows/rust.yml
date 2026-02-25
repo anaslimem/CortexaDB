@@ -26,7 +26,7 @@ jobs:
         python-version: '3.11'
     - name: Test Python Bindings
       run: |
-        cd crates/mnemos-py
+        cd crates/agentlite-py
         python3 -m venv .venv
         source .venv/bin/activate
         pip install maturin pytest

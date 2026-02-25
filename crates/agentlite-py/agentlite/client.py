@@ -1,7 +1,7 @@
 import typing as t
 
-from ._mnemos import MnemosError, Hit, Memory, Stats, MnemosNotFoundError, MnemosConfigError, MnemosIOError
-from . import _mnemos
+from ._agentlite import AgentLiteError, Hit, Memory, Stats, AgentLiteNotFoundError, AgentLiteConfigError, AgentLiteIOError
+from . import _agentlite
 from .embedder import Embedder
 from .chunker import chunk_text
 from .replay import ReplayWriter, ReplayReader
@@ -10,26 +10,26 @@ import time
 
 class Namespace:
     """
-    A scoped context for Mnemos operations.
+    A scoped context for AgentLite operations.
 
     Obtained via ``db.namespace(name)``.  All store and query operations
     automatically apply this namespace.
 
     Args:
-        db:       Parent :class:`Mnemos` instance.
+        db:       Parent :class:`AgentLite` instance.
         name:     Namespace identifier string.
         readonly: When *True*, ``remember()`` and ``ingest_document()`` raise
-                  :class:`MnemosError` — useful for shared read-only views.
+                  :class:`AgentLiteError` — useful for shared read-only views.
     """
 
-    def __init__(self, db: "Mnemos", name: str, *, readonly: bool = False):
+    def __init__(self, db: "AgentLite", name: str, *, readonly: bool = False):
         self._db = db
         self.name = name
         self._readonly = readonly
 
     def _check_writable(self) -> None:
         if self._readonly:
-            raise MnemosError(
+            raise AgentLiteError(
                 f"Namespace '{self.name}' is read-only. "
                 "Open it without readonly=True to write."
             )
@@ -109,27 +109,27 @@ class Namespace:
         return f"Namespace(name={self.name!r}, mode={mode})"
 
 
-class Mnemos:
+class AgentLite:
     """
-    Pythonic interface to the Mnemos embedded vector + graph database.
+    Pythonic interface to the AgentLite embedded vector + graph database.
 
     Open with a fixed dimension (manual embedding)::
 
-        db = Mnemos.open("agent.mem", dimension=128)
+        db = AgentLite.open("agent.mem", dimension=128)
         mid = db.remember("hello", embedding=[0.1] * 128)
 
     Open with an embedder for automatic embedding::
 
-        from mnemos.providers.openai import OpenAIEmbedder
-        db = Mnemos.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
+        from agentlite.providers.openai import OpenAIEmbedder
+        db = AgentLite.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
         mid = db.remember("We chose Stripe for payments")
 
     Record a session for deterministic replay::
 
-        db = Mnemos.open("agent.mem", dimension=128, record="session.log")
+        db = AgentLite.open("agent.mem", dimension=128, record="session.log")
         db.remember("fact A", embedding=[...])   # stored + logged
         # later ...
-        db2 = Mnemos.replay("session.log", "replay.mem")
+        db2 = AgentLite.replay("session.log", "replay.mem")
 
     Multi-agent namespace model::
 
@@ -149,11 +149,11 @@ class Mnemos:
         self._embedder = embedder
         self._recorder = _recorder
         try:
-            self._inner = _mnemos.Mnemos.open(path, dimension=dimension, sync=sync, max_entries=max_entries)
+            self._inner = _agentlite.AgentLite.open(path, dimension=dimension, sync=sync, max_entries=max_entries)
         except Exception as e:
-            if isinstance(e, MnemosError):
+            if isinstance(e, AgentLiteError):
                 raise
-            raise MnemosError(str(e))
+            raise AgentLiteError(str(e))
 
     @classmethod
     def open(
@@ -165,9 +165,9 @@ class Mnemos:
         sync: str = "strict",
         max_entries: t.Optional[int] = None,
         record: t.Optional[str] = None,
-    ) -> "Mnemos":
+    ) -> "AgentLite":
         """
-        Open or create a Mnemos database.
+        Open or create a AgentLite database.
 
         Exactly one of *dimension* or *embedder* must be provided.
 
@@ -175,7 +175,7 @@ class Mnemos:
             path:      Directory path for the database files.
             dimension: Vector embedding dimension. Use when supplying your own
                        pre-computed embeddings.
-            embedder:  An :class:`~mnemos.Embedder` instance. The dimension is
+            embedder:  An :class:`~agentlite.Embedder` instance. The dimension is
                        inferred from ``embedder.dimension`` automatically.
             sync:      Write durability policy: ``"strict"`` (default),
                        ``"async"``, or ``"batch"``.
@@ -184,15 +184,15 @@ class Mnemos:
                        NDJSON file so the session can be replayed later.
 
         Raises:
-            MnemosError: If neither or both of *dimension* and *embedder* are
+            AgentLiteError: If neither or both of *dimension* and *embedder* are
                          provided, or if the database cannot be opened.
         """
         if embedder is not None and dimension is not None:
-            raise MnemosConfigError(
+            raise AgentLiteConfigError(
                 "Provide either 'dimension' or 'embedder', not both."
             )
         if embedder is None and dimension is None:
-            raise MnemosConfigError(
+            raise AgentLiteConfigError(
                 "One of 'dimension' or 'embedder' is required."
             )
 
@@ -218,11 +218,11 @@ class Mnemos:
         db_path: str,
         *,
         sync: str = "strict",
-    ) -> "Mnemos":
+    ) -> "AgentLite":
         """
         Replay a log file into a fresh database, returning the populated instance.
 
-        The log must have been produced by ``Mnemos.open(..., record=log_path)``
+        The log must have been produced by ``AgentLite.open(..., record=log_path)``
         or ``db.export_replay(log_path)``.
 
         Args:
@@ -231,23 +231,23 @@ class Mnemos:
             sync:      Sync policy for the replayed database.
 
         Returns:
-            A :class:`Mnemos` instance with all recorded operations applied.
+            A :class:`AgentLite` instance with all recorded operations applied.
 
         Raises:
-            MnemosError:      If the log is invalid or replay fails.
+            AgentLiteError:      If the log is invalid or replay fails.
             FileNotFoundError: If *log_path* does not exist.
 
         Example::
 
-            db = Mnemos.replay("session.log", "/tmp/replayed.mem")
+            db = AgentLite.replay("session.log", "/tmp/replayed.mem")
             hits = db.ask("payment provider?", embedding=[...])
         """
         try:
             reader = ReplayReader(log_path)
         except FileNotFoundError as e:
-            raise MnemosIOError(str(e))
+            raise AgentLiteIOError(str(e))
         except ValueError as e:
-            raise MnemosConfigError(str(e))
+            raise AgentLiteConfigError(str(e))
 
         hdr = reader.header
         db = cls(db_path, dimension=hdr.dimension, sync=sync)
@@ -309,7 +309,7 @@ class Mnemos:
         if supplied is not None:
             return supplied
         if self._embedder is None:
-            raise MnemosConfigError(
+            raise AgentLiteConfigError(
                 "No embedder configured. Either pass 'embedding=' explicitly "
                 "or open the database with 'embedder=...'."
             )
@@ -350,7 +350,7 @@ class Mnemos:
         Args:
             name:     Namespace identifier (e.g. ``"agent_a"``, ``"shared"``).
             readonly: If *True*, writes to this namespace raise
-                      :class:`MnemosError`.
+                      :class:`AgentLiteError`.
         """
         return Namespace(self, name, readonly=readonly)
 
@@ -489,7 +489,7 @@ class Mnemos:
         Requires an embedder to be configured.
         """
         if self._embedder is None:
-            raise MnemosConfigError(
+            raise AgentLiteConfigError(
                 "ingest_document() requires an embedder. "
                 "Open the database with 'embedder=...'."
             )
@@ -524,12 +524,12 @@ class Mnemos:
 
         Example::
 
-            db = Mnemos.open("agent.mem", dimension=128)
+            db = AgentLite.open("agent.mem", dimension=128)
             # ... lots of work ...
             db.export_replay("snapshot.log")
 
             # Later on any machine:
-            db2 = Mnemos.replay("snapshot.log", "restored.mem")
+            db2 = AgentLite.replay("snapshot.log", "restored.mem")
         """
         stats = self._inner.stats()
         dim = stats.vector_dimension
@@ -604,14 +604,14 @@ class Mnemos:
         embedder_name = type(self._embedder).__name__ if self._embedder else "none"
         recording = f", recording={self._recorder._path}" if self._recorder else ""
         return (
-            f"Mnemos(entries={s.entries}, dimension={s.vector_dimension}, "
+            f"AgentLite(entries={s.entries}, dimension={s.vector_dimension}, "
             f"indexed={s.indexed_embeddings}, embedder={embedder_name}{recording})"
         )
 
     def __len__(self) -> int:
         return len(self._inner)
 
-    def __enter__(self) -> "Mnemos":
+    def __enter__(self) -> "AgentLite":
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> bool:

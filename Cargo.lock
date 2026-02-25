@@ -3,6 +3,29 @@
 version = 4
 
 [[package]]
+name = "agentlite-core"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "bincode",
+ "chrono",
+ "crc",
+ "proptest",
+ "rayon",
+ "serde",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "agentlite-py"
+version = "0.1.0"
+dependencies = [
+ "agentlite-core",
+ "pyo3",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -340,29 +363,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "mnemos-core"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "bincode",
- "chrono",
- "crc",
- "proptest",
- "rayon",
- "serde",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "mnemos-py"
-version = "0.1.0"
-dependencies = [
- "mnemos-core",
- "pyo3",
 ]
 
 [[package]]

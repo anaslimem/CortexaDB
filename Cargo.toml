@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/mnemos-core",
-    "crates/mnemos-py",
+    "crates/agentlite-core",
+    "crates/agentlite-py",
 ]
 resolver = "2"

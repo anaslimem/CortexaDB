@@ -1,8 +1,8 @@
 """
-mnemos.replay — deterministic replay log (NDJSON format).
+agentlite.replay — deterministic replay log (NDJSON format).
 
 A replay log is a newline-delimited JSON file that records every write
-operation on a Mnemos database.  It can be used for:
+operation on a AgentLite database.  It can be used for:
 
 * **Agent debugging** — replay an agent session step-by-step.
 * **Reproducible experiments** — recreate exact database states.
@@ -12,7 +12,7 @@ File format
 -----------
 Line 1 — header (JSON object):
 
-    {"mnemos_replay": "1.0", "dimension": 3, "sync": "strict", "recorded_at": "2026-02-25T03:00:00Z"}
+    {"agentlite_replay": "1.0", "dimension": 3, "sync": "strict", "recorded_at": "2026-02-25T03:00:00Z"}
 
 Lines 2..N — operation records (one JSON object per line):
 
@@ -67,7 +67,7 @@ class ReplayWriter:
         # Only write the header when creating a new file.
         if self._path.stat().st_size == 0:
             header = {
-                "mnemos_replay": REPLAY_FORMAT_VERSION,
+                "agentlite_replay": REPLAY_FORMAT_VERSION,
                 "dimension": dimension,
                 "sync": sync,
                 "recorded_at": datetime.now(timezone.utc).isoformat(),
@@ -144,7 +144,7 @@ class ReplayHeader:
     """Parsed replay log header."""
 
     def __init__(self, raw: dict) -> None:
-        version = raw.get("mnemos_replay")
+        version = raw.get("agentlite_replay")
         if version != REPLAY_FORMAT_VERSION:
             raise ValueError(
                 f"Unsupported replay log version: {version!r}. "

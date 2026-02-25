@@ -1,10 +1,10 @@
 import pytest
 import os
 import shutil
-from mnemos import Mnemos, MnemosError, HashEmbedder
-from mnemos.chunker import chunk_text
+from agentlite import AgentLite, AgentLiteError, HashEmbedder
+from agentlite.chunker import chunk_text
 
-DB_PATH = "/tmp/mnemos_test_py"
+DB_PATH = "/tmp/agentlite_test_py"
 
 @pytest.fixture(autouse=True)
 def cleanup():
@@ -14,9 +14,9 @@ def cleanup():
     if os.path.exists(DB_PATH):
         shutil.rmtree(DB_PATH)
 
-def test_mnemos_basic_flow():
+def test_agentlite_basic_flow():
     # 1. Open with dimension 3
-    db = Mnemos.open(DB_PATH, dimension=3)
+    db = AgentLite.open(DB_PATH, dimension=3)
     
     # 2. Store memory
     mid = db.remember("Hello world", embedding=[1.0, 0.0, 0.0])
@@ -47,8 +47,8 @@ def test_mnemos_basic_flow():
     db.checkpoint()
 
 
-def test_mnemos_namespaces():
-    db = Mnemos.open(DB_PATH, dimension=3)
+def test_agentlite_namespaces():
+    db = AgentLite.open(DB_PATH, dimension=3)
     
     agent_a = db.namespace("agent_a")
     agent_b = db.namespace("agent_b")
@@ -64,26 +64,26 @@ def test_mnemos_namespaces():
     assert hits_a[0].id == id_a
 
     # Context manager test
-    with Mnemos.open(DB_PATH, dimension=3) as db_ctx:
+    with AgentLite.open(DB_PATH, dimension=3) as db_ctx:
         assert len(db_ctx) == 2
 
 
-def test_mnemos_error_handling():
-    db = Mnemos.open(DB_PATH, dimension=3)
+def test_agentlite_error_handling():
+    db = AgentLite.open(DB_PATH, dimension=3)
 
     # Wrong dimension map
-    with pytest.raises(MnemosError, match="embedding dimension mismatch"):
+    with pytest.raises(AgentLiteError, match="embedding dimension mismatch"):
         db.remember("Wrong dim", embedding=[1.0, 0.0])
         
     # Missing embedding required
-    with pytest.raises(MnemosError, match="No embedder"):
+    with pytest.raises(AgentLiteError, match="No embedder"):
         db.remember("No embedding")
 
     # Wrong dimension on open — the mismatch check uses in-memory stats (entries > 0)
     # so no checkpoint is required.
     mid = db.remember("Seed", embedding=[1.0, 0.0, 0.0])
-    with pytest.raises(MnemosError, match="(?i)dimension mismatch"):
-        Mnemos.open(DB_PATH, dimension=4)
+    with pytest.raises(AgentLiteError, match="(?i)dimension mismatch"):
+        AgentLite.open(DB_PATH, dimension=4)
 
 # Chunker
 def test_chunk_text_basic():
@@ -121,7 +121,7 @@ def test_hash_embedder_deterministic():
 
 def test_open_with_embedder():
     emb = HashEmbedder(dimension=32)
-    db = Mnemos.open(DB_PATH, embedder=emb)
+    db = AgentLite.open(DB_PATH, embedder=emb)
     # remember without explicit embedding
     mid = db.remember("Auto-embedded text")
     assert mid > 0
@@ -129,20 +129,20 @@ def test_open_with_embedder():
     assert len(hits) >= 1
 
 def test_open_requires_one_of_dimension_or_embedder():
-    with pytest.raises(MnemosError, match="required"):
-        Mnemos.open(DB_PATH)  # neither
+    with pytest.raises(AgentLiteError, match="required"):
+        AgentLite.open(DB_PATH)  # neither
 
-    with pytest.raises(MnemosError, match="not both"):
-        Mnemos.open(DB_PATH, dimension=16, embedder=HashEmbedder(16))
+    with pytest.raises(AgentLiteError, match="not both"):
+        AgentLite.open(DB_PATH, dimension=16, embedder=HashEmbedder(16))
 
 def test_remember_without_embedder_requires_embedding():
-    db = Mnemos.open(DB_PATH, dimension=3)
-    with pytest.raises(MnemosError, match="No embedder"):
+    db = AgentLite.open(DB_PATH, dimension=3)
+    with pytest.raises(AgentLiteError, match="No embedder"):
         db.remember("No embedding provided")
 
 def test_ingest_document():
     emb = HashEmbedder(dimension=32)
-    db = Mnemos.open(DB_PATH, embedder=emb)
+    db = AgentLite.open(DB_PATH, embedder=emb)
     long_text = ("The quick brown fox jumps over the lazy dog. " * 30).strip()
     ids = db.ingest_document(long_text, chunk_size=100, overlap=20)
     assert len(ids) > 1
@@ -150,13 +150,13 @@ def test_ingest_document():
     assert db.stats().entries == len(ids)
 
 def test_ingest_document_requires_embedder():
-    db = Mnemos.open(DB_PATH, dimension=16)
-    with pytest.raises(MnemosError, match="ingest_document"):
+    db = AgentLite.open(DB_PATH, dimension=16)
+    with pytest.raises(AgentLiteError, match="ingest_document"):
         db.ingest_document("some text")
 
 def test_namespace_auto_embed():
     emb = HashEmbedder(dimension=32)
-    db = Mnemos.open(DB_PATH, embedder=emb)
+    db = AgentLite.open(DB_PATH, embedder=emb)
     ns = db.namespace("agent_a")
     mid = ns.remember("I am agent A")
     assert db.get(mid).namespace == "agent_a"
@@ -167,7 +167,7 @@ def test_namespace_auto_embed():
 def test_namespace_isolation():
     """Memories in namespace A should not appear in namespace B results."""
     emb = HashEmbedder(dimension=32)
-    db = Mnemos.open(DB_PATH, embedder=emb)
+    db = AgentLite.open(DB_PATH, embedder=emb)
 
     agent_a = db.namespace("agent_a")
     agent_b = db.namespace("agent_b")
@@ -190,7 +190,7 @@ def test_namespace_isolation():
 def test_namespaced_ask_param():
     """db.ask(query, namespaces=[...]) should scope results correctly."""
     emb = HashEmbedder(dimension=32)
-    db = Mnemos.open(DB_PATH, embedder=emb)
+    db = AgentLite.open(DB_PATH, embedder=emb)
 
     mid_a = db.remember("Agent A private", namespace="agent_a")
     mid_b = db.remember("Agent B private", namespace="agent_b")
@@ -207,7 +207,7 @@ def test_namespaced_ask_param():
 def test_cross_namespace_fan_out():
     """namespaces=[a, b] should return merged re-ranked results from both."""
     emb = HashEmbedder(dimension=32)
-    db = Mnemos.open(DB_PATH, embedder=emb)
+    db = AgentLite.open(DB_PATH, embedder=emb)
 
     mid_a = db.remember("Agent A knowledge", namespace="agent_a")
     mid_s = db.remember("Shared knowledge",  namespace="shared")
@@ -224,7 +224,7 @@ def test_cross_namespace_fan_out():
 def test_global_ask_returns_all_namespaces():
     """db.ask(query) with no namespaces= should search globally."""
     emb = HashEmbedder(dimension=32)
-    db = Mnemos.open(DB_PATH, embedder=emb)
+    db = AgentLite.open(DB_PATH, embedder=emb)
 
     mid_a = db.remember("Agent A fact", namespace="agent_a")
     mid_b = db.remember("Agent B fact", namespace="agent_b")
@@ -240,7 +240,7 @@ def test_global_ask_returns_all_namespaces():
 def test_readonly_namespace():
     """A readonly namespace should allow ask() but reject remember()."""
     emb = HashEmbedder(dimension=32)
-    db = Mnemos.open(DB_PATH, embedder=emb)
+    db = AgentLite.open(DB_PATH, embedder=emb)
 
     # Write to shared normally.
     mid = db.namespace("shared").remember("Public knowledge")
@@ -251,20 +251,20 @@ def test_readonly_namespace():
     assert any(h.id == mid for h in hits)
 
     # Writes must be rejected.
-    with pytest.raises(MnemosError, match="read-only"):
+    with pytest.raises(AgentLiteError, match="read-only"):
         ro.remember("Trying to write")
 
-    with pytest.raises(MnemosError, match="read-only"):
+    with pytest.raises(AgentLiteError, match="read-only"):
         ro.ingest_document("Document text")
 
 # Deterministic Replay
 import json
 import tempfile
-from mnemos import ReplayReader
+from agentlite import ReplayReader
 
-LOG_PATH  = "/tmp/mnemos_replay_test.log"
-LOG_PATH2 = "/tmp/mnemos_replay_test2.log"
-REPLAY_DB = "/tmp/mnemos_replay_db"
+LOG_PATH  = "/tmp/agentlite_replay_test.log"
+LOG_PATH2 = "/tmp/agentlite_replay_test2.log"
+REPLAY_DB = "/tmp/agentlite_replay_db"
 
 @pytest.fixture(autouse=False)
 def cleanup_replay():
@@ -281,7 +281,7 @@ def cleanup_replay():
 
 def test_replay_recording_creates_ndjson(cleanup_replay):
     """Recording mode should produce a valid NDJSON file."""
-    with Mnemos.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
+    with AgentLite.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
         db.remember("First memory", embedding=[1.0, 0.0, 0.0])
         db.remember("Second memory", embedding=[0.0, 1.0, 0.0])
 
@@ -290,7 +290,7 @@ def test_replay_recording_creates_ndjson(cleanup_replay):
 
     # First line is header.
     header = json.loads(lines[0])
-    assert header["mnemos_replay"] == "1.0"
+    assert header["agentlite_replay"] == "1.0"
     assert header["dimension"] == 3
 
     # 2 operation lines.
@@ -303,11 +303,11 @@ def test_replay_recording_creates_ndjson(cleanup_replay):
 
 def test_replay_round_trip(cleanup_replay):
     """Replaying a log into a new DB should recreate the same memories."""
-    with Mnemos.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
+    with AgentLite.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
         mid1 = db.remember("Alpha", embedding=[1.0, 0.0, 0.0], namespace="agent_a")
         mid2 = db.remember("Beta",  embedding=[0.0, 1.0, 0.0], namespace="agent_b")
 
-    db2 = Mnemos.replay(LOG_PATH, REPLAY_DB)
+    db2 = AgentLite.replay(LOG_PATH, REPLAY_DB)
 
     assert len(db2) == 2
 
@@ -319,23 +319,23 @@ def test_replay_round_trip(cleanup_replay):
 
 def test_replay_connect_id_mapping(cleanup_replay):
     """connect() IDs in the log should be translated to new IDs on replay."""
-    with Mnemos.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
+    with AgentLite.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
         a = db.remember("Node A", embedding=[1.0, 0.0, 0.0])
         b = db.remember("Node B", embedding=[0.0, 1.0, 0.0])
         db.connect(a, b, "relates_to")
 
-    db2 = Mnemos.replay(LOG_PATH, REPLAY_DB)
+    db2 = AgentLite.replay(LOG_PATH, REPLAY_DB)
     # Just assert the DB has 2 entries — connect is non-fatal if it fails.
     assert len(db2) == 2
 
 
 def test_replay_namespace_preserved(cleanup_replay):
     """Replay should preserve original namespaces."""
-    with Mnemos.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
+    with AgentLite.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
         db.remember("In A", embedding=[1.0, 0.0, 0.0], namespace="agent_a")
         db.remember("In B", embedding=[0.0, 1.0, 0.0], namespace="agent_b")
 
-    db2 = Mnemos.replay(LOG_PATH, REPLAY_DB)
+    db2 = AgentLite.replay(LOG_PATH, REPLAY_DB)
 
     hits_a = db2.ask("query", embedding=[1.0, 0.0, 0.0], namespaces=["agent_a"])
     hits_b = db2.ask("query", embedding=[0.0, 1.0, 0.0], namespaces=["agent_b"])
@@ -348,14 +348,14 @@ def test_replay_namespace_preserved(cleanup_replay):
 
 
 def test_replay_invalid_log_raises(cleanup_replay):
-    """Replaying a non-existent file should raise MnemosError."""
-    with pytest.raises(MnemosError):
-        Mnemos.replay("/tmp/no_such_file.log", REPLAY_DB)
+    """Replaying a non-existent file should raise AgentLiteError."""
+    with pytest.raises(AgentLiteError):
+        AgentLite.replay("/tmp/no_such_file.log", REPLAY_DB)
 
 
 def test_replay_reader_header():
     """ReplayReader should parse the header correctly."""
-    with Mnemos.open(DB_PATH, dimension=4, record=LOG_PATH) as db:
+    with AgentLite.open(DB_PATH, dimension=4, record=LOG_PATH) as db:
         db.remember("test", embedding=[1.0, 0.0, 0.0, 0.0])
 
     reader = ReplayReader(LOG_PATH)
@@ -371,8 +371,8 @@ def test_replay_reader_header():
     os.remove(LOG_PATH)
 
 def test_hybrid_use_graph():
-    import mnemos
-    db = mnemos.Mnemos.open(DB_PATH, dimension=2, sync="strict")
+    import agentlite
+    db = agentlite.AgentLite.open(DB_PATH, dimension=2, sync="strict")
     id1 = db.remember("Node A", embedding=[1.0, 0.0])
     id2 = db.remember("Node B", embedding=[0.0, 1.0])  # Orthogonal
     db.connect(id1, id2, "links_to")
@@ -392,8 +392,8 @@ def test_hybrid_use_graph():
     assert hits_graph[1].score >= hits_normal[0].score * 0.89
 
 def test_hybrid_recency_bias():
-    import mnemos
-    db = mnemos.Mnemos.open(DB_PATH, dimension=2, sync="strict")
+    import agentlite
+    db = agentlite.AgentLite.open(DB_PATH, dimension=2, sync="strict")
     id1 = db.remember("Node A", embedding=[1.0, 0.0])
 
     hits_normal = db.ask("test", embedding=[1.0, 0.0], top_k=1)
@@ -404,9 +404,9 @@ def test_hybrid_recency_bias():
     assert abs(hits_recent[0].score - (hits_normal[0].score * 1.2)) < 0.05
 
 def test_capacity_max_entries(tmp_path):
-    import mnemos
+    import agentlite
     db_path = str(tmp_path / "capacity_test")
-    db = mnemos.Mnemos.open(db_path, dimension=2, sync="strict", max_entries=5)
+    db = agentlite.AgentLite.open(db_path, dimension=2, sync="strict", max_entries=5)
 
     # Insert 8 memories.
     for i in range(8):
@@ -418,7 +418,7 @@ def test_capacity_max_entries(tmp_path):
     assert stats.indexed_embeddings == 5
 
     # Reopen to verify eviction persisted
-    db = mnemos.Mnemos.open(db_path, dimension=2, sync="strict")
+    db = agentlite.AgentLite.open(db_path, dimension=2, sync="strict")
     stats = db.stats()
     assert stats.entries == 5
     assert stats.indexed_embeddings == 5

@@ -1,14 +1,14 @@
 """
-mnemos.embedder — Embedder ABC and HashEmbedder (for testing).
+agentlite.embedder — Embedder ABC and HashEmbedder (for testing).
 
-The Embedder protocol is the integration point between Mnemos and any embedding
-model. Implement `Embedder` and pass it to `Mnemos.open(embedder=...)` to enable
+The Embedder protocol is the integration point between AgentLite and any embedding
+model. Implement `Embedder` and pass it to `AgentLite.open(embedder=...)` to enable
 automatic embedding.
 
-    from mnemos import Mnemos
-    from mnemos.providers.openai import OpenAIEmbedder
+    from agentlite import AgentLite
+    from agentlite.providers.openai import OpenAIEmbedder
 
-    db = Mnemos.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
+    db = AgentLite.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
     db.remember("We chose Stripe for payments")   # embeds automatically
     hits = db.ask("payment provider?")            # embeds query automatically
 """
@@ -26,7 +26,7 @@ class Embedder(ABC):
     Abstract base class for embedding models.
 
     Subclass this to integrate any embedding provider (OpenAI, Gemini, Ollama,
-    or your own local model) with Mnemos.
+    or your own local model) with AgentLite.
 
     The two required members are:
 
@@ -85,10 +85,10 @@ class HashEmbedder(Embedder):
 
     Example::
 
-        from mnemos import Mnemos
-        from mnemos import HashEmbedder
+        from agentlite import AgentLite
+        from agentlite import HashEmbedder
 
-        db = Mnemos.open("/tmp/test.mem", embedder=HashEmbedder(dimension=64))
+        db = AgentLite.open("/tmp/test.mem", embedder=HashEmbedder(dimension=64))
         db.remember("hello world")
     """
 

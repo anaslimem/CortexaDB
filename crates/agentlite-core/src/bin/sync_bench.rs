@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use mnemos_core::core::memory_entry::{MemoryEntry, MemoryId};
-use mnemos_core::engine::SyncPolicy;
-use mnemos_core::store::MnemosStore;
+use agentlite_core::core::memory_entry::{MemoryEntry, MemoryId};
+use agentlite_core::engine::SyncPolicy;
+use agentlite_core::store::AgentLiteStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = BenchConfig::from_args(std::env::args().skip(1).collect())?;
@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::remove_dir_all(&seg)?;
     }
 
-    let store = MnemosStore::new_with_policy(&wal, &seg, cfg.vector_dim, cfg.policy)?;
+    let store = AgentLiteStore::new_with_policy(&wal, &seg, cfg.vector_dim, cfg.policy)?;
 
     let start = Instant::now();
     for i in 0..cfg.ops {
@@ -45,10 +45,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(store);
 
     let recovered =
-        MnemosStore::recover_with_policy(&wal, &seg, cfg.vector_dim, SyncPolicy::Strict)?;
+        AgentLiteStore::recover_with_policy(&wal, &seg, cfg.vector_dim, SyncPolicy::Strict)?;
     let recovered_len = recovered.state_machine().len() as u64;
 
-    println!("=== Mnemos Sync Benchmark ===");
+    println!("=== AgentLite Sync Benchmark ===");
     println!("mode: {:?}", cfg.policy);
     println!("ops: {}", cfg.ops);
     println!("data_dir: {}", cfg.data_dir.display());
@@ -86,7 +86,7 @@ impl BenchConfig {
         let mut ops: u64 = 20_000;
         let mut vector_dim: usize = 3;
         let mut namespace = "bench".to_string();
-        let mut data_dir = std::env::temp_dir().join("mnemos_sync_bench");
+        let mut data_dir = std::env::temp_dir().join("agentlite_sync_bench");
 
         let mut mode = "strict".to_string();
         let mut batch_max_ops: usize = 64;
@@ -191,7 +191,7 @@ fn print_help() {
          --ops <u64> (default: 20000)\n\
          --vector-dim <usize> (default: 3)\n\
          --namespace <string> (default: bench)\n\
-         --data-dir <path> (default: /tmp/mnemos_sync_bench)\n\
+         --data-dir <path> (default: /tmp/agentlite_sync_bench)\n\
          --batch-max-ops <usize> (default: 64)\n\
          --batch-max-delay-ms <u64> (default: 25)\n\
          --async-interval-ms <u64> (default: 25)"

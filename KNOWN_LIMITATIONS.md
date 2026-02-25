@@ -1,12 +1,12 @@
 # Known Limitations
 
-Mnemos is in active early development (v0.1). This document lists current constraints so you can make informed decisions about when and how to use it.
+AgentLite is in active early development (v0.1). This document lists current constraints so you can make informed decisions about when and how to use it.
 
 ---
 
 ### 1. Single-Node Only
 
-Mnemos runs as a single process. There is no replication, clustering, or distributed consensus. If the node goes down, the service is unavailable until it restarts (data is safe on disk thanks to WAL durability).
+AgentLite runs as a single process. There is no replication, clustering, or distributed consensus. If the node goes down, the service is unavailable until it restarts (data is safe on disk thanks to WAL durability).
 
 **Implication**: suitable for single-machine agent deployments and dev/staging environments. Not yet suitable for HA production setups.
 

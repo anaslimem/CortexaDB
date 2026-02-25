@@ -2,11 +2,11 @@ import pytest
 import os
 import shutil
 import time
-from mnemos import Mnemos
+from agentlite import AgentLite
 
 @pytest.fixture
 def clean_db_path(request):
-    db_path = f"/tmp/mnemos_stress_{request.node.name}"
+    db_path = f"/tmp/agentlite_stress_{request.node.name}"
     if os.path.exists(db_path):
         shutil.rmtree(db_path)
     yield db_path
@@ -17,7 +17,7 @@ def test_replay_safety(clean_db_path):
     """All entries must survive close + reopen."""
     print("\n--- Test 1: Replay Safety (5000 inserts) ---")
 
-    with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db:
+    with AgentLite.open(clean_db_path, dimension=2, sync="strict") as db:
         start_time = time.time()
         for i in range(5000):
             db.remember(f"Entry {i}", embedding=[0.5, 0.5])
@@ -25,7 +25,7 @@ def test_replay_safety(clean_db_path):
         print(f"Inserted 5,000 memories in {time.time() - start_time:.2f}s")
         assert len(db) == 5000
 
-    with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db2:
+    with AgentLite.open(clean_db_path, dimension=2, sync="strict") as db2:
         assert len(db2) == 5000, f"Expected 5000 entries after reopen, got {len(db2)}"
 
     print("Test 1 PASS")
@@ -34,7 +34,7 @@ def test_compaction_integrity(clean_db_path):
     """All entries must survive compact + reopen."""
     print("\n--- Test 3: WAL Compaction Integrity ---")
 
-    with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db:
+    with AgentLite.open(clean_db_path, dimension=2, sync="strict") as db:
         for _ in range(100):
             db.remember("Stress entry", embedding=[0.1, 0.9])
 
@@ -43,7 +43,7 @@ def test_compaction_integrity(clean_db_path):
         print("Compacting...")
         db.compact()
 
-    with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db2:
+    with AgentLite.open(clean_db_path, dimension=2, sync="strict") as db2:
         assert len(db2) == 100, f"Expected 100 entries after compact + reopen, got {len(db2)}"
 
     print("Test 3 PASS")
@@ -53,7 +53,7 @@ def test_concurrent_compaction(clean_db_path):
     import threading
 
     print("\n--- Test 4: Concurrent Compaction and Reads ---")
-    with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db:
+    with AgentLite.open(clean_db_path, dimension=2, sync="strict") as db:
         # We need small segments or many entries to trigger rotation, 
         # but compact_segments also filters by deletion ratio.
         # Let's insert enough to have some churn.

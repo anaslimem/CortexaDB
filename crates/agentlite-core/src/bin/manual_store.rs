@@ -1,6 +1,6 @@
-use mnemos_core::core::memory_entry::{MemoryEntry, MemoryId};
-use mnemos_core::query::{QueryEmbedder, QueryOptions};
-use mnemos_core::store::MnemosStore;
+use agentlite_core::core::memory_entry::{MemoryEntry, MemoryId};
+use agentlite_core::query::{QueryEmbedder, QueryOptions};
+use agentlite_core::store::AgentLiteStore;
 
 struct DemoEmbedder;
 
@@ -15,7 +15,7 @@ impl QueryEmbedder for DemoEmbedder {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let base = std::env::temp_dir().join("mnemos_manual_demo");
+    let base = std::env::temp_dir().join("agentlite_manual_demo");
     std::fs::create_dir_all(&base)?;
     let wal = base.join("demo.wal");
     let seg = base.join("segments");
@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::remove_dir_all(&seg)?;
     }
 
-    let store = MnemosStore::new(&wal, &seg, 3)?;
+    let store = AgentLiteStore::new(&wal, &seg, 3)?;
 
     store.insert_memory(
         MemoryEntry::new(
@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let out = store.query("rust", options, &DemoEmbedder)?;
 
-    println!("--- Mnemos Manual Demo ---");
+    println!("--- AgentLite Manual Demo ---");
     println!("WAL length: {}", store.wal_len());
     println!("Indexed embeddings: {}", store.indexed_embeddings());
     println!("Hits: {}", out.hits.len());

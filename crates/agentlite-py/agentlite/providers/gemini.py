@@ -1,15 +1,15 @@
 """
-mnemos.providers.gemini — Google Gemini embedding wrapper.
+agentlite.providers.gemini — Google Gemini embedding wrapper.
 
 Requires:
     pip install google-generativeai
 
 Usage::
 
-    from mnemos import Mnemos
-    from mnemos.providers.gemini import GeminiEmbedder
+    from agentlite import AgentLite
+    from agentlite.providers.gemini import GeminiEmbedder
 
-    db = Mnemos.open(
+    db = AgentLite.open(
         "agent.mem",
         embedder=GeminiEmbedder(api_key="AIza...", model="models/text-embedding-004"),
     )

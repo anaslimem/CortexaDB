@@ -1,15 +1,15 @@
 """
-mnemos.providers.openai — OpenAI embedding wrapper.
+agentlite.providers.openai — OpenAI embedding wrapper.
 
 Requires:
     pip install openai
 
 Usage::
 
-    from mnemos import Mnemos
-    from mnemos.providers.openai import OpenAIEmbedder
+    from agentlite import AgentLite
+    from agentlite.providers.openai import OpenAIEmbedder
 
-    db = Mnemos.open(
+    db = AgentLite.open(
         "agent.mem",
         embedder=OpenAIEmbedder(api_key="sk-...", model="text-embedding-3-small"),
     )

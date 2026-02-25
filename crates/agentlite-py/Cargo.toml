@@ -1,15 +1,15 @@
 [package]
-name = "mnemos-py"
+name = "agentlite-py"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "_mnemos"
+name = "_agentlite"
 crate-type = ["cdylib"]
 
 [dependencies]
-mnemos-core = { path = "../mnemos-core" }
+agentlite-core = { path = "../agentlite-core" }
 pyo3 = { version = "0.24", features = ["extension-module"] }
 
 [package.metadata.maturin]
-name = "mnemos"
+name = "agentlite"

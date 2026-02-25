@@ -1,11 +1,11 @@
-//! Startup benchmark for Mnemos.
+//! Startup benchmark for AgentLite.
 //!
 //! Measures cold open time, snapshot load time, and WAL replay time
 //! against the <100ms target for small/medium databases.
 
-use mnemos_core::engine::{CapacityPolicy, SyncPolicy};
-use mnemos_core::facade::{Mnemos, MnemosConfig};
-use mnemos_core::store::CheckpointPolicy;
+use agentlite_core::engine::{CapacityPolicy, SyncPolicy};
+use agentlite_core::facade::{AgentLite, AgentLiteConfig};
+use agentlite_core::store::CheckpointPolicy;
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(128);
 
-    let base_dir = std::env::temp_dir().join("mnemos_startup_bench");
+    let base_dir = std::env::temp_dir().join("agentlite_startup_bench");
     if base_dir.exists() {
         std::fs::remove_dir_all(&base_dir)?;
     }
@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = base_dir.join("db");
     let db_path_str = db_path.to_str().unwrap();
 
-    println!("=== Mnemos Startup Benchmark ===");
+    println!("=== AgentLite Startup Benchmark ===");
     println!("entries: {entry_count}");
     println!("vector_dim: {vector_dim}");
     println!();
@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Seeding database...");
     let seed_start = Instant::now();
     {
-        let config = MnemosConfig {
+        let config = AgentLiteConfig {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Batch {
                 max_ops: 512,
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             checkpoint_policy: CheckpointPolicy::Disabled,
             capacity_policy: CapacityPolicy::new(None, None),
         };
-        let db = Mnemos::open_with_config(db_path_str, config)?;
+        let db = AgentLite::open_with_config(db_path_str, config)?;
 
         for i in 0..entry_count {
             let embedding: Vec<f32> = (0..vector_dim)
@@ -68,13 +68,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------------
     let cold_start = Instant::now();
     {
-        let config = MnemosConfig {
+        let config = AgentLiteConfig {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Disabled,
             capacity_policy: CapacityPolicy::new(None, None),
         };
-        let db = Mnemos::open_with_config(db_path_str, config)?;
+        let db = AgentLite::open_with_config(db_path_str, config)?;
         assert_eq!(db.stats().entries, entry_count);
     }
     let cold_elapsed = cold_start.elapsed();
@@ -86,13 +86,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Creating checkpoint...");
     let ckpt_start = Instant::now();
     {
-        let config = MnemosConfig {
+        let config = AgentLiteConfig {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Disabled,
             capacity_policy: CapacityPolicy::new(None, None),
         };
-        let db = Mnemos::open_with_config(db_path_str, config)?;
+        let db = AgentLite::open_with_config(db_path_str, config)?;
         db.checkpoint()?;
     }
     let ckpt_elapsed = ckpt_start.elapsed();
@@ -106,13 +106,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------------
     let tail_count = (entry_count / 20).max(5);
     {
-        let config = MnemosConfig {
+        let config = AgentLiteConfig {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Disabled,
             capacity_policy: CapacityPolicy::new(None, None),
         };
-        let db = Mnemos::open_with_config(db_path_str, config)?;
+        let db = AgentLite::open_with_config(db_path_str, config)?;
         for i in 0..tail_count {
             let embedding: Vec<f32> = (0..vector_dim)
                 .map(|d| ((i * 11 + d * 3) % 100) as f32 / 100.0)
@@ -126,13 +126,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------------
     let fast_start = Instant::now();
     {
-        let config = MnemosConfig {
+        let config = AgentLiteConfig {
             vector_dimension: vector_dim,
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Disabled,
             capacity_policy: CapacityPolicy::new(None, None),
         };
-        let db = Mnemos::open_with_config(db_path_str, config)?;
+        let db = AgentLite::open_with_config(db_path_str, config)?;
         assert_eq!(db.stats().entries, entry_count + tail_count);
     }
     let fast_elapsed = fast_start.elapsed();

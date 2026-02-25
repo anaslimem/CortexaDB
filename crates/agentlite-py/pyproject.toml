@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.0"]
+build-backend = "maturin"
+
+[project]
+name = "agentlite"
+version = "0.1.0"
+requires-python = ">=3.9"
+description = "Fast, embedded vector + graph memory for AI agents"
+authors = [
+    { name = "Anas Limem", email = "limemanas0@gmail.com" },
+]
+license = { text = "GPL-3.0" }
+readme = "../../README.md"
+
+[project.urls]
+Homepage = "https://github.com/anaslimem/AgentLite"
+Repository = "https://github.com/anaslimem/AgentLite"
+"Bug Tracker" = "https://github.com/anaslimem/AgentLite/issues"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "agentlite._agentlite"
