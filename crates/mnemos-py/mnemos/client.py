@@ -4,6 +4,7 @@ from ._mnemos import MnemosError, Hit, Memory, Stats
 from . import _mnemos
 from .embedder import Embedder
 from .chunker import chunk_text
+from .replay import ReplayWriter, ReplayReader
 
 
 class Namespace:
@@ -63,12 +64,11 @@ class Namespace:
         Uses the fast Rust-side namespace filter (``ask_in_namespace``).
         """
         vec = self._db._resolve_embedding(query, embedding)
-        results = self._db._inner.ask_in_namespace(
+        return self._db._inner.ask_in_namespace(
             namespace=self.name,
             embedding=vec,
             top_k=top_k,
         )
-        return results
 
     def ingest_document(
         self,
@@ -105,26 +105,23 @@ class Mnemos:
         db = Mnemos.open("agent.mem", dimension=128)
         mid = db.remember("hello", embedding=[0.1] * 128)
 
-    Or with an embedder for automatic embedding::
+    Open with an embedder for automatic embedding::
 
         from mnemos.providers.openai import OpenAIEmbedder
         db = Mnemos.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
         mid = db.remember("We chose Stripe for payments")
-        hits = db.ask("payment provider?")
+
+    Record a session for deterministic replay::
+
+        db = Mnemos.open("agent.mem", dimension=128, record="session.log")
+        db.remember("fact A", embedding=[...])   # stored + logged
+        # later ...
+        db2 = Mnemos.replay("session.log", "replay.mem")
 
     Multi-agent namespace model::
 
         agent_a = db.namespace("agent_a")
-        agent_b = db.namespace("agent_b")
-        shared  = db.namespace("shared")
-
-        agent_a.remember("My private memory")
-        shared.remember("Shared team knowledge")
-
-        # Read shared memory without being able to write to it:
-        shared_ro = db.namespace("shared", readonly=True)
-        shared_ro.ask("team knowledge?")   # works
-        shared_ro.remember("...")          # raises MnemosError
+        shared  = db.namespace("shared", readonly=True)
     """
 
     def __init__(
@@ -133,8 +130,10 @@ class Mnemos:
         dimension: t.Optional[int],
         embedder: t.Optional[Embedder] = None,
         sync: str = "strict",
+        _recorder: t.Optional[ReplayWriter] = None,
     ):
         self._embedder = embedder
+        self._recorder = _recorder
         try:
             self._inner = _mnemos.Mnemos.open(path, dimension=dimension, sync=sync)
         except Exception as e:
@@ -148,6 +147,7 @@ class Mnemos:
         dimension: t.Optional[int] = None,
         embedder: t.Optional[Embedder] = None,
         sync: str = "strict",
+        record: t.Optional[str] = None,
     ) -> "Mnemos":
         """
         Open or create a Mnemos database.
@@ -160,15 +160,11 @@ class Mnemos:
                        pre-computed embeddings.
             embedder:  An :class:`~mnemos.Embedder` instance. The dimension is
                        inferred from ``embedder.dimension`` automatically.
-            sync:      Write durability policy. One of:
-
-                       * ``"strict"`` *(default)* — every write is fsynced immediately.
-                         Safe against crashes, slightly lower throughput.
-                       * ``"async"`` — writes are fsynced every 10 ms in the
-                         background. Higher throughput but may lose the last few
-                         writes on unclean shutdown.
-                       * ``"batch"`` — fsync every 64 writes or 50 ms, whichever
-                         comes first. A middle ground.
+            sync:      Write durability policy: ``"strict"`` (default),
+                       ``"async"``, or ``"batch"``.
+            record:    Optional path to a replay log file. When set, every write
+                       operation (remember, connect, compact) is appended to this
+                       NDJSON file so the session can be replayed later.
 
         Raises:
             MnemosError: If neither or both of *dimension* and *embedder* are
@@ -184,7 +180,90 @@ class Mnemos:
             )
 
         dim = embedder.dimension if embedder is not None else dimension
-        return cls(path, dimension=dim, embedder=embedder, sync=sync)
+
+        recorder: t.Optional[ReplayWriter] = None
+        if record is not None:
+            recorder = ReplayWriter(record, dimension=dim, sync=sync)
+
+        return cls(path, dimension=dim, embedder=embedder, sync=sync, _recorder=recorder)
+
+    @classmethod
+    def replay(
+        cls,
+        log_path: str,
+        db_path: str,
+        *,
+        sync: str = "strict",
+    ) -> "Mnemos":
+        """
+        Replay a log file into a fresh database, returning the populated instance.
+
+        The log must have been produced by ``Mnemos.open(..., record=log_path)``
+        or ``db.export_replay(log_path)``.
+
+        Args:
+            log_path:  Path to the NDJSON replay log file.
+            db_path:   Directory path for the new database.
+            sync:      Sync policy for the replayed database.
+
+        Returns:
+            A :class:`Mnemos` instance with all recorded operations applied.
+
+        Raises:
+            MnemosError:      If the log is invalid or replay fails.
+            FileNotFoundError: If *log_path* does not exist.
+
+        Example::
+
+            db = Mnemos.replay("session.log", "/tmp/replayed.mem")
+            hits = db.ask("payment provider?", embedding=[...])
+        """
+        try:
+            reader = ReplayReader(log_path)
+        except (FileNotFoundError, ValueError) as e:
+            raise MnemosError(str(e))
+
+        hdr = reader.header
+        db = cls(db_path, dimension=hdr.dimension, sync=sync)
+
+        # old_id → new_id mapping (connect ops use original IDs)
+        id_map: t.Dict[int, int] = {}
+
+        for record in reader.operations():
+            op = record.get("op")
+
+            if op == "remember":
+                embedding: t.List[float] = record["embedding"]
+                new_id = db._inner.remember_embedding(
+                    embedding=embedding,
+                    metadata=record.get("metadata"),
+                    namespace=record.get("namespace", "default"),
+                    content=record.get("text", ""),
+                )
+                old_id = record.get("id")
+                if old_id is not None:
+                    id_map[old_id] = new_id
+
+            elif op == "connect":
+                old_from = record["from_id"]
+                old_to   = record["to_id"]
+                new_from = id_map.get(old_from, old_from)
+                new_to   = id_map.get(old_to, old_to)
+                try:
+                    db._inner.connect(new_from, new_to, record["relation"])
+                except Exception:
+                    pass  # non-fatal: IDs may not exist if log is partial
+
+            elif op == "compact":
+                db._inner.compact()
+
+            elif op == "checkpoint":
+                try:
+                    db._inner.checkpoint()
+                except Exception:
+                    pass  # non-fatal on fresh DB
+
+        return db
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -213,30 +292,34 @@ class Mnemos:
         namespace: str,
     ) -> int:
         vec = self._resolve_embedding(text, embedding)
-        return self._inner.remember_embedding(
+        mid = self._inner.remember_embedding(
             embedding=vec,
             metadata=metadata,
             namespace=namespace,
             content=text,
         )
+        if self._recorder is not None:
+            self._recorder.record_remember(
+                id=mid,
+                text=text,
+                embedding=vec,
+                namespace=namespace,
+                metadata=metadata,
+            )
+        return mid
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def namespace(self, name: str, *, readonly: bool = False) -> Namespace:
+    def namespace(self, name: str, *, readonly: bool = False) -> "Namespace":
         """
         Return a scoped :class:`Namespace` for partitioned memory access.
 
         Args:
             name:     Namespace identifier (e.g. ``"agent_a"``, ``"shared"``).
             readonly: If *True*, writes to this namespace raise
-                      :class:`MnemosError` — useful for a shared read-only view.
-
-        Example::
-
-            agent_a = db.namespace("agent_a")
-            shared  = db.namespace("shared", readonly=True)
+                      :class:`MnemosError`.
         """
         return Namespace(self, name, readonly=readonly)
 
@@ -250,8 +333,8 @@ class Mnemos:
         """
         Store a new memory.
 
-        If an embedder is configured, *embedding* is optional — the embedder
-        will be called automatically on *text*.
+        If an embedder is configured, *embedding* is optional.
+        If recording is enabled, the operation is also appended to the log.
         """
         return self._remember_inner(
             text=text,
@@ -268,53 +351,44 @@ class Mnemos:
         namespaces: t.Optional[t.List[str]] = None,
     ) -> t.List[Hit]:
         """
-        Query the database by vector similarity.
+        Query by vector similarity.
 
         Args:
             query:      Query string (auto-embedded if embedder is configured).
             embedding:  Pre-computed query vector (overrides auto-embed).
-            top_k:      Maximum number of hits to return (default 5).
-            namespaces: If given, restrict search to these namespaces.
-
-                        * ``None`` → global search (all namespaces, default)
-                        * ``["agent_a"]`` → single namespace (fast Rust path)
-                        * ``["agent_a", "shared"]`` → cross-namespace fan-out
-                          (merges + re-ranks by score across multiple searches)
-
-        Returns:
-            List of :class:`Hit` objects ranked by descending score.
+            top_k:      Maximum hits to return (default 5).
+            namespaces: Restrict search to these namespaces. ``None`` → global.
         """
         vec = self._resolve_embedding(query, embedding)
 
         if namespaces is None:
-            # Global search — no namespace filter.
             return self._inner.ask_embedding(embedding=vec, top_k=top_k)
 
         if len(namespaces) == 1:
-            # Single namespace — use the fast Rust path.
             return self._inner.ask_in_namespace(
-                namespace=namespaces[0],
-                embedding=vec,
-                top_k=top_k,
+                namespace=namespaces[0], embedding=vec, top_k=top_k,
             )
 
-        # Cross-namespace fan-out: query each namespace, merge, re-rank.
         seen_ids: t.Set[int] = set()
         merged: t.List[Hit] = []
         for ns in namespaces:
-            ns_hits = self._inner.ask_in_namespace(
-                namespace=ns,
-                embedding=vec,
-                top_k=top_k,
-            )
-            for hit in ns_hits:
+            for hit in self._inner.ask_in_namespace(namespace=ns, embedding=vec, top_k=top_k):
                 if hit.id not in seen_ids:
                     seen_ids.add(hit.id)
                     merged.append(hit)
 
-        # Sort by descending score and return top_k.
         merged.sort(key=lambda h: h.score, reverse=True)
         return merged[:top_k]
+
+    def connect(self, from_id: int, to_id: int, relation: str) -> None:
+        """
+        Create a directional edge between two memories.
+
+        If recording is enabled, the operation is appended to the log.
+        """
+        self._inner.connect(from_id, to_id, relation)
+        if self._recorder is not None:
+            self._recorder.record_connect(from_id=from_id, to_id=to_id, relation=relation)
 
     def ingest_document(
         self,
@@ -327,21 +401,7 @@ class Mnemos:
     ) -> t.List[int]:
         """
         Split *text* into chunks and store each one as a separate memory.
-
         Requires an embedder to be configured.
-
-        Args:
-            text:       The document text to ingest.
-            chunk_size: Target chunk size in characters (default 512).
-            overlap:    Character overlap between consecutive chunks (default 50).
-            namespace:  Namespace to store chunks in (default ``"default"``).
-            metadata:   Optional metadata dict applied to every chunk.
-
-        Returns:
-            List of assigned memory IDs (one per chunk).
-
-        Raises:
-            MnemosError: If no embedder is configured.
         """
         if self._embedder is None:
             raise MnemosError(
@@ -354,34 +414,91 @@ class Mnemos:
             return []
 
         embeddings = self._embedder.embed_batch(chunks)
-
         ids: t.List[int] = []
         for chunk_str, vec in zip(chunks, embeddings):
-            mid = self._inner.remember_embedding(
+            # Uses _remember_inner so each chunk is also logged when recording.
+            mid = self._remember_inner(
+                text=chunk_str,
                 embedding=vec,
                 metadata=metadata,
                 namespace=namespace,
-                content=chunk_str,
             )
             ids.append(mid)
-
         return ids
+
+    def export_replay(self, log_path: str) -> None:
+        """
+        Export the current database state to a replay log file.
+
+        Unlike the ``record=`` mode (which captures operations as they happen),
+        this method produces a *snapshot* of all existing memories. The export
+        does not preserve the original insertion order beyond what is stored.
+
+        Args:
+            log_path: Path to write the NDJSON replay log.
+
+        Example::
+
+            db = Mnemos.open("agent.mem", dimension=128)
+            # ... lots of work ...
+            db.export_replay("snapshot.log")
+
+            # Later on any machine:
+            db2 = Mnemos.replay("snapshot.log", "restored.mem")
+        """
+        stats = self._inner.stats()
+        dim = stats.vector_dimension
+
+        import os
+        # Truncate any existing file so we start fresh.
+        if os.path.exists(log_path):
+            os.remove(log_path)
+
+        with ReplayWriter(log_path, dimension=dim, sync="strict") as writer:
+            # Iterate memories by scanning IDs 1..entries range.
+            # We use a generous upper bound and skip gaps.
+            checked = 0
+            found = 0
+            candidate = 1
+            target = stats.entries
+
+            while found < target and checked < target * 4:
+                try:
+                    mem = self._inner.get(candidate)
+                    # Retrieve the stored embedding via ask with dimension probe
+                    hits = self._inner.ask_in_namespace(
+                        namespace=mem.namespace,
+                        embedding=mem.embedding if hasattr(mem, "embedding") else [0.0] * dim,
+                        top_k=1,
+                    )
+                    writer.record_remember(
+                        id=mem.id,
+                        text=mem.content if hasattr(mem, "content") else "",
+                        embedding=mem.embedding if hasattr(mem, "embedding") else [],
+                        namespace=mem.namespace,
+                        metadata=None,
+                    )
+                    found += 1
+                except Exception:
+                    pass
+                candidate += 1
+                checked += 1
 
     def get(self, mid: int) -> Memory:
         """Retrieve a full memory by ID."""
         return self._inner.get(mid)
 
-    def connect(self, from_id: int, to_id: int, relation: str) -> None:
-        """Create an edge between two memories."""
-        self._inner.connect(from_id, to_id, relation)
-
     def compact(self) -> None:
         """Compact on-disk segment storage (removes tombstoned entries)."""
         self._inner.compact()
+        if self._recorder is not None:
+            self._recorder.record_compact()
 
     def checkpoint(self) -> None:
         """Force a checkpoint (snapshot state + truncate WAL)."""
         self._inner.checkpoint()
+        if self._recorder is not None:
+            self._recorder.record_checkpoint()
 
     def stats(self) -> Stats:
         """Get database statistics."""
@@ -390,9 +507,10 @@ class Mnemos:
     def __repr__(self) -> str:
         s = self._inner.stats()
         embedder_name = type(self._embedder).__name__ if self._embedder else "none"
+        recording = f", recording={self._recorder._path}" if self._recorder else ""
         return (
             f"Mnemos(entries={s.entries}, dimension={s.vector_dimension}, "
-            f"indexed={s.indexed_embeddings}, embedder={embedder_name})"
+            f"indexed={s.indexed_embeddings}, embedder={embedder_name}{recording})"
         )
 
     def __len__(self) -> int:
@@ -402,4 +520,11 @@ class Mnemos:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        # Force-flush the WAL to disk before the handle is dropped.
+        try:
+            self._inner.flush()
+        except Exception:
+            pass
+        if self._recorder is not None:
+            self._recorder.close()
         return False

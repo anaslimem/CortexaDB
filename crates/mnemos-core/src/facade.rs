@@ -319,6 +319,12 @@ impl Mnemos {
         Ok(())
     }
 
+    /// Flush all pending WAL writes to disk.
+    pub fn flush(&self) -> Result<()> {
+        self.inner.flush()?;
+        Ok(())
+    }
+
     /// Force a checkpoint now (snapshot state + truncate WAL).
     pub fn checkpoint(&self) -> Result<()> {
         self.inner.checkpoint_now()?;

@@ -14,9 +14,9 @@ def clean_db_path(request):
         shutil.rmtree(db_path)
 
 def test_replay_safety(clean_db_path):
+    """All entries must survive close + reopen."""
     print("\n--- Test 1: Replay Safety (5000 inserts) ---")
 
-    # Use strict sync so every write is fsynced — guarantees full replay on reopen.
     with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db:
         start_time = time.time()
         for i in range(5000):
@@ -25,17 +25,15 @@ def test_replay_safety(clean_db_path):
         print(f"Inserted 5,000 memories in {time.time() - start_time:.2f}s")
         assert len(db) == 5000
 
-    # Simulate closing then reopen — strict policy guarantees no data loss.
-    print("Reopening...")
     with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db2:
         assert len(db2) == 5000, f"Expected 5000 entries after reopen, got {len(db2)}"
 
     print("Test 1 PASS")
 
 def test_compaction_integrity(clean_db_path):
+    """All entries must survive compact + reopen."""
     print("\n--- Test 3: WAL Compaction Integrity ---")
 
-    # Use strict sync so compact sees all 100 entries in the WAL.
     with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db:
         for _ in range(100):
             db.remember("Stress entry", embedding=[0.1, 0.9])
@@ -45,7 +43,6 @@ def test_compaction_integrity(clean_db_path):
         print("Compacting...")
         db.compact()
 
-    print("Reopening...")
     with Mnemos.open(clean_db_path, dimension=2, sync="strict") as db2:
         assert len(db2) == 100, f"Expected 100 entries after compact + reopen, got {len(db2)}"
 

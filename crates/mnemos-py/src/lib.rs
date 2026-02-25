@@ -189,10 +189,11 @@ impl PyMnemos {
         let config = facade::MnemosConfig {
             vector_dimension: dimension,
             sync_policy,
-            checkpoint_policy: CheckpointPolicy::Periodic {
-                every_ops: 1000,
-                every_ms: 30_000,
-            },
+            // Disabled: the Drop impl's checkpoint_now() truncates the WAL
+            // based on a potentially-stale snapshot, which can lose the last
+            // few entries. Disabling checkpoint avoids WAL truncation on Drop;
+            // the user can still call checkpoint() explicitly when safe.
+            checkpoint_policy: CheckpointPolicy::Disabled,
         };
 
         let db = facade::Mnemos::open_with_config(path, config).map_err(to_py_err)?;
@@ -380,6 +381,14 @@ impl PyMnemos {
     #[pyo3(text_signature = "(self)")]
     fn compact(&self, py: Python<'_>) -> PyResult<()> {
         py.allow_threads(|| self.inner.compact()).map_err(to_py_err)
+    }
+
+    /// Flush all pending WAL writes to disk.
+    /// Raises:
+    ///     MnemosError: If the flush fails.
+    #[pyo3(text_signature = "(self)")]
+    fn flush(&self, py: Python<'_>) -> PyResult<()> {
+        py.allow_threads(|| self.inner.flush()).map_err(to_py_err)
     }
 
     /// Force a checkpoint (snapshot state + truncate WAL).
