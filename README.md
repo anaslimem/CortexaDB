@@ -2,6 +2,7 @@
 
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
+[![Version](https://img.shields.io/badge/Version-0.1.1-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
 
 **CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
 
@@ -9,23 +10,27 @@ Think of it as **SQLite, but with semantic and relational intelligence for your 
 
 ---
 
-##  Quickstart
+## Quickstart
 
 ### Python (Recommended)
 CortexaDB is designed to be extremely easy to use from Python via high-performance Rust bindings.
 
 ```python
 from cortexadb import CortexaDB
+from cortexadb.providers.openai import OpenAIEmbedder
 
-# Open database (auto-creates if missing)
-# You can provide a manual dimension or an Embedder instance
-db = CortexaDB.open("agent.mem", dimension=1536)
+# Open database with embedder (auto-embeds text)
+db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
 
-# Store a memory
-mid = db.remember("The user prefers dark mode for the dashboard.", metadata={"type": "preference"})
+# Store memories
+db.remember("The user prefers dark mode.")
+db.remember("User works at Stripe.")
 
-# Ask a question (Semantic Search)
-hits = db.ask("Does the user have UI preferences?")
+# Load a file (TXT, MD, JSON, DOCX, PDF)
+db.load("document.pdf", strategy="recursive")
+
+# Ask questions (Semantic Search)
+hits = db.ask("What does the user like?")
 for hit in hits:
     print(f"ID: {hit.id}, Score: {hit.score}")
 
@@ -35,7 +40,7 @@ db.connect(mid1, mid2, "relates_to")
 
 ---
 
-##  Installation
+## Installation
 
 ### Python
 CortexaDB is available on PyPI and can be installed via `pip`:
@@ -43,6 +48,10 @@ CortexaDB is available on PyPI and can be installed via `pip`:
 ```bash
 # Recommended: Install from PyPI
 pip install cortexadb
+
+# With document support (DOCX, PDF)
+pip install cortexadb[docs]
+pip install cortexadb[pdf]
 
 # From GitHub (Install latest release)
 pip install "cortexadb @ git+https://github.com/anaslimem/CortexaDB.git#subdirectory=crates/cortexadb-py"
@@ -57,9 +66,11 @@ cortexadb-core = { git = "https://github.com/anaslimem/CortexaDB.git" }
 
 ---
 
-##  Key Features
+## Key Features
 
 - **Hybrid Retrieval**: Combine vector similarity (semantic), graph relations (structural), and recency (temporal) in a single query.
+- **Smart Chunking**: Multiple strategies for document ingestion - `fixed`, `recursive`, `semantic`, `markdown`, `json`.
+- **File Support**: Load documents directly - TXT, MD, JSON, DOCX, PDF.
 - **Hard Durability**: Write-Ahead Log (WAL) and Segmented logs ensure your agent never forgets, even after a crash.
 - **Multi-Agent Namespaces**: Isolate memories between different agents or workspaces within a single database file.
 - **Deterministic Replay**: Record operations to a log file and replay them exactly to debug agent behavior or migrate data.
@@ -68,7 +79,44 @@ cortexadb-core = { git = "https://github.com/anaslimem/CortexaDB.git" }
 
 ---
 
-##  API Guide
+## Chunking Strategies
+
+CortexaDB provides 5 smart chunking strategies for document ingestion:
+
+| Strategy | Use Case |
+|----------|----------|
+| `fixed` | Simple character-based with word-boundary snap |
+| `recursive` | General purpose - splits paragraphs → sentences → words |
+| `semantic` | Articles, blogs - split by paragraphs |
+| `markdown` | Technical docs - preserves headers, lists, code blocks |
+| `json` | Structured data - flattens to key-value pairs |
+
+```python
+from cortexadb import CortexaDB, chunk
+
+# Use chunk() directly
+chunks = chunk(text, strategy="recursive", chunk_size=512, overlap=50)
+
+# Or use db.ingest() / db.load()
+db.ingest("text...", strategy="markdown")
+db.load("document.pdf", strategy="recursive")
+```
+
+---
+
+## File Format Support
+
+| Format | Extension | Install |
+|--------|-----------|---------|
+| Plain Text | `.txt` | Built-in |
+| Markdown | `.md` | Built-in |
+| JSON | `.json` | Built-in |
+| Word | `.docx` | `pip install cortexadb[docs]` |
+| PDF | `.pdf` | `pip install cortexadb[pdf]` |
+
+---
+
+## API Guide
 
 ### Core Operations
 
@@ -76,6 +124,8 @@ cortexadb-core = { git = "https://github.com/anaslimem/CortexaDB.git" }
 |--------|-------------|
 | `CortexaDB.open(path, ...)` | Opens or creates a database at the specified path. |
 | `.remember(text, ...)` | Stores a new memory. Auto-embeds if an embedder is configured. |
+| `.ingest(text, ...)` | Ingests text with smart chunking. |
+| `.load(path, ...)` | Loads and ingests a file. |
 | `.ask(query, ...)` | Performs a hybrid search across vectors, graphs, and time. |
 | `.connect(id1, id2, rel)` | Creates a directed edge between two memory entries. |
 | `.namespace(name)` | Returns a scoped view of the database for a specific agent/context. |
@@ -91,7 +141,7 @@ When calling `CortexaDB.open()`, you can tune the behavior:
 
 ---
 
-##  Technical Essentials: How it's built
+## Technical Essentials: How it's built
 
 <details>
 <summary><b>Click to see the Rust Architecture</b></summary>
@@ -111,6 +161,13 @@ Unlike standard vector DBs, CortexaDB doesn't just look at distance. Our query p
 - **Graph**: Discover related concepts by traversing edges created with `.connect()`.
 - **Temporal**: Boost or filter results based on when they were "remembered".
 
+### Smart Chunking
+The chunking engine is built in Rust for performance:
+- 5 strategies covering most use cases
+- Word-boundary awareness to avoid splitting words
+- Overlap support for context continuity
+- JSON flattening for structured data
+
 ### Versioned Serialization
 We use a custom versioned serialization layer (with a "magic-byte" header). This allows us to update the CortexaDB engine without breaking your existing database files—it knows how to read "legacy" data while writing new records in the latest format.
 
@@ -118,8 +175,8 @@ We use a custom versioned serialization layer (with a "magic-byte" header). This
 
 ---
 
-##  License & Status
-CortexaDB is currently in **Beta (v0.1)**. It is released under the **MIT** and **Apache-2.0** licenses.  
+## License & Status
+CortexaDB is currently in **Beta (v0.1.1)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
 
 ---
