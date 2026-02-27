@@ -43,6 +43,58 @@ fn map_cortexadb_err(e: facade::CortexaDBError) -> PyErr {
     }
 }
 
+/// Parse index_mode from Python - accepts string or dict
+/// String: "exact", "hnsw"
+/// Dict: {"type": "hnsw", "m": 16, "ef_search": 50, "ef_construction": 200}
+fn parse_index_mode(index_mode: Bound<'_, PyAny>) -> PyResult<cortexadb_core::IndexMode> {
+    // If string: "exact" or "hnsw"
+    if let Ok(s) = index_mode.extract::<String>() {
+        return match s.to_lowercase().as_str() {
+            "exact" => Ok(cortexadb_core::IndexMode::Exact),
+            "hnsw" => Ok(cortexadb_core::IndexMode::Hnsw(cortexadb_core::HnswConfig::default())),
+            other => Err(CortexaDBConfigError::new_err(format!(
+                "unknown index_mode '{}'. Valid: 'exact', 'hnsw'",
+                other
+            ))),
+        };
+    }
+
+    // If dict: {"type": "hnsw", "m": 16, "ef_search": 50, "ef_construction": 200}
+    if let Ok(dict) = index_mode.extract::<HashMap<String, Py<PyAny>>>() {
+        let mode_type = dict
+            .get("type")
+            .and_then(|v| v.extract::<String>(index_mode.py()).ok())
+            .unwrap_or_else(|| "hnsw".to_string());
+
+        if mode_type.to_lowercase() == "hnsw" {
+            let m =
+                dict.get("m").and_then(|v| v.extract::<usize>(index_mode.py()).ok()).unwrap_or(16);
+            let ef_search = dict
+                .get("ef_search")
+                .and_then(|v| v.extract::<usize>(index_mode.py()).ok())
+                .unwrap_or(50);
+            let ef_construction = dict
+                .get("ef_construction")
+                .and_then(|v| v.extract::<usize>(index_mode.py()).ok())
+                .unwrap_or(200);
+
+            return Ok(cortexadb_core::IndexMode::Hnsw(cortexadb_core::HnswConfig {
+                m,
+                ef_search,
+                ef_construction,
+            }));
+        }
+
+        if mode_type.to_lowercase() == "exact" {
+            return Ok(cortexadb_core::IndexMode::Exact);
+        }
+    }
+
+    Err(CortexaDBConfigError::new_err(
+        "index_mode must be a string ('exact'/'hnsw') or dict with 'type' key".to_string(),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Hit — lightweight query result
 // ---------------------------------------------------------------------------
@@ -196,14 +248,13 @@ impl PyCortexaDB {
     ///         mismatches an existing database.
     #[staticmethod]
     #[pyo3(
-        text_signature = "(path, *, dimension, sync='strict', index_mode='exact', max_entries=None)",
-        signature = (path, *, dimension, sync="strict".to_string(), index_mode="exact".to_string(), max_entries=None)
+        text_signature = "(path, *, dimension, sync='strict', index_mode='exact', max_entries=None)"
     )]
     fn open(
         path: &str,
         dimension: usize,
         sync: String,
-        index_mode: String,
+        index_mode: Bound<'_, PyAny>,
         max_entries: Option<usize>,
     ) -> PyResult<Self> {
         if dimension == 0 {
@@ -222,16 +273,7 @@ impl PyCortexaDB {
             }
         };
 
-        let index_mode = match index_mode.to_lowercase().as_str() {
-            "exact" => cortexadb_core::IndexMode::Exact,
-            "hnsw" => cortexadb_core::IndexMode::Hnsw(cortexadb_core::HnswConfig::default()),
-            other => {
-                return Err(CortexaDBConfigError::new_err(format!(
-                    "unknown index_mode '{}'. Valid values: 'exact', 'hnsw'",
-                    other,
-                )));
-            }
-        };
+        let index_mode = parse_index_mode(index_mode)?;
 
         let config = facade::CortexaDBConfig {
             vector_dimension: dimension,

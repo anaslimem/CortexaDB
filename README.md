@@ -102,7 +102,8 @@ db = CortexaDB.open("db.mem", dimension=128, index_mode="hnsw")
 db = CortexaDB.open("db.mem", dimension=128, index_mode={
     "type": "hnsw",
     "m": 16,           # connections per node
-    "ef_search": 50     # query-time search width
+    "ef_search": 50,   # query-time search width
+    "ef_construction": 200  # build-time search width
 })
 ```
 
@@ -205,7 +206,7 @@ We use a custom versioned serialization layer (with a "magic-byte" header). This
 ---
 
 ## License & Status
-CortexaDB is currently in **Beta (v0.1.1)**. It is released under the **MIT** and **Apache-2.0** licenses.  
+CortexaDB is currently in **Beta (v0.1.2)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
 
 ---
