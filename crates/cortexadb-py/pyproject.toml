@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "cortexadb"
-version = "0.1.1"
+version = "0.1.2"
 requires-python = ">=3.9"
 description = "Fast, embedded vector + graph memory for AI agents"
 authors = [
