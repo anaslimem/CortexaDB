@@ -18,7 +18,7 @@ crc = "3.0"
 arc-swap = "1.8.2"
 regex = "1.10"
 serde_json = "1.0"
-usearch = "2.24.0"
+usearch = { version = "2.24.0", default-features = false, features = ["fp16lib"] }
 
 [dev-dependencies]
 proptest = "1.4"
