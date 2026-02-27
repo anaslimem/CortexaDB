@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use crate::core::memory_entry::MemoryId;
@@ -12,6 +13,8 @@ pub enum HnswError {
     NoVectors,
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Lock error")]
+    LockError,
 }
 
 pub type Result<T> = std::result::Result<T, HnswError>;
@@ -29,12 +32,9 @@ impl Default for HnswConfig {
     }
 }
 
-/// Vector index mode - exact (brute-force) or HNSW (approximate)
 #[derive(Debug, Clone)]
 pub enum IndexMode {
-    /// Exact brute-force search (default, 100% recall)
     Exact,
-    /// HNSW approximate search (faster, 95%+ recall)
     Hnsw(HnswConfig),
 }
 
@@ -44,8 +44,9 @@ impl Default for IndexMode {
     }
 }
 
+#[derive(Clone)]
 pub struct HnswBackend {
-    index: Rc<RefCell<usearch::Index>>,
+    index: Arc<Mutex<usearch::Index>>,
     dimension: usize,
     config: HnswConfig,
 }
@@ -74,10 +75,10 @@ impl HnswBackend {
         let index =
             usearch::new_index(&options).map_err(|e| HnswError::UsearchError(e.to_string()))?;
 
-        Ok(Self { index, dimension, config })
+        Ok(Self { index: Arc::new(Mutex::new(index)), dimension, config })
     }
 
-    pub fn add(&mut self, id: MemoryId, vector: &[f32]) -> Result<()> {
+    pub fn add(&self, id: MemoryId, vector: &[f32]) -> Result<()> {
         if vector.len() != self.dimension {
             return Err(HnswError::DimensionMismatch {
                 expected: self.dimension,
@@ -85,7 +86,8 @@ impl HnswBackend {
             });
         }
 
-        self.index
+        let index = self.index.lock().map_err(|_| HnswError::LockError)?;
+        index
             .add(id.0 as usearch::Key, vector)
             .map_err(|e| HnswError::UsearchError(e.to_string()))?;
 
@@ -105,12 +107,14 @@ impl HnswBackend {
             });
         }
 
-        if self.index.capacity() == 0 {
+        let index = self.index.lock().map_err(|_| HnswError::LockError)?;
+
+        if index.capacity() == 0 {
             return Err(HnswError::NoVectors);
         }
 
         let results =
-            self.index.search(query, top_k).map_err(|e| HnswError::UsearchError(e.to_string()))?;
+            index.search(query, top_k).map_err(|e| HnswError::UsearchError(e.to_string()))?;
 
         let mut output = Vec::with_capacity(top_k);
         for i in 0..results.keys.len() {
@@ -125,18 +129,17 @@ impl HnswBackend {
         Ok(output)
     }
 
-    pub fn remove(&mut self, id: MemoryId) -> Result<()> {
-        self.index
-            .remove(id.0 as usearch::Key)
-            .map_err(|e| HnswError::UsearchError(e.to_string()))?;
+    pub fn remove(&self, id: MemoryId) -> Result<()> {
+        let index = self.index.lock().map_err(|_| HnswError::LockError)?;
+        index.remove(id.0 as usearch::Key).map_err(|e| HnswError::UsearchError(e.to_string()))?;
         Ok(())
     }
 
     pub fn len(&self) -> usize {
-        self.index.size()
+        self.index.lock().map(|i| i.size()).unwrap_or(0)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.index.size() == 0
+        self.len() == 0
     }
 }

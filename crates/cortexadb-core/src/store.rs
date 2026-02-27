@@ -121,6 +121,7 @@ impl CortexaDBStore {
             SyncPolicy::Strict,
             CheckpointPolicy::Disabled,
             CapacityPolicy::new(None, None),
+            crate::index::hnsw::IndexMode::Exact,
         )
     }
 
@@ -137,6 +138,7 @@ impl CortexaDBStore {
             sync_policy,
             CheckpointPolicy::Disabled,
             CapacityPolicy::new(None, None),
+            crate::index::hnsw::IndexMode::Exact,
         )
     }
 
@@ -147,6 +149,7 @@ impl CortexaDBStore {
         sync_policy: SyncPolicy,
         checkpoint_policy: CheckpointPolicy,
         capacity_policy: CapacityPolicy,
+        index_mode: crate::index::hnsw::IndexMode,
     ) -> Result<Self> {
         let wal_path = wal_path.as_ref().to_path_buf();
         let segments_dir = segments_dir.as_ref().to_path_buf();
@@ -159,6 +162,7 @@ impl CortexaDBStore {
             checkpoint_policy,
             capacity_policy,
             checkpoint_path,
+            index_mode,
         )
     }
 
@@ -174,6 +178,7 @@ impl CortexaDBStore {
             SyncPolicy::Strict,
             CheckpointPolicy::Disabled,
             CapacityPolicy::new(None, None),
+            crate::index::hnsw::IndexMode::Exact,
         )
     }
 
@@ -190,6 +195,7 @@ impl CortexaDBStore {
             sync_policy,
             CheckpointPolicy::Disabled,
             CapacityPolicy::new(None, None),
+            crate::index::hnsw::IndexMode::Exact,
         )
     }
 
@@ -200,6 +206,7 @@ impl CortexaDBStore {
         sync_policy: SyncPolicy,
         checkpoint_policy: CheckpointPolicy,
         capacity_policy: CapacityPolicy,
+        index_mode: crate::index::hnsw::IndexMode,
     ) -> Result<Self> {
         let wal_path = wal_path.as_ref().to_path_buf();
         let segments_dir = segments_dir.as_ref().to_path_buf();
@@ -223,6 +230,7 @@ impl CortexaDBStore {
             checkpoint_policy,
             capacity_policy,
             checkpoint_path,
+            index_mode,
         )
     }
 
@@ -233,8 +241,17 @@ impl CortexaDBStore {
         checkpoint_policy: CheckpointPolicy,
         capacity_policy: CapacityPolicy,
         checkpoint_path: std::path::PathBuf,
+        index_mode: crate::index::hnsw::IndexMode,
     ) -> Result<Self> {
-        let indexes = Self::build_vector_index(engine.get_state_machine(), vector_dimension, None)?;
+        let hnsw_config = match index_mode {
+            crate::index::hnsw::IndexMode::Exact => None,
+            crate::index::hnsw::IndexMode::Hnsw(config) => Some(config),
+        };
+        let indexes = Self::build_vector_index(
+            engine.get_state_machine(),
+            vector_dimension,
+            hnsw_config.as_ref(),
+        )?;
         Self::assert_vector_index_in_sync_inner(engine.get_state_machine(), &indexes)?;
 
         let snapshot = Arc::new(ArcSwap::from_pointee(ReadSnapshot::new(
@@ -1141,6 +1158,7 @@ mod tests {
                 SyncPolicy::Strict,
                 CheckpointPolicy::Periodic { every_ops: 1, every_ms: 10 },
                 CapacityPolicy::new(None, None),
+                crate::index::hnsw::IndexMode::Exact,
             )
             .unwrap();
 
@@ -1161,6 +1179,7 @@ mod tests {
             SyncPolicy::Strict,
             CheckpointPolicy::Disabled,
             CapacityPolicy::new(None, None),
+            crate::index::hnsw::IndexMode::Exact,
         )
         .unwrap();
         assert_eq!(recovered.state_machine().len(), 1);

@@ -293,14 +293,9 @@ impl VectorIndex {
         self.id_to_namespace.insert(id, namespace);
 
         // Also add to HNSW backend if enabled
-        if let Some(ref hnsw_arc) = self.hnsw_backend {
-            if let Some(hnsw) = Arc::get_mut(&mut Arc::clone(hnsw_arc)) {
-                let _ = hnsw.add(id, &embedding);
-            }
+        if let Some(ref hnsw) = self.hnsw_backend {
+            let _ = hnsw.add(id, &embedding);
         }
-
-        Ok(())
-    }
 
         Ok(())
     }
@@ -334,9 +329,8 @@ impl VectorIndex {
             self.id_to_namespace.remove(&id);
 
             // Also remove from HNSW backend if enabled
-            if let Some(ref hnsw_arc) = self.hnsw_backend {
-                let hnsw_arc_clone = Arc::clone(hnsw_arc);
-                let _ = hnsw_arc_clone.remove(id);
+            if let Some(ref hnsw) = self.hnsw_backend {
+                let _ = hnsw.remove(id);
             }
         }
         Ok(())
@@ -408,9 +402,8 @@ impl VectorIndex {
         }
 
         // Use HNSW if available (approximate search)
-        if let Some(ref hnsw_arc) = self.hnsw_backend {
-            let hnsw_arc_clone = Arc::clone(hnsw_arc);
-            match hnsw_arc_clone.search(query, top_k, None) {
+        if let Some(ref hnsw) = self.hnsw_backend {
+            match hnsw.search(query, top_k, None) {
                 Ok(results) => return Ok(results),
                 Err(e) => {
                     // Fall back to exact search if HNSW fails

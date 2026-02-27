@@ -160,6 +160,7 @@ impl CortexaDB {
                 config.sync_policy,
                 config.checkpoint_policy,
                 config.capacity_policy,
+                config.index_mode.clone(),
             )?
         } else {
             CortexaDBStore::new_with_policies(
@@ -169,6 +170,7 @@ impl CortexaDB {
                 config.sync_policy,
                 config.checkpoint_policy,
                 config.capacity_policy,
+                config.index_mode.clone(),
             )?
         };
 
