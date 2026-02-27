@@ -22,6 +22,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install C++ build tools (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          # Install LLVM (includes Clang which works well with maturin)
+          choco install llvm -y
+          refreshenv
+      - name: Set MSVC environment (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: egor-tentin/setup-msvc@v7
+        with:
+          arch: x64
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         env:
