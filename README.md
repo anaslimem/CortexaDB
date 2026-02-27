@@ -105,7 +105,7 @@ db = CortexaDB.open("db.mem", dimension=128, index_mode={
     "ef_search": 50,   # query-time search width
     "ef_construction": 200  # build-time search width
 })
-
+```
 ### HNSW Parameters
 
 | Parameter | Default | Range | Description |
