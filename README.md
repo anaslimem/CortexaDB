@@ -105,7 +105,19 @@ db = CortexaDB.open("db.mem", dimension=128, index_mode={
     "ef_search": 50,   # query-time search width
     "ef_construction": 200  # build-time search width
 })
-```
+
+### HNSW Parameters
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `m` | 16 | 4-64 | Connections per node. Higher = more memory, higher recall. |
+| `ef_search` | 50 | 10-500 | Query search width. Higher = better recall, slower search. |
+| `ef_construction` | 200 | 50-500 | Build search width. Higher = better index, slower build. |
+
+**Trade-offs:**
+- **Speed vs Recall**: Increase `ef_search` for better results, decrease for speed
+- **Memory vs Quality**: Increase `m` for higher recall, uses more memory  
+- **Build Time vs Quality**: Increase `ef_construction` for better index, slower initial build
 
 ---
 
