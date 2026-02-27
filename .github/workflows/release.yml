@@ -34,6 +34,9 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+      - name: Disable AVX-512 for Windows build
+        if: matrix.os == 'windows-latest'
+        run: echo "RUSTFLAGS=-C target-feature=-avx512bw,-avx512dq,-avx512vl,-avx512f" >> $GITHUB_ENV
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         env:
