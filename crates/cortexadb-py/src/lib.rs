@@ -196,13 +196,14 @@ impl PyCortexaDB {
     ///         mismatches an existing database.
     #[staticmethod]
     #[pyo3(
-        text_signature = "(path, *, dimension, sync='strict', max_entries=None)",
-        signature = (path, *, dimension, sync="strict".to_string(), max_entries=None)
+        text_signature = "(path, *, dimension, sync='strict', index_mode='exact', max_entries=None)",
+        signature = (path, *, dimension, sync="strict".to_string(), index_mode="exact".to_string(), max_entries=None)
     )]
     fn open(
         path: &str,
         dimension: usize,
         sync: String,
+        index_mode: String,
         max_entries: Option<usize>,
     ) -> PyResult<Self> {
         if dimension == 0 {
@@ -221,6 +222,17 @@ impl PyCortexaDB {
             }
         };
 
+        let index_mode = match index_mode.to_lowercase().as_str() {
+            "exact" => cortexadb_core::IndexMode::Exact,
+            "hnsw" => cortexadb_core::IndexMode::Hnsw(cortexadb_core::HnswConfig::default()),
+            other => {
+                return Err(CortexaDBConfigError::new_err(format!(
+                    "unknown index_mode '{}'. Valid values: 'exact', 'hnsw'",
+                    other,
+                )));
+            }
+        };
+
         let config = facade::CortexaDBConfig {
             vector_dimension: dimension,
             sync_policy,
@@ -230,6 +242,7 @@ impl PyCortexaDB {
             // the user can still call checkpoint() explicitly when safe.
             checkpoint_policy: CheckpointPolicy::Disabled,
             capacity_policy: CapacityPolicy::new(max_entries, None),
+            index_mode,
         };
 
         let db = facade::CortexaDB::open_with_config(path, config).map_err(map_cortexadb_err)?;
