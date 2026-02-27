@@ -212,10 +212,25 @@ impl VectorIndex {
         }
     }
 
-    /// Create a new vector index with HNSW enabled
+    /// Create a new vector index with HNSW enabled (fresh build)
     pub fn new_with_hnsw(vector_dimension: usize, config: HnswConfig) -> Result<Self> {
-        let hnsw_backend =
-            HnswBackend::new(vector_dimension, config).map_err(|_e| VectorError::NoEmbeddings)?;
+        Self::new_with_loaded_hnsw(vector_dimension, config, None)
+    }
+
+    /// Create a new vector index with optional pre-loaded HNSW backend
+    pub fn new_with_loaded_hnsw(
+        vector_dimension: usize,
+        config: HnswConfig,
+        loaded_hnsw: Option<HnswBackend>,
+    ) -> Result<Self> {
+        let hnsw_backend = match loaded_hnsw {
+            Some(backend) => Some(Arc::new(backend)),
+            None => {
+                let backend = HnswBackend::new(vector_dimension, config)
+                    .map_err(|_e| VectorError::NoEmbeddings)?;
+                Some(Arc::new(backend))
+            }
+        };
         Ok(Self {
             partitions: HashMap::new(),
             id_to_namespace: HashMap::new(),
@@ -223,7 +238,7 @@ impl VectorIndex {
             backend_mode: VectorBackendMode::Exact,
             backend: Arc::new(ExactBackend),
             ann_provider: Arc::new(PrefixAnnCandidateProvider),
-            hnsw_backend: Some(Arc::new(hnsw_backend)),
+            hnsw_backend,
         })
     }
 
@@ -253,6 +268,31 @@ impl VectorIndex {
     /// Check if HNSW is enabled
     pub fn is_hnsw_enabled(&self) -> bool {
         self.hnsw_backend.is_some()
+    }
+
+    /// Save HNSW index to disk (no-op if HNSW not enabled)
+    pub fn save_hnsw(&self, path: &std::path::Path) -> std::io::Result<()> {
+        if let Some(ref hnsw) = self.hnsw_backend {
+            hnsw.save_to_file(path)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Load HNSW index from disk (returns None if file doesn't exist)
+    pub fn load_hnsw(
+        path: &std::path::Path,
+        dimension: usize,
+        config: HnswConfig,
+    ) -> std::io::Result<Option<HnswBackend>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        match HnswBackend::load_from_file(path, dimension, config) {
+            Ok(backend) => Ok(Some(backend)),
+            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+        }
     }
 
     pub fn backend_mode(&self) -> VectorBackendMode {

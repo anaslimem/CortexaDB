@@ -2,11 +2,18 @@
 
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
-[![Version](https://img.shields.io/badge/Version-0.1.2-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
+[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
 
 **CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
 
 Think of it as **SQLite, but with semantic and relational intelligence for your agents.**
+
+---
+
+## What's New in v0.1.3
+
+- **Automatic HNSW Persistence** - HNSW index is now automatically saved to disk on checkpoint or database close, enabling fast restart without rebuilding the index
+- Improved reliability for production use
 
 ---
 
@@ -88,6 +95,16 @@ CortexaDB uses **USearch** for high-performance approximate nearest neighbor sea
 |------|----------|--------|-------|
 | `exact` | Small datasets (<10K) | 100% | O(n) |
 | `hnsw` | Large datasets | 95%+ | O(log n) |
+
+### Automatic Persistence
+
+HNSW indexing now includes **automatic persistence**:
+
+- On `checkpoint()` - HNSW index is saved to disk
+- On database close/drop - HNSW index is automatically saved
+- On restart - HNSW index is loaded from disk (fast recovery!)
+
+No extra configuration needed - just use `index_mode="hnsw"` and it just works.
 
 ```python
 from cortexadb import CortexaDB, HashEmbedder
@@ -218,7 +235,7 @@ We use a custom versioned serialization layer (with a "magic-byte" header). This
 ---
 
 ## License & Status
-CortexaDB is currently in **Beta (v0.1.2)**. It is released under the **MIT** and **Apache-2.0** licenses.  
+CortexaDB is currently in **Beta (v0.1.3)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
 
 ---

@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
@@ -141,5 +142,48 @@ impl HnswBackend {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let index = self.index.lock().map_err(|_| HnswError::LockError)?;
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+        index.save(&path_str).map_err(|e| HnswError::UsearchError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn load_from_file(path: &Path, dimension: usize, config: HnswConfig) -> Result<Self> {
+        if !path.exists() {
+            return Err(HnswError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "HNSW index file not found",
+            )));
+        }
+
+        let options = usearch::IndexOptions {
+            dimensions: dimension,
+            metric: usearch::MetricKind::Cos,
+            quantization: usearch::ScalarKind::F32,
+            connectivity: config.m,
+            expansion_add: config.ef_construction,
+            expansion_search: config.ef_search,
+            ..Default::default()
+        };
+
+        let index =
+            usearch::new_index(&options).map_err(|e| HnswError::UsearchError(e.to_string()))?;
+
+        let path_str = path.to_string_lossy().to_string();
+        index.load(&path_str).map_err(|e| HnswError::UsearchError(e.to_string()))?;
+
+        Ok(Self { index: Arc::new(Mutex::new(index)), dimension, config })
+    }
+
+    pub fn dimension(&self) -> usize {
+        self.dimension
     }
 }
