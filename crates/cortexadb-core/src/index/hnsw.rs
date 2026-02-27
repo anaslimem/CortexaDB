@@ -45,7 +45,7 @@ impl Default for IndexMode {
 }
 
 pub struct HnswBackend {
-    index: usearch::Index,
+    index: Rc<RefCell<usearch::Index>>,
     dimension: usize,
     config: HnswConfig,
 }

@@ -4,6 +4,7 @@ use thiserror::Error;
 use crate::core::memory_entry::MemoryId;
 use crate::core::state_machine::StateMachine;
 use crate::index::graph::GraphIndex;
+use crate::index::hnsw::HnswConfig;
 use crate::index::temporal::TemporalIndex;
 use crate::index::vector::{VectorBackendMode, VectorIndex};
 
@@ -66,7 +67,7 @@ impl Default for RankingWeights {
 /// Combined index layer for multi-criteria queries
 ///
 /// Combines Vector + Graph + Temporal indexes for rich contextual search
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct IndexLayer {
     pub vector: VectorIndex,
 }
@@ -75,6 +76,15 @@ impl IndexLayer {
     /// Create new index layer
     pub fn new(vector_dimension: usize) -> Self {
         Self { vector: VectorIndex::new(vector_dimension) }
+    }
+
+    /// Create new index layer with HNSW enabled
+    pub fn new_with_hnsw(vector_dimension: usize, hnsw_config: HnswConfig) -> Self {
+        let vector = match VectorIndex::new_with_hnsw(vector_dimension, hnsw_config) {
+            Ok(v) => v,
+            Err(_) => VectorIndex::new(vector_dimension),
+        };
+        Self { vector }
     }
 
     /// Search similar embeddings within a time range

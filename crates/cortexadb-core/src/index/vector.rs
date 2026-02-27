@@ -4,6 +4,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::core::memory_entry::MemoryId;
+use crate::index::hnsw::{HnswBackend, HnswConfig};
 
 #[derive(Error, Debug)]
 pub enum VectorError {
@@ -166,8 +167,9 @@ struct NamespacePartition {
 /// Vector index for semantic search via embeddings
 ///
 /// Stores embeddings (vectors) and enables fast similarity search
-/// using cosine similarity with parallel computation via Rayon
-#[derive(Debug, Clone)]
+/// using cosine similarity with parallel computation via Rayon.
+/// Supports both exact (brute-force) and HNSW approximate search.
+#[derive(Clone)]
 pub struct VectorIndex {
     /// namespace -> partition
     partitions: HashMap<String, NamespacePartition>,
@@ -181,6 +183,19 @@ pub struct VectorIndex {
     backend: Arc<dyn VectorSearchBackend>,
     /// ANN candidate strategy (prefix by default; swappable for HNSW/FAISS adapters)
     ann_provider: Arc<dyn AnnCandidateProvider>,
+    /// HNSW backend for approximate nearest neighbor search
+    hnsw_backend: Option<Arc<HnswBackend>>,
+}
+
+impl std::fmt::Debug for VectorIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VectorIndex")
+            .field("vector_dimension", &self.vector_dimension)
+            .field("partitions", &self.partitions.len())
+            .field("backend_mode", &self.backend_mode)
+            .field("hnsw_enabled", &self.hnsw_backend.is_some())
+            .finish()
+    }
 }
 
 impl VectorIndex {
@@ -193,7 +208,23 @@ impl VectorIndex {
             backend_mode: VectorBackendMode::Exact,
             backend: Arc::new(ExactBackend),
             ann_provider: Arc::new(PrefixAnnCandidateProvider),
+            hnsw_backend: None,
         }
+    }
+
+    /// Create a new vector index with HNSW enabled
+    pub fn new_with_hnsw(vector_dimension: usize, config: HnswConfig) -> Result<Self> {
+        let hnsw_backend =
+            HnswBackend::new(vector_dimension, config).map_err(|_e| VectorError::NoEmbeddings)?;
+        Ok(Self {
+            partitions: HashMap::new(),
+            id_to_namespace: HashMap::new(),
+            vector_dimension,
+            backend_mode: VectorBackendMode::Exact,
+            backend: Arc::new(ExactBackend),
+            ann_provider: Arc::new(PrefixAnnCandidateProvider),
+            hnsw_backend: Some(Arc::new(hnsw_backend)),
+        })
     }
 
     #[allow(dead_code)]
@@ -209,6 +240,19 @@ impl VectorIndex {
                 Arc::new(AnnBackend { ann_search_multiplier: ann_search_multiplier.max(1) })
             }
         };
+    }
+
+    /// Enable HNSW indexing for approximate search
+    pub fn enable_hnsw(&mut self, config: HnswConfig) -> Result<()> {
+        let backend = HnswBackend::new(self.vector_dimension, config)
+            .map_err(|_| VectorError::NoEmbeddings)?;
+        self.hnsw_backend = Some(Arc::new(backend));
+        Ok(())
+    }
+
+    /// Check if HNSW is enabled
+    pub fn is_hnsw_enabled(&self) -> bool {
+        self.hnsw_backend.is_some()
     }
 
     pub fn backend_mode(&self) -> VectorBackendMode {
@@ -245,8 +289,19 @@ impl VectorIndex {
 
         let partition = self.partitions.entry(namespace.clone()).or_default();
         partition.tombstones.remove(&id);
-        partition.embeddings.insert(id, embedding);
+        partition.embeddings.insert(id, embedding.clone());
         self.id_to_namespace.insert(id, namespace);
+
+        // Also add to HNSW backend if enabled
+        if let Some(ref hnsw_arc) = self.hnsw_backend {
+            if let Some(hnsw) = Arc::get_mut(&mut Arc::clone(hnsw_arc)) {
+                let _ = hnsw.add(id, &embedding);
+            }
+        }
+
+        Ok(())
+    }
+
         Ok(())
     }
 
@@ -277,6 +332,12 @@ impl VectorIndex {
                 }
             }
             self.id_to_namespace.remove(&id);
+
+            // Also remove from HNSW backend if enabled
+            if let Some(ref hnsw_arc) = self.hnsw_backend {
+                let hnsw_arc_clone = Arc::clone(hnsw_arc);
+                let _ = hnsw_arc_clone.remove(id);
+            }
         }
         Ok(())
     }
@@ -346,6 +407,19 @@ impl VectorIndex {
             return Err(VectorError::InvalidTopK(top_k));
         }
 
+        // Use HNSW if available (approximate search)
+        if let Some(ref hnsw_arc) = self.hnsw_backend {
+            let hnsw_arc_clone = Arc::clone(hnsw_arc);
+            match hnsw_arc_clone.search(query, top_k, None) {
+                Ok(results) => return Ok(results),
+                Err(e) => {
+                    // Fall back to exact search if HNSW fails
+                    eprintln!("HNSW search failed, falling back to exact: {:?}", e);
+                }
+            }
+        }
+
+        // Default: exact search
         match self.backend.mode() {
             VectorBackendMode::Exact => {
                 self.search_exact_scoped(query, top_k, namespace, use_parallel)

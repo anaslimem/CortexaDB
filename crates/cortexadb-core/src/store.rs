@@ -234,7 +234,7 @@ impl CortexaDBStore {
         capacity_policy: CapacityPolicy,
         checkpoint_path: std::path::PathBuf,
     ) -> Result<Self> {
-        let indexes = Self::build_vector_index(engine.get_state_machine(), vector_dimension)?;
+        let indexes = Self::build_vector_index(engine.get_state_machine(), vector_dimension, None)?;
         Self::assert_vector_index_in_sync_inner(engine.get_state_machine(), &indexes)?;
 
         let snapshot = Arc::new(ArcSwap::from_pointee(ReadSnapshot::new(
@@ -497,6 +497,7 @@ impl CortexaDBStore {
         writer.indexes = Self::build_vector_index(
             writer.engine.get_state_machine(),
             writer.indexes.vector.dimension(),
+            None,
         )?;
 
         let indexed = writer.indexes.vector.len();
@@ -767,8 +768,13 @@ impl CortexaDBStore {
     fn build_vector_index(
         state_machine: &StateMachine,
         vector_dimension: usize,
+        hnsw_config: Option<&crate::index::hnsw::HnswConfig>,
     ) -> Result<IndexLayer> {
-        let mut indexes = IndexLayer::new(vector_dimension);
+        let indexes = match hnsw_config {
+            Some(config) => IndexLayer::new_with_hnsw(vector_dimension, config.clone()),
+            None => IndexLayer::new(vector_dimension),
+        };
+        let mut indexes = indexes;
         for entry in state_machine.all_memories() {
             if let Some(embedding) = entry.embedding.clone() {
                 indexes.vector_index_mut().index_in_namespace(
