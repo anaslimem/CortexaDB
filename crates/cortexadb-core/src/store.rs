@@ -103,6 +103,7 @@ pub struct CortexaDBStore {
     sync_thread: Option<JoinHandle<()>>,
     checkpoint_policy: CheckpointPolicy,
     checkpoint_path: std::path::PathBuf,
+    hnsw_path: std::path::PathBuf,
     checkpoint_control: Arc<(Mutex<CheckpointRuntime>, Condvar)>,
     checkpoint_thread: Option<JoinHandle<()>>,
     capacity_policy: CapacityPolicy,
@@ -243,14 +244,38 @@ impl CortexaDBStore {
         checkpoint_path: std::path::PathBuf,
         index_mode: crate::index::hnsw::IndexMode,
     ) -> Result<Self> {
+        let hnsw_path = checkpoint_path.with_extension("hnsw");
+
         let hnsw_config = match index_mode {
             crate::index::hnsw::IndexMode::Exact => None,
             crate::index::hnsw::IndexMode::Hnsw(config) => Some(config),
         };
+
+        let loaded_hnsw = if let Some(config) = hnsw_config.as_ref() {
+            match crate::index::VectorIndex::load_hnsw(&hnsw_path, vector_dimension, config.clone())
+            {
+                Ok(Some(backend)) => {
+                    eprintln!("Loaded HNSW index from disk (fast recovery)");
+                    Some(backend)
+                }
+                Ok(None) => {
+                    eprintln!("No HNSW index file found, building fresh index");
+                    None
+                }
+                Err(e) => {
+                    eprintln!("Failed to load HNSW index, rebuilding: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let indexes = Self::build_vector_index(
             engine.get_state_machine(),
             vector_dimension,
             hnsw_config.as_ref(),
+            loaded_hnsw,
         )?;
         Self::assert_vector_index_in_sync_inner(engine.get_state_machine(), &indexes)?;
 
@@ -297,6 +322,7 @@ impl CortexaDBStore {
             sync_thread,
             checkpoint_policy,
             checkpoint_path,
+            hnsw_path,
             checkpoint_control,
             checkpoint_thread,
             capacity_policy,
@@ -319,6 +345,10 @@ impl CortexaDBStore {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
         let last_applied_id = writer.engine.last_applied_id().0;
         save_checkpoint(&self.checkpoint_path, snapshot.state_machine(), last_applied_id)?;
+
+        if let Err(e) = snapshot.indexes.vector_index().save_hnsw(&self.hnsw_path) {
+            eprintln!("Warning: Failed to save HNSW index: {}", e);
+        }
 
         // Truncate WAL prefix — only keep entries written after the checkpoint.
         let wal_path = writer.engine.wal_path().to_path_buf();
@@ -514,6 +544,7 @@ impl CortexaDBStore {
         writer.indexes = Self::build_vector_index(
             writer.engine.get_state_machine(),
             writer.indexes.vector.dimension(),
+            None,
             None,
         )?;
 
@@ -786,12 +817,25 @@ impl CortexaDBStore {
         state_machine: &StateMachine,
         vector_dimension: usize,
         hnsw_config: Option<&crate::index::hnsw::HnswConfig>,
+        loaded_hnsw: Option<crate::index::hnsw::HnswBackend>,
     ) -> Result<IndexLayer> {
+        let has_loaded_hnsw = loaded_hnsw.is_some();
         let indexes = match hnsw_config {
-            Some(config) => IndexLayer::new_with_hnsw(vector_dimension, config.clone()),
+            Some(config) => {
+                if let Some(loaded) = loaded_hnsw {
+                    IndexLayer::new_with_loaded_hnsw(vector_dimension, config.clone(), Some(loaded))
+                } else {
+                    IndexLayer::new_with_hnsw(vector_dimension, config.clone())
+                }
+            }
             None => IndexLayer::new(vector_dimension),
         };
         let mut indexes = indexes;
+
+        if has_loaded_hnsw {
+            return Ok(indexes);
+        }
+
         for entry in state_machine.all_memories() {
             if let Some(embedding) = entry.embedding.clone() {
                 indexes.vector_index_mut().index_in_namespace(
@@ -854,6 +898,12 @@ impl Drop for CortexaDBStore {
         let _ = self.flush();
         if self.checkpoint_policy != CheckpointPolicy::Disabled {
             let _ = self.checkpoint_now();
+        }
+
+        // Always save HNSW index on drop if it exists (automatic persistence)
+        let snapshot = self.snapshot.load_full();
+        if let Err(e) = snapshot.indexes.vector_index().save_hnsw(&self.hnsw_path) {
+            eprintln!("Warning: Failed to save HNSW on drop: {}", e);
         }
     }
 }

@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::core::memory_entry::MemoryId;
 use crate::core::state_machine::StateMachine;
 use crate::index::graph::GraphIndex;
-use crate::index::hnsw::HnswConfig;
+use crate::index::hnsw::{HnswBackend, HnswConfig};
 use crate::index::temporal::TemporalIndex;
 use crate::index::vector::{VectorBackendMode, VectorIndex};
 
@@ -78,12 +78,22 @@ impl IndexLayer {
         Self { vector: VectorIndex::new(vector_dimension) }
     }
 
-    /// Create new index layer with HNSW enabled
+    /// Create new index layer with HNSW enabled (fresh build)
     pub fn new_with_hnsw(vector_dimension: usize, hnsw_config: HnswConfig) -> Self {
-        let vector = match VectorIndex::new_with_hnsw(vector_dimension, hnsw_config) {
-            Ok(v) => v,
-            Err(_) => VectorIndex::new(vector_dimension),
-        };
+        Self::new_with_loaded_hnsw(vector_dimension, hnsw_config, None)
+    }
+
+    /// Create new index layer with optional pre-loaded HNSW backend
+    pub fn new_with_loaded_hnsw(
+        vector_dimension: usize,
+        hnsw_config: HnswConfig,
+        loaded_hnsw: Option<HnswBackend>,
+    ) -> Self {
+        let vector =
+            match VectorIndex::new_with_loaded_hnsw(vector_dimension, hnsw_config, loaded_hnsw) {
+                Ok(v) => v,
+                Err(_) => VectorIndex::new(vector_dimension),
+            };
         Self { vector }
     }
 
