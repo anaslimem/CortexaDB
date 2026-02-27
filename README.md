@@ -222,4 +222,8 @@ CortexaDB is currently in **Beta (v0.1.2)**. It is released under the **MIT** an
 We are actively refining the API and welcome feedback!
 
 ---
+
+**^** Windows builds are temporarily unavailable due to a Windows compatibility issue in the usearch library.
+
+---
 > *CortexaDB — Because agents shouldn't have to choose between speed and a soul (memory).*
