@@ -153,13 +153,18 @@ class CortexaDB:
         embedder: t.Optional[Embedder] = None,
         sync: str = "strict",
         max_entries: t.Optional[int] = None,
+        index_mode: str = "exact",
         _recorder: t.Optional[ReplayWriter] = None,
     ):
         self._embedder = embedder
         self._recorder = _recorder
         try:
             self._inner = _cortexadb.CortexaDB.open(
-                path, dimension=dimension, sync=sync, max_entries=max_entries
+                path,
+                dimension=dimension,
+                sync=sync,
+                max_entries=max_entries,
+                index_mode=index_mode,
             )
         except Exception as e:
             if isinstance(e, CortexaDBError):
@@ -175,6 +180,7 @@ class CortexaDB:
         embedder: t.Optional[Embedder] = None,
         sync: str = "strict",
         max_entries: t.Optional[int] = None,
+        index_mode: str = "exact",
         record: t.Optional[str] = None,
     ) -> "CortexaDB":
         """
@@ -190,6 +196,8 @@ class CortexaDB:
                        inferred from ``embedder.dimension`` automatically.
             sync:      Write durability policy: ``"strict"`` (default),
                        ``"async"``, or ``"batch"``.
+            index_mode: Search index mode: ``"exact"`` (default) or ``"hnsw"``.
+                         Can also be a dict with HNSW parameters.
             record:    Optional path to a replay log file. When set, every write
                        operation (remember, connect, compact) is appended to this
                        NDJSON file so the session can be replayed later.
@@ -217,6 +225,7 @@ class CortexaDB:
             embedder=embedder,
             sync=sync,
             max_entries=max_entries,
+            index_mode=index_mode,
             _recorder=recorder,
         )
 
