@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
 use crate::core::state_machine::StateMachineError;
 use crate::engine::{CapacityPolicy, SyncPolicy};
+use crate::index::IndexMode;
 use crate::query::hybrid::{QueryEmbedder, QueryOptions};
 use crate::store::{CheckpointPolicy, CortexaDBStore, CortexaDBStoreError};
 
@@ -54,6 +55,7 @@ pub struct CortexaDBConfig {
     pub sync_policy: SyncPolicy,
     pub checkpoint_policy: CheckpointPolicy,
     pub capacity_policy: CapacityPolicy,
+    pub index_mode: IndexMode,
 }
 
 impl Default for CortexaDBConfig {
@@ -63,6 +65,7 @@ impl Default for CortexaDBConfig {
             sync_policy: SyncPolicy::Strict,
             checkpoint_policy: CheckpointPolicy::Periodic { every_ops: 1000, every_ms: 30_000 },
             capacity_policy: CapacityPolicy::new(None, None),
+            index_mode: IndexMode::Exact,
         }
     }
 }

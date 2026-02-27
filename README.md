@@ -2,7 +2,7 @@
 
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
-[![Version](https://img.shields.io/badge/Version-0.1.1-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
+[![Version](https://img.shields.io/badge/Version-0.1.2-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
 
 **CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
 
@@ -71,11 +71,40 @@ cortexadb-core = { git = "https://github.com/anaslimem/CortexaDB.git" }
 - **Hybrid Retrieval**: Combine vector similarity (semantic), graph relations (structural), and recency (temporal) in a single query.
 - **Smart Chunking**: Multiple strategies for document ingestion - `fixed`, `recursive`, `semantic`, `markdown`, `json`.
 - **File Support**: Load documents directly - TXT, MD, JSON, DOCX, PDF.
+- **HNSW Indexing**: Ultra-fast approximate nearest neighbor search using USearch (95%+ recall at millisecond latency).
 - **Hard Durability**: Write-Ahead Log (WAL) and Segmented logs ensure your agent never forgets, even after a crash.
 - **Multi-Agent Namespaces**: Isolate memories between different agents or workspaces within a single database file.
 - **Deterministic Replay**: Record operations to a log file and replay them exactly to debug agent behavior or migrate data.
 - **Automatic Capacity Management**: Set `max_entries` or `max_bytes` and let CortexaDB handle LRU/Importance-based eviction automatically.
 - **Crash-Safe Compaction**: Background maintenance that keeps your storage lean without risking data loss.
+
+---
+
+## HNSW Indexing
+
+CortexaDB uses **USearch** for high-performance approximate nearest neighbor search. Switch between exact and HNSW modes based on your needs:
+
+| Mode | Use Case | Recall | Speed |
+|------|----------|--------|-------|
+| `exact` | Small datasets (<10K) | 100% | O(n) |
+| `hnsw` | Large datasets | 95%+ | O(log n) |
+
+```python
+from cortexadb import CortexaDB, HashEmbedder
+
+# Default: exact (brute-force)
+db = CortexaDB.open("db.mem", dimension=128)
+
+# Or use HNSW for large-scale search
+db = CortexaDB.open("db.mem", dimension=128, index_mode="hnsw")
+
+# HNSW with custom parameters
+db = CortexaDB.open("db.mem", dimension=128, index_mode={
+    "type": "hnsw",
+    "m": 16,           # connections per node
+    "ef_search": 50     # query-time search width
+})
+```
 
 ---
 
