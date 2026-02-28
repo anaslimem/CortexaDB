@@ -6,6 +6,6 @@ pub mod vector;
 
 pub use combined::IndexLayer;
 pub use graph::GraphIndex;
-pub use hnsw::{HnswBackend, HnswConfig, HnswError, IndexMode};
+pub use hnsw::{HnswBackend, HnswConfig, HnswError, IndexMode, MetricKind};
 pub use temporal::TemporalIndex;
 pub use vector::VectorIndex;

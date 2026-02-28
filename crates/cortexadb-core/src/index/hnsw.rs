@@ -20,16 +20,38 @@ pub enum HnswError {
 
 pub type Result<T> = std::result::Result<T, HnswError>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetricKind {
+    Cos,
+    L2,
+}
+
+impl Default for MetricKind {
+    fn default() -> Self {
+        Self::Cos
+    }
+}
+
+impl MetricKind {
+    pub fn to_usearch(&self) -> usearch::MetricKind {
+        match self {
+            MetricKind::Cos => usearch::MetricKind::Cos,
+            MetricKind::L2 => usearch::MetricKind::L2sq,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct HnswConfig {
     pub m: usize,
     pub ef_construction: usize,
     pub ef_search: usize,
+    pub metric: MetricKind,
 }
 
 impl Default for HnswConfig {
     fn default() -> Self {
-        Self { m: 16, ef_construction: 200, ef_search: 50 }
+        Self { m: 16, ef_construction: 200, ef_search: 50, metric: MetricKind::default() }
     }
 }
 
@@ -65,7 +87,7 @@ impl HnswBackend {
     pub fn new(dimension: usize, config: HnswConfig) -> Result<Self> {
         let options = usearch::IndexOptions {
             dimensions: dimension,
-            metric: usearch::MetricKind::Cos,
+            metric: config.metric.to_usearch(),
             quantization: usearch::ScalarKind::F32,
             connectivity: config.m,
             expansion_add: config.ef_construction,
@@ -166,7 +188,7 @@ impl HnswBackend {
 
         let options = usearch::IndexOptions {
             dimensions: dimension,
-            metric: usearch::MetricKind::Cos,
+            metric: config.metric.to_usearch(),
             quantization: usearch::ScalarKind::F32,
             connectivity: config.m,
             expansion_add: config.ef_construction,

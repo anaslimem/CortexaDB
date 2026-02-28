@@ -2,7 +2,7 @@
 
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
-[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
+[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
 
 **CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
 
@@ -10,10 +10,11 @@ Think of it as **SQLite, but with semantic and relational intelligence for your 
 
 ---
 
-## What's New in v0.1.3
+## What's New in v0.1.4
 
-- **Automatic HNSW Persistence** - HNSW index is now automatically saved to disk on checkpoint or database close, enabling fast restart without rebuilding the index
-- Improved reliability for production use
+- **L2/Euclidean Distance** - Added support for L2 distance metric in HNSW
+  - Use `metric: "l2"` in index_mode config
+  - Best for image embeddings, recommendation systems, geometric data
 
 ---
 
@@ -120,7 +121,14 @@ db = CortexaDB.open("db.mem", dimension=128, index_mode={
     "type": "hnsw",
     "m": 16,           # connections per node
     "ef_search": 50,   # query-time search width
-    "ef_construction": 200  # build-time search width
+    "ef_construction": 200,  # build-time search width
+    "metric": "cos"    # distance metric: "cos" (cosine) or "l2" (euclidean)
+})
+
+# L2/Euclidean metric - best for image embeddings, recommendation systems
+db = CortexaDB.open("db.mem", dimension=128, index_mode={
+    "type": "hnsw",
+    "metric": "l2"
 })
 ```
 ### HNSW Parameters
@@ -130,11 +138,26 @@ db = CortexaDB.open("db.mem", dimension=128, index_mode={
 | `m` | 16 | 4-64 | Connections per node. Higher = more memory, higher recall. |
 | `ef_search` | 50 | 10-500 | Query search width. Higher = better recall, slower search. |
 | `ef_construction` | 200 | 50-500 | Build search width. Higher = better index, slower build. |
+| `metric` | `cos` | `cos`, `l2` | Distance metric. `cos` = Cosine, `l2` = Euclidean/L2 |
+
+### Choosing a Distance Metric
+
+| Metric | Best For | Description |
+|--------|----------|-------------|
+| `cos` (default) | Text/semantic search | Measures angle between vectors. Ignores magnitude. |
+| `l2` | Image embeddings, recommendation systems | Measures straight-line distance. Considers both direction and magnitude. |
+
+**When to use L2:**
+- Image embeddings where magnitude matters
+- Recommendation systems comparing user ratings
+- Geometric data (e.g., GPS coordinates)
+- When your embedding model was trained with L2 loss
 
 **Trade-offs:**
 - **Speed vs Recall**: Increase `ef_search` for better results, decrease for speed
 - **Memory vs Quality**: Increase `m` for higher recall, uses more memory  
 - **Build Time vs Quality**: Increase `ef_construction` for better index, slower initial build
+- **Cosine vs L2**: Use `cos` for text/semantic search, `l2` for image/recommendation data
 
 ---
 
@@ -235,7 +258,7 @@ We use a custom versioned serialization layer (with a "magic-byte" header). This
 ---
 
 ## License & Status
-CortexaDB is currently in **Beta (v0.1.3)**. It is released under the **MIT** and **Apache-2.0** licenses.  
+CortexaDB is currently in **Beta (v0.1.4)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
 
 ---

@@ -45,7 +45,7 @@ fn map_cortexadb_err(e: facade::CortexaDBError) -> PyErr {
 
 /// Parse index_mode from Python - accepts string or dict
 /// String: "exact", "hnsw"
-/// Dict: {"type": "hnsw", "m": 16, "ef_search": 50, "ef_construction": 200}
+/// Dict: {"type": "hnsw", "m": 16, "ef_search": 50, "ef_construction": 200, "metric": "cos"}
 fn parse_index_mode(index_mode: Bound<'_, PyAny>) -> PyResult<cortexadb_core::IndexMode> {
     // If string: "exact" or "hnsw"
     if let Ok(s) = index_mode.extract::<String>() {
@@ -59,7 +59,7 @@ fn parse_index_mode(index_mode: Bound<'_, PyAny>) -> PyResult<cortexadb_core::In
         };
     }
 
-    // If dict: {"type": "hnsw", "m": 16, "ef_search": 50, "ef_construction": 200}
+    // If dict: {"type": "hnsw", "m": 16, "ef_search": 50, "ef_construction": 200, "metric": "cos"}
     if let Ok(dict) = index_mode.extract::<HashMap<String, Py<PyAny>>>() {
         let mode_type = dict
             .get("type")
@@ -78,10 +78,21 @@ fn parse_index_mode(index_mode: Bound<'_, PyAny>) -> PyResult<cortexadb_core::In
                 .and_then(|v| v.extract::<usize>(index_mode.py()).ok())
                 .unwrap_or(200);
 
+            let metric_str = dict
+                .get("metric")
+                .and_then(|v| v.extract::<String>(index_mode.py()).ok())
+                .unwrap_or_else(|| "cos".to_string());
+
+            let metric = match metric_str.to_lowercase().as_str() {
+                "l2" | "l2sq" => cortexadb_core::MetricKind::L2,
+                _ => cortexadb_core::MetricKind::Cos,
+            };
+
             return Ok(cortexadb_core::IndexMode::Hnsw(cortexadb_core::HnswConfig {
                 m,
                 ef_search,
                 ef_construction,
+                metric,
             }));
         }
 
