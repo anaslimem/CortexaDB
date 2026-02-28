@@ -15,6 +15,7 @@ Think of it as **SQLite, but with semantic and relational intelligence for your 
 - **L2/Euclidean Distance** - Added support for L2 distance metric in HNSW
   - Use `metric: "l2"` in index_mode config
   - Best for image embeddings, recommendation systems, geometric data
+- **Windows Support** - Re-enabled Windows builds in release pipeline
 
 ---
 
@@ -263,7 +264,4 @@ We are actively refining the API and welcome feedback!
 
 ---
 
-**^** Windows builds are temporarily unavailable due to a Windows compatibility issue in the usearch library.
-
----
 > *CortexaDB — Because agents shouldn't have to choose between speed and a soul (memory).*
