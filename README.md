@@ -2,11 +2,19 @@
 
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
-[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
+[![Version](https://img.shields.io/badge/Version-0.1.5-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
 
 **CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
 
 Think of it as **SQLite, but with semantic and relational intelligence for your agents.**
+
+---
+
+## What's New in v0.1.5
+
+- **Benchmark Suite** - Added comprehensive benchmarking with HNSW vs Exact comparison
+- **HNSW Performance Fix** - Fixed segmentation fault issue with usearch
+- **5x Speedup** - HNSW now runs ~5x faster than exact search with 95% recall
 
 ---
 
@@ -310,7 +318,7 @@ python benchmark/run_benchmark.py \
 ---
 
 ## License & Status
-CortexaDB is currently in **Beta (v0.1.4)**. It is released under the **MIT** and **Apache-2.0** licenses.  
+CortexaDB is currently in **Beta (v0.1.5)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
 
 ---

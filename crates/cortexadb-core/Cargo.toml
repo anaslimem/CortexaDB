@@ -1,6 +1,6 @@
 [package]
 name = "cortexadb-core"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Anas Limem <limemanas0@gmail.com>"]
 description = "Fast, embedded vector + graph memory for AI agents"
