@@ -532,4 +532,120 @@ mod tests {
         let m1 = db.get_memory(id1).unwrap();
         assert_eq!(m1.namespace, "agent_b");
     }
+
+    #[test]
+    fn test_delete_memory_removes_from_stats() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+
+        let id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        assert_eq!(db.stats().entries, 1);
+
+        db.delete_memory(id).unwrap();
+        assert_eq!(db.stats().entries, 0, "entry count should be 0 after delete");
+    }
+
+    #[test]
+    fn test_delete_memory_not_returned_in_ask() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+
+        let id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        // Keep a second entry so the index is non-empty after deletion.
+        // (ask() returns NoEmbeddings when the vector index is completely empty.)
+        let _id_keep = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+
+        db.delete_memory(id).unwrap();
+
+        let hits = db.ask(vec![1.0, 0.0, 0.0], 10, None).unwrap();
+        assert!(hits.iter().all(|h| h.id != id), "deleted memory must not appear in search results");
+    }
+
+    #[test]
+    fn test_get_memory_after_delete_returns_error() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+
+        let id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.delete_memory(id).unwrap();
+
+        let result = db.get_memory(id);
+        assert!(result.is_err(), "get_memory on a deleted ID must return an error");
+    }
+
+    #[test]
+    fn test_get_neighbors_returns_correct_edges() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+
+        let id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        let id3 = db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+
+        db.connect(id1, id2, "related").unwrap();
+        db.connect(id1, id3, "follows").unwrap();
+
+        let neighbors = db.get_neighbors(id1).unwrap();
+        assert_eq!(neighbors.len(), 2, "id1 should have 2 outgoing edges");
+
+        let target_ids: Vec<u64> = neighbors.iter().map(|(t, _)| *t).collect();
+        assert!(target_ids.contains(&id2), "id2 must be a neighbor of id1");
+        assert!(target_ids.contains(&id3), "id3 must be a neighbor of id1");
+
+        let relations: Vec<&str> = neighbors.iter().map(|(_, r)| r.as_str()).collect();
+        assert!(relations.contains(&"related"));
+        assert!(relations.contains(&"follows"));
+    }
+
+    #[test]
+    fn test_get_neighbors_no_edges_returns_empty() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+
+        let id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        let neighbors = db.get_neighbors(id).unwrap();
+        assert!(neighbors.is_empty(), "node with no edges should return empty neighbors");
+    }
+
+    #[test]
+    fn test_ask_in_namespace_only_returns_own_namespace() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+
+        // Same embedding direction — only namespace should differentiate results.
+        let id_a = db.remember_in_namespace("ns_a", vec![1.0, 0.0, 0.0], None).unwrap();
+        let _id_b = db.remember_in_namespace("ns_b", vec![1.0, 0.0, 0.0], None).unwrap();
+
+        let hits = db.ask_in_namespace("ns_a", vec![1.0, 0.0, 0.0], 10, None).unwrap();
+        assert!(!hits.is_empty(), "should find memories in ns_a");
+        assert!(
+            hits.iter().all(|h| h.id == id_a),
+            "all hits must belong to ns_a, got: {:?}",
+            hits.iter().map(|h| h.id).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_flush_completes_without_error() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+        db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.flush().expect("flush must not fail");
+    }
+
+    #[test]
+    fn test_compact_completes_without_error() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+        db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.compact().expect("compact must not fail");
+    }
 }
