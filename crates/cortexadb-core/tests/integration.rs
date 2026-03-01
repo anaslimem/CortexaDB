@@ -94,6 +94,7 @@ fn test_checkpoint_recovery_preserves_all_entries() {
         let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
         all_ids.push(db.remember(vec![1.0, 0.0, 0.0], None).unwrap());
         all_ids.push(db.remember(vec![0.0, 1.0, 0.0], None).unwrap());
+        db.flush().unwrap(); // ensure WAL is synced before checkpoint
         db.checkpoint().unwrap();
         // Write one more entry AFTER the checkpoint.
         all_ids.push(db.remember(vec![0.0, 0.0, 1.0], None).unwrap());
@@ -115,8 +116,10 @@ fn test_double_checkpoint_recovery() {
     {
         let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
         db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.flush().unwrap();
         db.checkpoint().unwrap();
         db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        db.flush().unwrap();
         db.checkpoint().unwrap(); // second checkpoint
         db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
     }
@@ -161,6 +164,7 @@ fn test_delete_then_checkpoint_recovery() {
         deleted_id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
         db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
         db.delete_memory(deleted_id).unwrap();
+        db.flush().unwrap(); // ensure WAL is synced before checkpoint
         db.checkpoint().unwrap();
     }
 

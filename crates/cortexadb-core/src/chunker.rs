@@ -45,41 +45,76 @@ pub fn chunk(text: &str, strategy: ChunkingStrategy) -> Vec<ChunkResult> {
 
 fn chunk_fixed(text: &str, chunk_size: usize, overlap: usize) -> Vec<ChunkResult> {
     let text = text.trim();
-    if text.is_empty() {
+    if text.is_empty() || chunk_size == 0 {
         return vec![];
     }
 
-    if chunk_size == 0 {
+    // overlap >= chunk_size → step would be 0 → infinite loop guard
+    if overlap >= chunk_size {
         return vec![];
     }
 
-    let step = chunk_size.saturating_sub(overlap);
-    if step == 0 {
+    // Tokenize by whitespace upfront so we never cut a word in half.
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
         return vec![];
     }
 
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    let mut index = 0;
+    let mut chunks: Vec<ChunkResult> = Vec::new();
+    // `word_pos` = index into `words` where the current chunk window starts.
+    let mut word_pos: usize = 0;
 
-    while start < text.len() {
-        let mut end = (start + chunk_size).min(text.len());
+    while word_pos < words.len() {
+        // Greedily pack whole words until we exceed chunk_size.
+        let mut chunk_words: Vec<&str> = Vec::new();
+        let mut char_count: usize = 0;
+        let mut w = word_pos;
 
-        if end < text.len() {
-            if let Some(snap) = text[..end].rfind(' ') {
-                if snap > start {
-                    end = snap;
-                }
+        while w < words.len() {
+            let word = words[w];
+            // First word has no leading space; all others need one.
+            let add_cost = if chunk_words.is_empty() { word.len() } else { word.len() + 1 };
+
+            if char_count + add_cost <= chunk_size || chunk_words.is_empty() {
+                // Always include at least one word even if it alone exceeds chunk_size,
+                // so long words are never silently dropped.
+                chunk_words.push(word);
+                char_count += add_cost;
+                w += 1;
+            } else {
+                break;
             }
         }
 
-        let chunk_text = text[start..end].trim().to_string();
+        let chunk_text = chunk_words.join(" ");
         if !chunk_text.is_empty() {
-            chunks.push(ChunkResult { text: chunk_text, index, metadata: None });
-            index += 1;
+            chunks.push(ChunkResult {
+                text: chunk_text,
+                index: chunks.len(),
+                metadata: None,
+            });
         }
 
-        start += step;
+        // Compute how many words from the tail of this chunk should be repeated
+        // at the start of the next chunk (overlap, measured in chars).
+        let overlap_words = {
+            let mut acc = 0usize;
+            let mut count = 0usize;
+            for word in chunk_words.iter().rev() {
+                let cost = if count == 0 { word.len() } else { word.len() + 1 };
+                if acc + cost <= overlap {
+                    acc += cost;
+                    count += 1;
+                } else {
+                    break;
+                }
+            }
+            count
+        };
+
+        let advance = chunk_words.len().saturating_sub(overlap_words);
+        // Safety: always advance by at least 1 to prevent infinite loop.
+        word_pos += advance.max(1);
     }
 
     chunks
@@ -171,7 +206,7 @@ fn chunk_recursive(text: &str, chunk_size: usize, overlap: usize) -> Vec<ChunkRe
         }
 
         if !split_done {
-            chunk_fixed(text, chunk_size, overlap);
+            // Fall back to fixed chunking when no separator works.
             let fixed_chunks = chunk_fixed(text, chunk_size, overlap);
             for chunk in fixed_chunks {
                 chunks.push(ChunkResult { text: chunk.text, index: *index, metadata: None });
