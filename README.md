@@ -18,14 +18,6 @@ Think of it as **SQLite, but with semantic and relational intelligence for your 
 
 ---
 
-## What's New in v0.1.4
-
-- **L2/Euclidean Distance** - Added support for L2 distance metric in HNSW
-  - Use `metric: "l2"` in index_mode config
-  - Best for image embeddings, recommendation systems, geometric data
-
----
-
 ## Quickstart
 
 ### Python (Recommended)
