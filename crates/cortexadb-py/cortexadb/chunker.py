@@ -63,5 +63,12 @@ def chunk_text(
     Legacy function for backward compatibility.
     Use chunk() for more strategies.
     """
+    if not text or not text.strip():
+        return []
+
+    # Preserve legacy behavior: short text should remain a single chunk.
+    if len(text) <= chunk_size:
+        return [text]
+
     results = chunk(text, strategy="fixed", chunk_size=chunk_size, overlap=overlap)
     return [r["text"] for r in results]

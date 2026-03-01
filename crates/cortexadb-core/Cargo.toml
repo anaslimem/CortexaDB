@@ -25,11 +25,14 @@ arc-swap = "1.8.2"
 regex = "1.10"
 serde_json = "1.0"
 usearch = { version = "2.24.0", features = ["simsimd"] }
+log = "0.4"
+
 
 [dev-dependencies]
 proptest = "1.4"
 tempfile = "3.8"
 criterion = "0.5"
+serial_test = "3.0"
 
 [[bench]]
 name = "storage_bench"

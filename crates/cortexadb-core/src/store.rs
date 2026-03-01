@@ -14,7 +14,8 @@ use crate::engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy};
 use crate::index::IndexLayer;
 use crate::index::vector::VectorBackendMode;
 use crate::query::{
-    QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan, QueryPlanner, StageTrace,
+    IntentAnchors, QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan,
+    QueryPlanner, StageTrace,
 };
 use crate::storage::checkpoint::{
     LoadedCheckpoint, checkpoint_path_from_wal, load_checkpoint, save_checkpoint,
@@ -255,15 +256,15 @@ impl CortexaDBStore {
             match crate::index::VectorIndex::load_hnsw(&hnsw_path, vector_dimension, config.clone())
             {
                 Ok(Some(backend)) => {
-                    eprintln!("Loaded HNSW index from disk (fast recovery)");
+                    log::info!("Loaded HNSW index from disk (fast recovery)");
                     Some(backend)
                 }
                 Ok(None) => {
-                    eprintln!("No HNSW index file found, building fresh index");
+                    log::info!("No HNSW index file found, building fresh index");
                     None
                 }
                 Err(e) => {
-                    eprintln!("Failed to load HNSW index, rebuilding: {}", e);
+                    log::warn!("Failed to load HNSW index, rebuilding: {}", e);
                     None
                 }
             }
@@ -347,7 +348,7 @@ impl CortexaDBStore {
         save_checkpoint(&self.checkpoint_path, snapshot.state_machine(), last_applied_id)?;
 
         if let Err(e) = snapshot.indexes.vector_index().save_hnsw(&self.hnsw_path) {
-            eprintln!("Warning: Failed to save HNSW index: {}", e);
+            log::warn!("Warning: Failed to save HNSW index: {}", e);
         }
 
         // Truncate WAL prefix — only keep entries written after the checkpoint.
@@ -416,7 +417,7 @@ impl CortexaDBStore {
                 if should_flush {
                     let mut write_state = writer.lock().expect("writer lock poisoned");
                     if let Err(err) = write_state.engine.flush() {
-                        eprintln!("cortexadb sync manager flush error: {err}");
+                        log::error!("cortexadb sync manager flush error: {err}");
                     }
                 }
             }
@@ -481,7 +482,7 @@ impl CortexaDBStore {
                     read_snapshot.state_machine(),
                     last_applied_id,
                 ) {
-                    eprintln!("cortexadb checkpoint write error: {err}");
+                    log::error!("cortexadb checkpoint write error: {err}");
                 } else {
                     // Truncate WAL prefix after successful checkpoint.
                     let wal_path = writer
@@ -493,11 +494,11 @@ impl CortexaDBStore {
                     if let Err(err) =
                         WriteAheadLog::truncate_prefix(&wal_path, CommandId(last_applied_id))
                     {
-                        eprintln!("cortexadb WAL truncation error: {err}");
+                        log::error!("cortexadb WAL truncation error: {err}");
                     } else if let Err(err) =
                         writer.lock().expect("writer lock poisoned").engine.reopen_wal()
                     {
-                        eprintln!("cortexadb WAL reopen error: {err}");
+                        log::error!("cortexadb WAL reopen error: {err}");
                     }
                 }
             }
@@ -575,10 +576,15 @@ impl CortexaDBStore {
     pub fn query_with_snapshot(
         &self,
         query_text: &str,
-        options: QueryOptions,
+        mut options: QueryOptions,
         embedder: &dyn QueryEmbedder,
     ) -> Result<(QueryExecution, Arc<ReadSnapshot>)> {
         let snapshot = self.snapshot();
+
+        if let Some(anchors) = options.intent_anchors.take() {
+            Self::apply_intent_adjustments(&mut options, &anchors, query_text, embedder);
+        }
+
         let plan = QueryPlanner::plan(options, snapshot.indexes().vector.len());
         let exec = QueryExecutor::execute(
             query_text,
@@ -588,6 +594,30 @@ impl CortexaDBStore {
             embedder,
         )?;
         Ok((exec, snapshot))
+    }
+
+    fn apply_intent_adjustments(
+        options: &mut QueryOptions,
+        anchors: &IntentAnchors,
+        query_text: &str,
+        embedder: &dyn QueryEmbedder,
+    ) {
+        if let Ok(query_emb) = embedder.embed(query_text) {
+            if let Some(adj) = QueryPlanner::infer_intent_adjustments(
+                &query_emb,
+                &anchors.semantic,
+                &anchors.recency,
+                &anchors.graph,
+                anchors.graph_hops_2_threshold,
+                anchors.graph_hops_3_threshold,
+                anchors.importance_pct,
+            ) {
+                options.score_weights = adj.score_weights;
+                if let Some(exp) = options.graph_expansion.as_mut() {
+                    exp.hops = adj.graph_hops;
+                }
+            }
+        }
     }
 
     pub fn query_with_plan(
@@ -903,7 +933,7 @@ impl Drop for CortexaDBStore {
         // Always save HNSW index on drop if it exists (automatic persistence)
         let snapshot = self.snapshot.load_full();
         if let Err(e) = snapshot.indexes.vector_index().save_hnsw(&self.hnsw_path) {
-            eprintln!("Warning: Failed to save HNSW on drop: {}", e);
+            log::warn!("Warning: Failed to save HNSW on drop: {}", e);
         }
     }
 }

@@ -447,7 +447,7 @@ impl VectorIndex {
                 Ok(results) => return Ok(results),
                 Err(e) => {
                     // Fall back to exact search if HNSW fails
-                    eprintln!("HNSW search failed, falling back to exact: {:?}", e);
+                    log::warn!("HNSW search failed, falling back to exact: {:?}", e);
                 }
             }
         }
