@@ -30,6 +30,7 @@ usearch = { version = "2.24.0", features = ["simsimd"] }
 proptest = "1.4"
 tempfile = "3.8"
 criterion = "0.5"
+serial_test = "3.0"
 
 [[bench]]
 name = "storage_bench"

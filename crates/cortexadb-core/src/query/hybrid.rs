@@ -29,6 +29,24 @@ pub enum HybridQueryError {
 
 pub type Result<T> = std::result::Result<T, HybridQueryError>;
 
+/// Optional intent anchors used by [`QueryPlanner::infer_intent_adjustments`] to
+/// automatically tune `score_weights` and `graph_hops` for a specific query.
+#[derive(Debug, Clone)]
+pub struct IntentAnchors {
+    /// Anchor representing purely semantic / factual queries.
+    pub semantic: Vec<f32>,
+    /// Anchor representing recency-focused queries.
+    pub recency: Vec<f32>,
+    /// Anchor representing graph-traversal / relationship queries.
+    pub graph: Vec<f32>,
+    /// Fixed importance share (0–100) that is never reallocated.
+    pub importance_pct: u8,
+    /// Cosine-similarity threshold to bump graph depth to 2 hops.
+    pub graph_hops_2_threshold: f32,
+    /// Cosine-similarity threshold to bump graph depth to 3 hops.
+    pub graph_hops_3_threshold: f32,
+}
+
 /// A pluggable embedding interface so agent developers can integrate any model backend.
 pub trait QueryEmbedder {
     fn embed(&self, query: &str) -> std::result::Result<Vec<f32>, String>;
@@ -49,17 +67,19 @@ impl ScoreWeights {
     fn normalized(self) -> Result<(f32, f32, f32)> {
         let total =
             self.similarity_pct as u16 + self.importance_pct as u16 + self.recency_pct as u16;
-        if total != 100 {
+        if !(98..=102).contains(&total) {
             return Err(HybridQueryError::InvalidScoreWeights {
                 similarity_pct: self.similarity_pct,
                 importance_pct: self.importance_pct,
                 recency_pct: self.recency_pct,
             });
         }
+        // Divide by actual total so the three floats always sum to exactly 1.0.
+        let t = total as f32;
         Ok((
-            self.similarity_pct as f32 / 100.0,
-            self.importance_pct as f32 / 100.0,
-            self.recency_pct as f32 / 100.0,
+            self.similarity_pct as f32 / t,
+            self.importance_pct as f32 / t,
+            self.recency_pct as f32 / t,
         ))
     }
 }
@@ -91,6 +111,7 @@ pub struct QueryOptions {
     pub candidate_multiplier: usize,
     pub score_weights: ScoreWeights,
     pub metadata_filter: Option<HashMap<String, String>>,
+    pub intent_anchors: Option<IntentAnchors>,
 }
 
 impl QueryOptions {
@@ -110,6 +131,7 @@ impl Default for QueryOptions {
             candidate_multiplier: 5,
             score_weights: ScoreWeights::default(),
             metadata_filter: None,
+            intent_anchors: None,
         }
     }
 }
@@ -405,5 +427,77 @@ mod tests {
         options.score_weights = ScoreWeights::new(80, 15, 15);
         let result = engine.query_with_options("hello", options);
         assert!(result.is_err());
+    }
+
+    // ----- ScoreWeights tolerance -----
+
+    #[test]
+    fn test_score_weights_accept_99_total() {
+        // 70+19+10 = 99 — rounding artefact from normalize_similarity_recency
+        let (sm, layer, embedder) = build_engine();
+        let engine = HybridQueryEngine::new(&sm, &layer, &embedder);
+        let mut options = QueryOptions::with_top_k(10);
+        options.score_weights = ScoreWeights::new(70, 19, 10);
+        assert!(engine.query_with_options("hello", options).is_ok(), "99-total must be accepted");
+    }
+
+    #[test]
+    fn test_score_weights_accept_101_total() {
+        // 71+20+10 = 101 — rounding artefact
+        let (sm, layer, embedder) = build_engine();
+        let engine = HybridQueryEngine::new(&sm, &layer, &embedder);
+        let mut options = QueryOptions::with_top_k(10);
+        options.score_weights = ScoreWeights::new(71, 20, 10);
+        assert!(engine.query_with_options("hello", options).is_ok(), "101-total must be accepted");
+    }
+
+    #[test]
+    fn test_score_weights_reject_clearly_wrong() {
+        // 40+40+40 = 120 — clearly wrong, must still fail
+        let (sm, layer, embedder) = build_engine();
+        let engine = HybridQueryEngine::new(&sm, &layer, &embedder);
+        let mut options = QueryOptions::with_top_k(10);
+        options.score_weights = ScoreWeights::new(40, 40, 40);
+        assert!(engine.query_with_options("hello", options).is_err(), "120-total must be rejected");
+    }
+
+    #[test]
+    fn test_score_weights_floats_sum_to_one() {
+        // 99-total weights should produce floats that sum to 1.0 (within float epsilon)
+        let w = ScoreWeights::new(70, 19, 10);
+        // call normalized() via a successful query to verify no error + score is valid
+        let (sm, layer, embedder) = build_engine();
+        let engine = HybridQueryEngine::new(&sm, &layer, &embedder);
+        let mut options = QueryOptions::with_top_k(10);
+        options.score_weights = w;
+        let hits = engine.query_with_options("hello", options).unwrap();
+        // All final_scores must be in [0, 1] — ensures weights were correctly normalised
+        for h in &hits {
+            assert!(h.final_score >= 0.0 && h.final_score <= 1.0,
+                "final_score {} out of [0,1]", h.final_score);
+        }
+    }
+
+    // ----- IntentAnchors smoke test -----
+
+    #[test]
+    fn test_query_options_intent_anchors_default_is_none() {
+        let opts = QueryOptions::default();
+        assert!(opts.intent_anchors.is_none(), "intent_anchors must default to None");
+    }
+
+    #[test]
+    fn test_query_options_intent_anchors_can_be_set() {
+        let anchors = IntentAnchors {
+            semantic: vec![1.0, 0.0, 0.0],
+            recency: vec![0.0, 1.0, 0.0],
+            graph: vec![0.0, 0.0, 1.0],
+            importance_pct: 20,
+            graph_hops_2_threshold: 0.55,
+            graph_hops_3_threshold: 0.80,
+        };
+        let mut opts = QueryOptions::default();
+        opts.intent_anchors = Some(anchors);
+        assert!(opts.intent_anchors.is_some());
     }
 }

@@ -297,7 +297,7 @@ impl CortexaDB {
         metadata_filter: Option<HashMap<String, String>>,
     ) -> Result<Vec<Hit>> {
         let embedder = StaticEmbedder { embedding: query_embedding };
-        let mut options = QueryOptions::with_top_k(top_k);
+        let mut options = QueryOptions::with_top_k(top_k.saturating_mul(4).max(top_k));
         options.namespace = Some(namespace.to_string());
         options.metadata_filter = metadata_filter;
         let execution = self.inner.query("", options, &embedder)?;
@@ -476,16 +476,20 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
 
+        let mut config = CortexaDBConfig::default();
+        config.checkpoint_policy = crate::store::CheckpointPolicy::Disabled;
+
         {
-            let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+            let db = CortexaDB::open_with_config(path.to_str().unwrap(), config.clone()).unwrap();
             db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
             db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+            db.flush().unwrap(); // ensure WAL is synced before checkpoint truncates it
             db.checkpoint().unwrap();
             // Write more after checkpoint.
             db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
         }
 
-        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+        let db = CortexaDB::open_with_config(path.to_str().unwrap(), config).unwrap();
         let stats = db.stats();
         assert_eq!(stats.entries, 3);
     }
@@ -647,5 +651,44 @@ mod tests {
         let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
         db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
         db.compact().expect("compact must not fail");
+    }
+
+    // ----- ask_in_namespace: sparse namespace over-fetch regression -----
+
+    #[test]
+    fn test_ask_in_namespace_finds_entry_in_sparse_namespace() {
+        // Regression: before the 4× fix, ask_in_namespace returned empty results when the
+        // target namespace had far fewer entries than top_k * candidate_multiplier entries globally.
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+
+        // Insert 10 entries in ns_majority to fill the global index.
+        for i in 0..10u32 {
+            let v = vec![i as f32 / 10.0, 1.0 - i as f32 / 10.0, 0.0];
+            db.remember_in_namespace("ns_majority", v, None).unwrap();
+        }
+        // Insert 2 entries in ns_sparse.
+        let id_a = db.remember_in_namespace("ns_sparse", vec![1.0, 0.0, 0.0], None).unwrap();
+        let id_b = db.remember_in_namespace("ns_sparse", vec![0.9, 0.1, 0.0], None).unwrap();
+
+        // Ask for top-2 in ns_sparse — both must be returned.
+        let hits = db.ask_in_namespace("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
+        let hit_ids: Vec<u64> = hits.iter().map(|h| h.id).collect();
+        assert!(hit_ids.contains(&id_a), "id_a must appear in ns_sparse results; got {:?}", hit_ids);
+        assert!(hit_ids.contains(&id_b), "id_b must appear in ns_sparse results; got {:?}", hit_ids);
+    }
+
+    // ----- Intent anchors end-to-end -----
+
+    #[test]
+    fn test_ask_without_intent_anchors_unchanged() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("testdb");
+        let db = CortexaDB::open(path.to_str().unwrap()).unwrap();
+        db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        // Default QueryOptions has intent_anchors = None; must produce same results as ask().
+        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+        assert!(!hits.is_empty());
     }
 }

@@ -14,7 +14,8 @@ use crate::engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy};
 use crate::index::IndexLayer;
 use crate::index::vector::VectorBackendMode;
 use crate::query::{
-    QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan, QueryPlanner, StageTrace,
+    IntentAnchors, QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan,
+    QueryPlanner, StageTrace,
 };
 use crate::storage::checkpoint::{
     LoadedCheckpoint, checkpoint_path_from_wal, load_checkpoint, save_checkpoint,
@@ -575,10 +576,15 @@ impl CortexaDBStore {
     pub fn query_with_snapshot(
         &self,
         query_text: &str,
-        options: QueryOptions,
+        mut options: QueryOptions,
         embedder: &dyn QueryEmbedder,
     ) -> Result<(QueryExecution, Arc<ReadSnapshot>)> {
         let snapshot = self.snapshot();
+
+        if let Some(anchors) = options.intent_anchors.take() {
+            Self::apply_intent_adjustments(&mut options, &anchors, query_text, embedder);
+        }
+
         let plan = QueryPlanner::plan(options, snapshot.indexes().vector.len());
         let exec = QueryExecutor::execute(
             query_text,
@@ -588,6 +594,30 @@ impl CortexaDBStore {
             embedder,
         )?;
         Ok((exec, snapshot))
+    }
+
+    fn apply_intent_adjustments(
+        options: &mut QueryOptions,
+        anchors: &IntentAnchors,
+        query_text: &str,
+        embedder: &dyn QueryEmbedder,
+    ) {
+        if let Ok(query_emb) = embedder.embed(query_text) {
+            if let Some(adj) = QueryPlanner::infer_intent_adjustments(
+                &query_emb,
+                &anchors.semantic,
+                &anchors.recency,
+                &anchors.graph,
+                anchors.graph_hops_2_threshold,
+                anchors.graph_hops_3_threshold,
+                anchors.importance_pct,
+            ) {
+                options.score_weights = adj.score_weights;
+                if let Some(exp) = options.graph_expansion.as_mut() {
+                    exp.hops = adj.graph_hops;
+                }
+            }
+        }
     }
 
     pub fn query_with_plan(
