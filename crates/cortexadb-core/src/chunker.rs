@@ -95,6 +95,11 @@ fn chunk_fixed(text: &str, chunk_size: usize, overlap: usize) -> Vec<ChunkResult
             });
         }
 
+        // No unseen words remain, so a trailing overlap-only chunk would be redundant.
+        if w >= words.len() {
+            break;
+        }
+
         // Compute how many words from the tail of this chunk should be repeated
         // at the start of the next chunk (overlap, measured in chars).
         let overlap_words = {
@@ -477,6 +482,13 @@ mod tests {
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, "Short");
         assert_eq!(chunks[0].index, 0);
+    }
+
+    #[test]
+    fn test_fixed_short_text_with_overlap_still_one_chunk() {
+        let chunks = chunk_fixed("Short sentence.", 512, 50);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, "Short sentence.");
     }
 
     #[test]
