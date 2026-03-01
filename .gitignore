@@ -27,3 +27,5 @@ target
 docs/
 .env
 *.mem
+venv/
+.venv/
