@@ -257,6 +257,58 @@ We use a custom versioned serialization layer (with a "magic-byte" header). This
 
 ---
 
+## Benchmarks
+
+CortexaDB has been benchmarked with **10,000 embeddings** at **384 dimensions** (typical sentence-transformer size).
+
+### Results
+
+| Mode | Indexing Time | Query (p50) | Throughput | Recall |
+|------|--------------|-------------|-----------|--------|
+| Exact (baseline) | 138s | 1.34ms | 690 QPS | 100% |
+| HNSW | 151s | 0.29ms | 3,203 QPS | 95% |
+
+→ **HNSW is ~5x faster than exact search while maintaining 95% recall**
+
+### Benchmark Methodology
+
+- **Dataset**: 10,000 embeddings × 384 dimensions (realistic sentence-transformer size)
+- **Indexing**: Time to build fresh index from scratch
+- **Query Latency**: p50/p95/p99 measured across 1,000 queries (after 100 warmup queries)
+- **Recall**: Percentage of HNSW results that match brute-force exact search
+
+### Running Benchmarks
+
+```bash
+# 1. Build the Rust extension
+cd crates/cortexadb-py
+maturin develop --release
+cd ../..
+
+# 2. Generate test embeddings
+python benchmark/generate_embeddings.py --count 10000 --dimensions 384
+
+# 3. Run benchmarks
+python benchmark/run_benchmark.py --index-mode exact   # baseline (100% recall)
+python benchmark/run_benchmark.py --index-mode hnsw    # fast mode (~95% recall)
+
+# Results are saved to benchmark/results/
+```
+
+### Custom Benchmark Options
+
+```bash
+python benchmark/run_benchmark.py \
+    --count 10000 \
+    --dimensions 384 \
+    --top-k 10 \
+    --warmup 100 \
+    --queries 1000 \
+    --index-mode hnsw
+```
+
+---
+
 ## License & Status
 CortexaDB is currently in **Beta (v0.1.4)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
