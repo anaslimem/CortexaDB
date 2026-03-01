@@ -98,6 +98,8 @@ impl HnswBackend {
         let index =
             usearch::new_index(&options).map_err(|e| HnswError::UsearchError(e.to_string()))?;
 
+        let _ = index.reserve(10000);
+
         Ok(Self { index: Arc::new(Mutex::new(index)), dimension, config })
     }
 
