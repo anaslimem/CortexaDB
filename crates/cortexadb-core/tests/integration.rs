@@ -8,8 +8,13 @@ use serial_test::serial;
 use tempfile::TempDir;
 
 fn open_db(path: &std::path::Path) -> CortexaDB {
-    let mut config = CortexaDBConfig::default();
-    config.checkpoint_policy = cortexadb_core::store::CheckpointPolicy::Disabled;
+    let config = CortexaDBConfig {
+        vector_dimension: 3,
+        sync_policy: cortexadb_core::engine::SyncPolicy::Strict,
+        checkpoint_policy: cortexadb_core::store::CheckpointPolicy::Disabled,
+        capacity_policy: cortexadb_core::engine::CapacityPolicy::new(None, None),
+        index_mode: cortexadb_core::index::IndexMode::Exact,
+    };
     CortexaDB::open_with_config(path.to_str().unwrap(), config).unwrap()
 }
 

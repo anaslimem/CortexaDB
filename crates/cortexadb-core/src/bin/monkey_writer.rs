@@ -35,8 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let _ = store.insert_memory(entry)?;
 
-        if i % 100 == 0 {
-            eprintln!("wrote {i}/{total}");
+        if i % 10_000 == 0 {
+            log::info!("wrote {i}/{total}");
         }
 
         if sleep_ms > 0 {
@@ -44,6 +44,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    eprintln!("writer completed");
+    log::info!("writer completed");
     Ok(())
 }
