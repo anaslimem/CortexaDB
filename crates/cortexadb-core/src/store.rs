@@ -388,10 +388,20 @@ impl CortexaDBStore {
                                     let (guard, _) = cvar
                                         .wait_timeout(runtime, timeout)
                                         .expect("sync runtime wait poisoned");
-                                    runtime = guard;
+                                    runtime = guard;    
+                                    let timed_out = runtime
+                                        .dirty_since
+                                        .map(|d| d.elapsed() >= max_delay)
+                                        .unwrap_or(true);
+                                    if runtime.pending_ops < max_ops && !timed_out {
+                                        drop(runtime);
+                                        continue;
+                                    }
                                 }
                             } else {
                                 runtime = cvar.wait(runtime).expect("sync runtime wait poisoned");
+                                drop(runtime);
+                                continue;
                             }
                         }
                     }
