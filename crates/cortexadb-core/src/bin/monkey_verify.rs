@@ -20,24 +20,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // With insert-only workload, recovered state size must match surviving WAL commands.
     if entries != wal_len {
-        return Err(format!(
-            "recovery mismatch: state_entries={} wal_len={}",
-            entries, wal_len
-        )
-        .into());
+        return Err(
+            format!("recovery mismatch: state_entries={} wal_len={}", entries, wal_len).into()
+        );
     }
 
     // IDs should be contiguous from 0..entries-1 for this controlled writer.
     for id in 0..entries {
-        state
-            .get_memory(MemoryId(id))
-            .map_err(|_| format!("missing recovered id {id}"))?;
+        state.get_memory(MemoryId(id)).map_err(|_| format!("missing recovered id {id}"))?;
     }
 
-    println!(
-        "Monkey recovery OK: recovered {} valid records (WAL len {}).",
-        entries, wal_len
-    );
+    println!("Monkey recovery OK: recovered {} valid records (WAL len {}).", entries, wal_len);
 
     Ok(())
 }

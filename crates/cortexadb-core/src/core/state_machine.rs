@@ -71,7 +71,7 @@ impl StateMachine {
         self.memories.insert(id, entry);
 
         // Add to temporal index
-        self.temporal_index.entry(timestamp).or_insert_with(Vec::new).push(id);
+        self.temporal_index.entry(timestamp).or_default().push(id);
 
         // Keep temporal index sorted for determinism
         if let Some(ids) = self.temporal_index.get_mut(&timestamp) {
@@ -118,7 +118,7 @@ impl StateMachine {
             });
         }
 
-        let edges = self.graph.entry(from).or_insert_with(Vec::new);
+        let edges = self.graph.entry(from).or_default();
         // Avoid duplicate edges
         if !edges.iter().any(|e| e.to == to && e.relation == relation) {
             edges.push(Edge { to, relation });

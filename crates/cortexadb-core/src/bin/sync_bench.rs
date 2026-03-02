@@ -102,10 +102,7 @@ impl BenchConfig {
                 }
                 "--vector-dim" => {
                     i += 1;
-                    vector_dim = args
-                        .get(i)
-                        .ok_or("missing value for --vector-dim")?
-                        .parse()?;
+                    vector_dim = args.get(i).ok_or("missing value for --vector-dim")?.parse()?;
                 }
                 "--namespace" => {
                     i += 1;
@@ -121,24 +118,18 @@ impl BenchConfig {
                 }
                 "--batch-max-ops" => {
                     i += 1;
-                    batch_max_ops = args
-                        .get(i)
-                        .ok_or("missing value for --batch-max-ops")?
-                        .parse()?;
+                    batch_max_ops =
+                        args.get(i).ok_or("missing value for --batch-max-ops")?.parse()?;
                 }
                 "--batch-max-delay-ms" => {
                     i += 1;
-                    batch_max_delay_ms = args
-                        .get(i)
-                        .ok_or("missing value for --batch-max-delay-ms")?
-                        .parse()?;
+                    batch_max_delay_ms =
+                        args.get(i).ok_or("missing value for --batch-max-delay-ms")?.parse()?;
                 }
                 "--async-interval-ms" => {
                     i += 1;
-                    async_interval_ms = args
-                        .get(i)
-                        .ok_or("missing value for --async-interval-ms")?
-                        .parse()?;
+                    async_interval_ms =
+                        args.get(i).ok_or("missing value for --async-interval-ms")?.parse()?;
                 }
                 "-h" | "--help" => {
                     print_help();
@@ -153,31 +144,19 @@ impl BenchConfig {
 
         let policy = match mode.to_ascii_lowercase().as_str() {
             "strict" => SyncPolicy::Strict,
-            "batch" => SyncPolicy::Batch {
-                max_ops: batch_max_ops,
-                max_delay_ms: batch_max_delay_ms,
-            },
-            "async" => SyncPolicy::Async {
-                interval_ms: async_interval_ms,
-            },
+            "batch" => {
+                SyncPolicy::Batch { max_ops: batch_max_ops, max_delay_ms: batch_max_delay_ms }
+            }
+            "async" => SyncPolicy::Async { interval_ms: async_interval_ms },
             _ => return Err(format!("invalid mode: {} (use strict|batch|async)", mode).into()),
         };
 
-        Ok(Self {
-            ops,
-            vector_dim,
-            namespace,
-            data_dir,
-            policy,
-        })
+        Ok(Self { ops, vector_dim, namespace, data_dir, policy })
     }
 }
 
 fn build_paths(cfg: &BenchConfig) -> (PathBuf, PathBuf) {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let run_dir = cfg.data_dir.join(format!("run_{}", nonce));
     let wal = run_dir.join("bench.wal");
     let seg = run_dir.join("segments");

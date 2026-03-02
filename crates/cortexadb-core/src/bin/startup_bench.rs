@@ -3,10 +3,10 @@
 //! Measures cold open time, snapshot load time, and WAL replay time
 //! against the <100ms target for small/medium databases.
 
-use cortexadb_core::IndexMode;
 use cortexadb_core::engine::{CapacityPolicy, SyncPolicy};
 use cortexadb_core::facade::{CortexaDB, CortexaDBConfig};
 use cortexadb_core::store::CheckpointPolicy;
+use cortexadb_core::IndexMode;
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

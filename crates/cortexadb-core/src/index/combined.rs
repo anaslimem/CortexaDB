@@ -64,6 +64,30 @@ impl Default for RankingWeights {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TimeRange {
+    pub start: u64,
+    pub end: u64,
+}
+
+impl TimeRange {
+    pub const fn new(start: u64, end: u64) -> Self {
+        Self { start, end }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GraphScope {
+    pub origin: MemoryId,
+    pub max_hops: usize,
+}
+
+impl GraphScope {
+    pub const fn new(origin: MemoryId, max_hops: usize) -> Self {
+        Self { origin, max_hops }
+    }
+}
+
 /// Combined index layer for multi-criteria queries
 ///
 /// Combines Vector + Graph + Temporal indexes for rich contextual search
@@ -143,17 +167,17 @@ impl IndexLayer {
         &self,
         state_machine: &StateMachine,
         query: &[f32],
-        time_start: u64,
-        time_end: u64,
-        origin: MemoryId,
-        max_hops: usize,
+        time_range: TimeRange,
+        graph_scope: GraphScope,
         top_k: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
         // Step 1: Get memories in time range
-        let temporal_results = TemporalIndex::get_range(state_machine, time_start, time_end)?;
+        let temporal_results =
+            TemporalIndex::get_range(state_machine, time_range.start, time_range.end)?;
 
         // Step 2: Get all reachable memories
-        let graph_results = GraphIndex::get_reachable(state_machine, origin, max_hops)?;
+        let graph_results =
+            GraphIndex::get_reachable(state_machine, graph_scope.origin, graph_scope.max_hops)?;
 
         // Step 3: Find intersection of temporal AND graph
         let temporal_set: HashSet<MemoryId> = temporal_results.into_iter().collect();
@@ -173,19 +197,15 @@ impl IndexLayer {
         &self,
         state_machine: &StateMachine,
         query: &[f32],
-        time_start: u64,
-        time_end: u64,
-        origin: MemoryId,
-        max_hops: usize,
+        time_range: TimeRange,
+        graph_scope: GraphScope,
         top_k: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
         self.search_weighted_in_range_connected_to_with_weights(
             state_machine,
             query,
-            time_start,
-            time_end,
-            origin,
-            max_hops,
+            time_range,
+            graph_scope,
             top_k,
             RankingWeights::default(),
         )
@@ -196,19 +216,19 @@ impl IndexLayer {
         &self,
         state_machine: &StateMachine,
         query: &[f32],
-        time_start: u64,
-        time_end: u64,
-        origin: MemoryId,
-        max_hops: usize,
+        time_range: TimeRange,
+        graph_scope: GraphScope,
         top_k: usize,
         weights: RankingWeights,
     ) -> Result<Vec<(MemoryId, f32)>> {
         let (vector_w, recency_w, graph_w) = weights.normalized()?;
 
         // Step 1: candidate intersection from temporal + graph.
-        let temporal_results = TemporalIndex::get_range(state_machine, time_start, time_end)?;
+        let temporal_results =
+            TemporalIndex::get_range(state_machine, time_range.start, time_range.end)?;
         let temporal_set: HashSet<MemoryId> = temporal_results.into_iter().collect();
-        let graph_distances = GraphIndex::bfs(state_machine, origin, max_hops)?;
+        let graph_distances =
+            GraphIndex::bfs(state_machine, graph_scope.origin, graph_scope.max_hops)?;
         let graph_set: HashSet<MemoryId> = graph_distances.keys().copied().collect();
         let candidates: HashSet<MemoryId> =
             temporal_set.intersection(&graph_set).copied().collect();
@@ -241,7 +261,7 @@ impl IndexLayer {
         }
 
         // Step 4: weighted score composition.
-        let hop_denominator = max_hops.max(1) as f32;
+        let hop_denominator = graph_scope.max_hops.max(1) as f32;
         let mut scored: Vec<(MemoryId, f32)> = timestamps
             .iter()
             .filter_map(|(id, ts)| {
@@ -366,7 +386,13 @@ mod tests {
 
         let query = vec![0.1, 0.2, 0.3]; // Non-zero vector
         let results = layer
-            .search_similar_in_range_connected_to(&sm, &query, 1000, 4000, MemoryId(0), 2, 3)
+            .search_similar_in_range_connected_to(
+                &sm,
+                &query,
+                TimeRange::new(1000, 4000),
+                GraphScope::new(MemoryId(0), 2),
+                3,
+            )
             .unwrap();
 
         // Should satisfy:
@@ -440,7 +466,13 @@ mod tests {
         sm.add_edge(MemoryId(3), MemoryId(2), "to".to_string()).unwrap();
 
         let results = layer
-            .search_weighted_in_range_connected_to(&sm, &[1.0, 0.0], 2000, 10000, MemoryId(0), 2, 1)
+            .search_weighted_in_range_connected_to(
+                &sm,
+                &[1.0, 0.0],
+                TimeRange::new(2000, 10000),
+                GraphScope::new(MemoryId(0), 2),
+                1,
+            )
             .unwrap();
 
         assert_eq!(results.len(), 1);
@@ -453,10 +485,8 @@ mod tests {
         let result = layer.search_weighted_in_range_connected_to_with_weights(
             &sm,
             &[0.1, 0.2, 0.3],
-            1000,
-            4000,
-            MemoryId(0),
-            2,
+            TimeRange::new(1000, 4000),
+            GraphScope::new(MemoryId(0), 2),
             3,
             RankingWeights::new(80, 30, 10),
         );

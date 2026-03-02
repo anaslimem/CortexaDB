@@ -30,14 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = CortexaDBStore::new(&wal, &seg, 3)?;
 
     store.insert_memory(
-        MemoryEntry::new(
-            MemoryId(1),
-            "agent1".to_string(),
-            b"Rust WAL design".to_vec(),
-            1000,
-        )
-        .with_embedding(vec![1.0, 0.0, 0.0])
-        .with_importance(0.8),
+        MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"Rust WAL design".to_vec(), 1000)
+            .with_embedding(vec![1.0, 0.0, 0.0])
+            .with_importance(0.8),
     )?;
 
     store.insert_memory(

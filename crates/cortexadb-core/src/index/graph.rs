@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use thiserror::Error;
 
@@ -85,9 +86,9 @@ impl GraphIndex {
                             continue;
                         }
                     }
-                    if !visited.contains_key(&neighbor_id) {
+                    if let Entry::Vacant(entry) = visited.entry(neighbor_id) {
                         let new_distance = distance + 1;
-                        visited.insert(neighbor_id, new_distance);
+                        entry.insert(new_distance);
                         queue.push_back((neighbor_id, new_distance));
                     }
                 }
@@ -410,7 +411,7 @@ mod tests {
         let paths = GraphIndex::dfs(&sm, MemoryId(0), 2).unwrap();
 
         // Should have multiple paths
-        assert!(paths.len() > 0);
+        assert!(!paths.is_empty());
 
         // All paths should start with 0
         for path in &paths {

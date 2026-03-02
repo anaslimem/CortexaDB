@@ -473,8 +473,11 @@ mod tests {
         let hits = engine.query_with_options("hello", options).unwrap();
         // All final_scores must be in [0, 1] — ensures weights were correctly normalised
         for h in &hits {
-            assert!(h.final_score >= 0.0 && h.final_score <= 1.0,
-                "final_score {} out of [0,1]", h.final_score);
+            assert!(
+                h.final_score >= 0.0 && h.final_score <= 1.0,
+                "final_score {} out of [0,1]",
+                h.final_score
+            );
         }
     }
 
@@ -496,8 +499,7 @@ mod tests {
             graph_hops_2_threshold: 0.55,
             graph_hops_3_threshold: 0.80,
         };
-        let mut opts = QueryOptions::default();
-        opts.intent_anchors = Some(anchors);
+        let opts = QueryOptions { intent_anchors: Some(anchors), ..Default::default() };
         assert!(opts.intent_anchors.is_some());
     }
 }
