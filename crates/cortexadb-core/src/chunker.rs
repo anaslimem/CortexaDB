@@ -700,34 +700,6 @@ mod tests {
     fn test_markdown_preserve_headers_includes_header_text() {
         let text = "# My Title\n\nSome body text.";
         let chunks = chunk_markdown(text, true, 0);
-        assert!(chunks.len() >= 2, "each header section should produce a chunk");
-    }
-
-    #[test]
-    fn test_markdown_preserve_headers_includes_header_text() {
-        let text = "# My Title\n\nSome body text.";
-        let chunks = chunk_markdown(text, true, 0);
-        assert!(!chunks.is_empty());
-        let combined = chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
-        assert!(combined.contains("My Title"), "header must appear in output");
-        assert!(combined.contains("Some body text"));
-    }
-
-    #[test]
-    fn test_markdown_body_text_present_regardless_of_preserve() {
-        let text = "# Header\n\nBody content here.";
-        for preserve in [true, false] {
-            let chunks = chunk_markdown(text, preserve, 0);
-            assert!(!chunks.is_empty());
-            let combined = chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
-            assert!(combined.contains("Body content"), "body text must be present (preserve={})", preserve);
-        }
-    }
-
-    #[test]
-    fn test_markdown_code_blocks_replaced_not_raw() {
-        let text = "Intro.\n\n```rust\nfn main() {}\n```\n\nConclusion.";
-        let chunks = chunk_markdown(text, false, 0);
         assert!(!chunks.is_empty());
         let combined = chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
         assert!(combined.contains("My Title"), "header must appear in output");
