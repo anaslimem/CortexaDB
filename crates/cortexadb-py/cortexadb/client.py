@@ -160,14 +160,32 @@ class CortexaDB:
         self._embedder = embedder
         self._recorder = _recorder
         try:
-            self._inner = _cortexadb.CortexaDB.open(
-                path,
-                dimension=dimension,
-                sync=sync,
-                max_entries=max_entries,
-                max_bytes=max_bytes,
-                index_mode=index_mode,
-            )
+            try:
+                self._inner = _cortexadb.CortexaDB.open(
+                    path,
+                    dimension=dimension,
+                    sync=sync,
+                    max_entries=max_entries,
+                    max_bytes=max_bytes,
+                    index_mode=index_mode,
+                )
+            except TypeError as type_err:
+                # Backward compatibility for environments with an older compiled
+                # extension that does not yet expose max_bytes.
+                if "max_bytes" not in str(type_err):
+                    raise
+                if max_bytes is not None:
+                    raise CortexaDBConfigError(
+                        "This installed cortexadb extension does not support "
+                        "'max_bytes' yet. Rebuild or reinstall cortexadb."
+                    )
+                self._inner = _cortexadb.CortexaDB.open(
+                    path,
+                    dimension=dimension,
+                    sync=sync,
+                    max_entries=max_entries,
+                    index_mode=index_mode,
+                )
         except Exception as e:
             if isinstance(e, CortexaDBError):
                 raise
@@ -451,6 +469,22 @@ class CortexaDB:
             base_hits = base_hits[:top_k]
 
         scored_candidates: t.Dict[int, float] = {h.id: h.score for h in base_hits}
+        allowed_namespaces: t.Optional[t.Set[str]] = (
+            set(namespaces) if namespaces is not None else None
+        )
+        namespace_cache: t.Dict[int, str] = {}
+
+        def is_namespace_allowed(mid: int) -> bool:
+            if allowed_namespaces is None:
+                return True
+            if mid in namespace_cache:
+                return namespace_cache[mid] in allowed_namespaces
+            try:
+                ns = self.get(mid).namespace
+            except Exception:
+                return False
+            namespace_cache[mid] = ns
+            return ns in allowed_namespaces
 
         # 2. Graph Traversal (Phase 3.3)
         if use_graph:
@@ -460,6 +494,8 @@ class CortexaDB:
                 try:
                     neighbors = self._inner.get_neighbors(hit.id)
                     for target_id, relation in neighbors:
+                        if not is_namespace_allowed(target_id):
+                            continue
                         # Edge weight factor (e.g. 0.9 penalty for 1 hop)
                         neighbor_score = hit.score * 0.9
 

@@ -391,6 +391,31 @@ def test_hybrid_use_graph():
     # The score of id2 should be updated because of graph neighbor logic
     assert hits_graph[1].score >= hits_normal[0].score * 0.89
 
+
+def test_hybrid_use_graph_respects_namespaces(monkeypatch):
+    import cortexadb
+
+    db = cortexadb.CortexaDB.open(DB_PATH, dimension=2, sync="strict")
+    id_a = db.remember("Node A", embedding=[1.0, 0.0], namespace="agent_a")
+    id_b = db.remember("Node B", embedding=[0.0, 1.0], namespace="agent_b")
+
+    def fake_get_neighbors(_mid):
+        # Simulate an unexpected backend neighbor response across namespaces.
+        return [(id_b, "forced")]
+
+    monkeypatch.setattr(type(db._inner), "get_neighbors", lambda self, mid: fake_get_neighbors(mid))
+
+    scoped_hits = db.ask(
+        "test",
+        embedding=[1.0, 0.0],
+        top_k=5,
+        namespaces=["agent_a"],
+        use_graph=True,
+    )
+    scoped_ids = {h.id for h in scoped_hits}
+    assert id_a in scoped_ids
+    assert id_b not in scoped_ids
+
 def test_hybrid_recency_bias():
     import cortexadb
     db = cortexadb.CortexaDB.open(DB_PATH, dimension=2, sync="strict")
