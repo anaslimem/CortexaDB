@@ -6,29 +6,51 @@
 //! - Using chunking strategies
 //! - Hybrid search
 //! - Graph relationships
+//! - Namespace-scoped operations
 
-use cortexadb_core::{ChunkingStrategy, CortexaDB, CortexaDBConfig, chunk};
+use cortexadb_core::{chunk, ChunkingStrategy, CortexaDB};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db_path = "example_rust.mem";
+fn embed_text(text: &str, dimension: usize) -> Vec<f32> {
+    let mut vec = vec![0.0_f32; dimension];
 
-    // Cleanup old database
-    for ext in ["", ".wal", ".checkpoint"] {
-        let path = format!("{}{}", db_path, ext);
-        if Path::new(&path).exists() {
-            std::fs::remove_file(&path)?;
+    for (i, token) in text.split_whitespace().enumerate() {
+        let mut hasher = DefaultHasher::new();
+        token.to_lowercase().hash(&mut hasher);
+        let hash = hasher.finish() as usize;
+        let idx = hash % dimension;
+        let sign = if hash & 1 == 0 { 1.0 } else { -1.0 };
+        vec[idx] += sign;
+        vec[(idx + i) % dimension] += 0.25 * sign;
+    }
+
+    let norm = vec.iter().map(|v| v * v).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in &mut vec {
+            *value /= norm;
         }
+    }
+
+    vec
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = "example_rust.db";
+    let dimension = 64;
+
+    // Cleanup old database directory
+    if Path::new(db_path).exists() {
+        std::fs::remove_dir_all(db_path)?;
     }
 
     println!("=== CortexaDB Rust Example ===\n");
 
     // -----------------------------------------------------------
-    // 1. Configure and Open Database
+    // 1. Open Database (current API)
     // -----------------------------------------------------------
-    let config = CortexaDBConfig { vector_dimension: 128, ..Default::default() };
-
-    let db = CortexaDB::open(db_path, config)?;
+    let db = CortexaDB::open(db_path, dimension)?;
     println!("Opened database: {} entries", db.stats()?.entries);
 
     // -----------------------------------------------------------
@@ -94,15 +116,32 @@ Content under heading 3.
     }
 
     // -----------------------------------------------------------
-    // 5. Store Memories
+    // 5. Store Memories (text-first helper for the example)
     // -----------------------------------------------------------
     println!("\n[4] Storing memories...");
 
-    let id1 = db.remember("The user lives in Paris and loves programming.", None, None)?;
+    let text1 = "The user lives in Paris and loves programming.";
+    let text2 = "CortexaDB is a vector database for AI agents.";
+    let text3 = "Rust is a systems programming language.";
 
-    let id2 = db.remember("CortexaDB is a vector database for AI agents.", None, None)?;
-
-    let id3 = db.remember("Rust is a systems programming language.", None, None)?;
+    let id1 = db.remember_with_content(
+        "default",
+        text1.as_bytes().to_vec(),
+        embed_text(text1, dimension),
+        None,
+    )?;
+    let id2 = db.remember_with_content(
+        "default",
+        text2.as_bytes().to_vec(),
+        embed_text(text2, dimension),
+        None,
+    )?;
+    let id3 = db.remember_with_content(
+        "default",
+        text3.as_bytes().to_vec(),
+        embed_text(text3, dimension),
+        None,
+    )?;
 
     println!("   Stored 3 memories: IDs {}, {}, {}", id1, id2, id3);
 
@@ -111,15 +150,47 @@ Content under heading 3.
     // -----------------------------------------------------------
     println!("\n[5] Creating graph connections...");
 
-    db.connect(id1, id2, "uses", None)?;
-    db.connect(id2, id3, "written_in", None)?;
+    db.connect(id1, id2, "uses")?;
+    db.connect(id2, id3, "written_in")?;
 
     println!("   Connected: {} -> {} -> {}", id1, id2, id3);
 
     // -----------------------------------------------------------
-    // 7. Stats
+    // 7. Ask (query text -> helper embedding)
     // -----------------------------------------------------------
-    println!("\n[6] Database stats...");
+    println!("\n[6] Querying memories...");
+    let query = "Where does the user live?";
+    let hits = db.ask(embed_text(query, dimension), 3, None)?;
+    for hit in hits {
+        let mem = db.get_memory(hit.id)?;
+        let content = String::from_utf8_lossy(&mem.content);
+        println!("   - ID: {}, Score: {:.4}, Content: {}", hit.id, hit.score, content);
+    }
+
+    // -----------------------------------------------------------
+    // 8. Namespace-scoped retrieval
+    // -----------------------------------------------------------
+    println!("\n[7] Namespaces...");
+    let travel_text = "Flight to Tokyo booked for June.";
+    let ns_id = db.remember_with_content(
+        "travel_agent",
+        travel_text.as_bytes().to_vec(),
+        embed_text(travel_text, dimension),
+        None,
+    )?;
+    println!("   Stored in namespace 'travel_agent': ID {}", ns_id);
+    let ns_hits = db.ask_in_namespace(
+        "travel_agent",
+        embed_text("Tokyo travel plans", dimension),
+        5,
+        None,
+    )?;
+    println!("   travel_agent hits: {}", ns_hits.len());
+
+    // -----------------------------------------------------------
+    // 9. Stats
+    // -----------------------------------------------------------
+    println!("\n[8] Database stats...");
     let stats = db.stats()?;
     println!("   Entries: {}", stats.entries);
     println!("   Indexed embeddings: {}", stats.indexed_embeddings);
@@ -127,11 +198,8 @@ Content under heading 3.
     println!("\n=== Example Complete! ===");
 
     // Cleanup
-    for ext in ["", ".wal", ".checkpoint"] {
-        let path = format!("{}{}", db_path, ext);
-        if Path::new(&path).exists() {
-            std::fs::remove_file(&path)?;
-        }
+    if Path::new(db_path).exists() {
+        std::fs::remove_dir_all(db_path)?;
     }
 
     Ok(())

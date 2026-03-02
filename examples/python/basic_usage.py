@@ -13,15 +13,17 @@ Demonstrates core features:
 
 from cortexadb import CortexaDB, HashEmbedder
 import os
+import shutil
 
 
 def main():
-    db_path = "example_agent.mem"
+    db_path = "example_agent.db"
 
-    # Cleanup old db
-    for f in [db_path, f"{db_path}.wal", f"{db_path}.checkpoint"]:
-        if os.path.exists(f):
-            os.remove(f)
+    # Cleanup old db directory
+    if os.path.isdir(db_path):
+        shutil.rmtree(db_path)
+    elif os.path.exists(db_path):
+        os.remove(db_path)
 
     print("=== CortexaDB Python Example ===\n")
 
@@ -134,13 +136,11 @@ This is the conclusion.
     # Close database first (releases file locks)
     del db
 
-    # Cleanup
-    for f in [db_path, f"{db_path}.wal", f"{db_path}.checkpoint"]:
-        if os.path.exists(f):
-            try:
-                os.remove(f)
-            except PermissionError:
-                pass  # File may be locked
+    # Cleanup db directory
+    if os.path.isdir(db_path):
+        shutil.rmtree(db_path)
+    elif os.path.exists(db_path):
+        os.remove(db_path)
 
     print("\n=== Example Complete! ===")
 
