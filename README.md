@@ -214,11 +214,15 @@ db.load("document.pdf", strategy="recursive")
 | `.delete_memory(id)` | Permanently removes a memory and updates all indexes. |
 | `.compact()` | Reclaims space by removing deleted entries from disk. |
 | `.checkpoint()` | Truncates the WAL and snapshots the current state for fast startup. |
+| `.export_replay(path)` | Exports current state to a replay log (NDJSON). |
+| `CortexaDB.replay(log_path, db_path)` | Rebuilds a database from a replay log. |
 
 ### Configuration Options
 When calling `CortexaDB.open()`, you can tune the behavior:
 - `sync`: `"strict"` (safest), `"async"` (fastest), or `"batch"` (balanced).
 - `max_entries`: Limits the total number of memories (triggers auto-eviction).
+- `max_bytes`: Limits total stored bytes (triggers auto-eviction).
+- `index_mode`: `"exact"`, `"hnsw"`, or an HNSW config dict.
 - `record`: Path to a log file for capturing the entire session for replay.
 
 ---

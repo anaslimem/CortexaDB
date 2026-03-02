@@ -146,6 +146,7 @@ impl PyHit {
 /// Attributes:
 ///     id (int): Memory identifier.
 ///     namespace (str): Namespace this memory belongs to.
+///     embedding (list[float] | None): Stored embedding vector.
 ///     metadata (dict[str, str]): Key-value metadata.
 ///     created_at (int): Unix timestamp when the memory was created.
 ///     importance (float): Importance score.
@@ -163,6 +164,8 @@ struct PyMemory {
     importance: f32,
     #[pyo3(get)]
     content: Vec<u8>,
+    #[pyo3(get)]
+    embedding: Option<Vec<f32>>,
     metadata_inner: HashMap<String, String>,
 }
 
@@ -259,7 +262,7 @@ impl PyCortexaDB {
     ///         mismatches an existing database.
     #[staticmethod]
     #[pyo3(
-        text_signature = "(path, *, dimension, sync='strict', index_mode='exact', max_entries=None)"
+        text_signature = "(path, *, dimension, sync='strict', index_mode='exact', max_entries=None, max_bytes=None)"
     )]
     fn open(
         path: &str,
@@ -267,6 +270,7 @@ impl PyCortexaDB {
         sync: String,
         index_mode: Bound<'_, PyAny>,
         max_entries: Option<usize>,
+        max_bytes: Option<u64>,
     ) -> PyResult<Self> {
         if dimension == 0 {
             return Err(CortexaDBConfigError::new_err("dimension must be > 0"));
@@ -294,7 +298,7 @@ impl PyCortexaDB {
             // few entries. Disabling checkpoint avoids WAL truncation on Drop;
             // the user can still call checkpoint() explicitly when safe.
             checkpoint_policy: CheckpointPolicy::Disabled,
-            capacity_policy: CapacityPolicy::new(max_entries, None),
+            capacity_policy: CapacityPolicy::new(max_entries, max_bytes),
             index_mode,
         };
 
@@ -457,6 +461,7 @@ impl PyCortexaDB {
             created_at: entry.created_at,
             importance: entry.importance,
             content: entry.content.clone(),
+            embedding: entry.embedding.clone(),
             metadata_inner: entry.metadata.clone(),
         })
     }

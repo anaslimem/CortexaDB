@@ -153,7 +153,8 @@ class CortexaDB:
         embedder: t.Optional[Embedder] = None,
         sync: str = "strict",
         max_entries: t.Optional[int] = None,
-        index_mode: str = "exact",
+        max_bytes: t.Optional[int] = None,
+        index_mode: t.Union[str, t.Dict[str, t.Any]] = "exact",
         _recorder: t.Optional[ReplayWriter] = None,
     ):
         self._embedder = embedder
@@ -164,6 +165,7 @@ class CortexaDB:
                 dimension=dimension,
                 sync=sync,
                 max_entries=max_entries,
+                max_bytes=max_bytes,
                 index_mode=index_mode,
             )
         except Exception as e:
@@ -180,7 +182,8 @@ class CortexaDB:
         embedder: t.Optional[Embedder] = None,
         sync: str = "strict",
         max_entries: t.Optional[int] = None,
-        index_mode: str = "exact",
+        max_bytes: t.Optional[int] = None,
+        index_mode: t.Union[str, t.Dict[str, t.Any]] = "exact",
         record: t.Optional[str] = None,
     ) -> "CortexaDB":
         """
@@ -196,6 +199,8 @@ class CortexaDB:
                        inferred from ``embedder.dimension`` automatically.
             sync:      Write durability policy: ``"strict"`` (default),
                        ``"async"``, or ``"batch"``.
+            max_entries: Optional entry-count limit for automatic eviction.
+            max_bytes: Optional byte-size limit for automatic eviction.
             index_mode: Search index mode: ``"exact"`` (default) or ``"hnsw"``.
                          Can also be a dict with HNSW parameters.
             record:    Optional path to a replay log file. When set, every write
@@ -225,6 +230,7 @@ class CortexaDB:
             embedder=embedder,
             sync=sync,
             max_entries=max_entries,
+            max_bytes=max_bytes,
             index_mode=index_mode,
             _recorder=recorder,
         )
@@ -309,6 +315,11 @@ class CortexaDB:
             elif op == "checkpoint":
                 try:
                     db._inner.checkpoint()
+                except Exception:
+                    pass  # non-fatal on fresh DB
+            elif op == "compact":
+                try:
+                    db._inner.compact()
                 except Exception:
                     pass  # non-fatal on fresh DB
 
@@ -680,20 +691,23 @@ class CortexaDB:
             while found < target and checked < target * 4:
                 try:
                     mem = self._inner.get(candidate)
-                    # Retrieve the stored embedding via ask with dimension probe
-                    hits = self._inner.ask_in_namespace(
-                        namespace=mem.namespace,
-                        embedding=mem.embedding
-                        if hasattr(mem, "embedding")
-                        else [0.0] * dim,
-                        top_k=1,
-                    )
+                    embedding = getattr(mem, "embedding", None)
+                    if not embedding:
+                        candidate += 1
+                        checked += 1
+                        continue
+                    content = getattr(mem, "content", b"")
+                    if isinstance(content, bytes):
+                        text = content.decode("utf-8", errors="replace")
+                    else:
+                        text = str(content)
+                    metadata = dict(mem.metadata) if hasattr(mem, "metadata") else None
                     writer.record_remember(
                         id=mem.id,
-                        text=mem.content if hasattr(mem, "content") else "",
-                        embedding=mem.embedding if hasattr(mem, "embedding") else [],
+                        text=text,
+                        embedding=embedding,
                         namespace=mem.namespace,
-                        metadata=None,
+                        metadata=metadata,
                     )
                     found += 1
                 except Exception:
