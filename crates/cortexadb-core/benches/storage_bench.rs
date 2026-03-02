@@ -1,7 +1,7 @@
 use cortexadb_core::engine::{CapacityPolicy, SyncPolicy};
 use cortexadb_core::store::CheckpointPolicy;
 use cortexadb_core::{CortexaDB, CortexaDBConfig, IndexMode};
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::tempdir;
 
 fn bench_ingestion(c: &mut Criterion) {

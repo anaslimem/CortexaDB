@@ -20,16 +20,11 @@ pub enum HnswError {
 
 pub type Result<T> = std::result::Result<T, HnswError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MetricKind {
+    #[default]
     Cos,
     L2,
-}
-
-impl Default for MetricKind {
-    fn default() -> Self {
-        Self::Cos
-    }
 }
 
 impl MetricKind {
@@ -55,16 +50,11 @@ impl Default for HnswConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum IndexMode {
+    #[default]
     Exact,
     Hnsw(HnswConfig),
-}
-
-impl Default for IndexMode {
-    fn default() -> Self {
-        Self::Exact
-    }
 }
 
 #[derive(Clone)]
@@ -147,7 +137,7 @@ impl HnswBackend {
             let distance = results.distances.get(i);
             if let (Some(key), Some(distance)) = (key, distance) {
                 let score = 1.0 - distance;
-                output.push((MemoryId(*key as u64), score));
+                output.push((MemoryId(*key), score));
             }
         }
 

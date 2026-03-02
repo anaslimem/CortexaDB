@@ -75,10 +75,7 @@ impl CortexaDBBuilder {
             config: CortexaDBConfig {
                 vector_dimension,
                 sync_policy: SyncPolicy::Strict,
-                checkpoint_policy: CheckpointPolicy::Periodic {
-                    every_ops: 1000,
-                    every_ms: 30_000,
-                },
+                checkpoint_policy: CheckpointPolicy::Periodic { every_ops: 1000, every_ms: 30_000 },
                 capacity_policy: CapacityPolicy::new(None, None),
                 index_mode: IndexMode::Exact,
             },
@@ -171,12 +168,12 @@ impl QueryEmbedder for StaticEmbedder {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Create a default DB with vector dimension 3
 /// let db = CortexaDB::open("my_agent.db", 3)?;
-/// 
+///
 /// // Or use the builder for advanced config
 /// let db_advanced = CortexaDB::builder("advanced.db", 1536)
 ///     .with_sync_policy(cortexadb_core::engine::SyncPolicy::Async { interval_ms: 1000 })
 ///     .build()?;
-/// 
+///
 /// let id = db.remember(vec![1.0, 0.0, 0.0], None)?;
 /// let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None)?;
 /// # Ok(())
@@ -636,7 +633,10 @@ mod tests {
         db.delete_memory(id).unwrap();
 
         let hits = db.ask(vec![1.0, 0.0, 0.0], 10, None).unwrap();
-        assert!(hits.iter().all(|h| h.id != id), "deleted memory must not appear in search results");
+        assert!(
+            hits.iter().all(|h| h.id != id),
+            "deleted memory must not appear in search results"
+        );
     }
 
     #[test]
@@ -747,8 +747,16 @@ mod tests {
         // Ask for top-2 in ns_sparse — both must be returned.
         let hits = db.ask_in_namespace("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
         let hit_ids: Vec<u64> = hits.iter().map(|h| h.id).collect();
-        assert!(hit_ids.contains(&id_a), "id_a must appear in ns_sparse results; got {:?}", hit_ids);
-        assert!(hit_ids.contains(&id_b), "id_b must appear in ns_sparse results; got {:?}", hit_ids);
+        assert!(
+            hit_ids.contains(&id_a),
+            "id_a must appear in ns_sparse results; got {:?}",
+            hit_ids
+        );
+        assert!(
+            hit_ids.contains(&id_b),
+            "id_b must appear in ns_sparse results; got {:?}",
+            hit_ids
+        );
     }
 
     // ----- Intent anchors end-to-end -----

@@ -88,11 +88,7 @@ fn chunk_fixed(text: &str, chunk_size: usize, overlap: usize) -> Vec<ChunkResult
 
         let chunk_text = chunk_words.join(" ");
         if !chunk_text.is_empty() {
-            chunks.push(ChunkResult {
-                text: chunk_text,
-                index: chunks.len(),
-                metadata: None,
-            });
+            chunks.push(ChunkResult { text: chunk_text, index: chunks.len(), metadata: None });
         }
 
         // No unseen words remain, so a trailing overlap-only chunk would be redundant.
@@ -157,7 +153,7 @@ fn chunk_recursive(text: &str, chunk_size: usize, overlap: usize) -> Vec<ChunkRe
         }
 
         let mut split_done = false;
-        for (_i, sep) in separators.iter().enumerate() {
+        for sep in separators.iter() {
             if *sep == " " {
                 continue;
             }
@@ -306,11 +302,11 @@ fn chunk_markdown(text: &str, preserve_headers: bool, overlap: usize) -> Vec<Chu
             }
         } else if list_regex.is_match(line) {
             if !last_header.is_empty() && !current_section.is_empty() {
-                current_section.push_str("\n");
+                current_section.push('\n');
             }
             current_section.push_str(trimmed);
         } else if !trimmed.starts_with("```") {
-            current_section.push_str(" ");
+            current_section.push(' ');
             current_section.push_str(trimmed);
         }
 
@@ -430,7 +426,7 @@ fn apply_overlap(chunks: Vec<ChunkResult>, overlap: usize) -> Vec<ChunkResult> {
                 combined.push_str(word);
             }
             if !combined.is_empty() {
-                combined.push_str(" ");
+                combined.push(' ');
             }
             combined.push_str(&chunk.text);
 
@@ -523,8 +519,7 @@ mod tests {
         // All words from the original text should appear in some chunk.
         let text = "alpha beta gamma delta epsilon zeta";
         let chunks = chunk_fixed(text, 12, 0);
-        let combined: String =
-            chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
+        let combined: String = chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
         for word in text.split_whitespace() {
             assert!(combined.contains(word), "word '{}' missing from chunked output", word);
         }
@@ -547,8 +542,7 @@ mod tests {
         // A word too long to fit in chunk_size must not be split.
         let text = "x superlongwordthatexceedschunksize y";
         let chunks = chunk_fixed(text, 5, 0);
-        let combined: String =
-            chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
+        let combined: String = chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
         assert!(combined.contains("superlongwordthatexceedschunksize"));
     }
 
@@ -719,7 +713,11 @@ mod tests {
             let chunks = chunk_markdown(text, preserve, 0);
             assert!(!chunks.is_empty());
             let combined = chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
-            assert!(combined.contains("Body content"), "body text must be present (preserve={})", preserve);
+            assert!(
+                combined.contains("Body content"),
+                "body text must be present (preserve={})",
+                preserve
+            );
         }
     }
 
@@ -859,8 +857,7 @@ mod tests {
 
     #[test]
     fn test_apply_overlap_single_chunk_unchanged() {
-        let input =
-            vec![ChunkResult { text: "only one".to_string(), index: 0, metadata: None }];
+        let input = vec![ChunkResult { text: "only one".to_string(), index: 0, metadata: None }];
         let out = apply_overlap(input, 5);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].text, "only one");
@@ -877,7 +874,7 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].text, "one");
         // "one" is the last (and only) word from chunk[0], so it is prepended to chunk[1]
-        assert!(out[1].text.starts_with("one "), "got '{}'" , out[1].text);
+        assert!(out[1].text.starts_with("one "), "got '{}'", out[1].text);
         assert!(out[1].text.contains("two three"));
     }
 
@@ -914,7 +911,7 @@ mod tests {
         let text = "# Title\nContent.\n\n## Subtitle\nMore content.";
         let strategy = ChunkingStrategy::Markdown { preserve_headers: true, overlap: 0 };
         let chunks = chunk(text, strategy);
-        assert!(chunks.len() >= 1);
+        assert!(!chunks.is_empty());
         let combined = chunks.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
         assert!(combined.contains("Title"), "header text must be in output");
         assert!(combined.contains("Content"));
@@ -928,7 +925,15 @@ mod tests {
         let strategy = ChunkingStrategy::Json { overlap: 0 };
         let chunks = chunk(text, strategy);
         assert_eq!(chunks.len(), 2);
-        assert!(chunks.iter().any(|c| c.metadata.as_ref().map(|m| m.key.as_ref().unwrap() == "data.id" && m.value.as_ref().unwrap() == "123").unwrap_or(false)));
-        assert!(chunks.iter().any(|c| c.metadata.as_ref().map(|m| m.key.as_ref().unwrap() == "data.name" && m.value.as_ref().unwrap() == "Test").unwrap_or(false)));
+        assert!(chunks.iter().any(|c| c
+            .metadata
+            .as_ref()
+            .map(|m| m.key.as_ref().unwrap() == "data.id" && m.value.as_ref().unwrap() == "123")
+            .unwrap_or(false)));
+        assert!(chunks.iter().any(|c| c
+            .metadata
+            .as_ref()
+            .map(|m| m.key.as_ref().unwrap() == "data.name" && m.value.as_ref().unwrap() == "Test")
+            .unwrap_or(false)));
     }
 }

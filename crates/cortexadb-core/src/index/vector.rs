@@ -24,22 +24,15 @@ pub type Result<T> = std::result::Result<T, VectorError>;
 
 const DEFAULT_NAMESPACE: &str = "__global__";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VectorBackendMode {
+    #[default]
     Exact,
     /// HNSW-like mode:
     /// 1) fetch larger approximate candidate pool (`ann_k`)
     /// 2) exact cosine rerank on those candidates
     /// 3) return top-k final results
-    Ann {
-        ann_search_multiplier: usize,
-    },
-}
-
-impl Default for VectorBackendMode {
-    fn default() -> Self {
-        Self::Exact
-    }
+    Ann { ann_search_multiplier: usize },
 }
 
 pub trait VectorSearchBackend: Send + Sync + std::fmt::Debug {
@@ -74,7 +67,7 @@ impl AnnCandidateProvider for PrefixAnnCandidateProvider {
         namespace: Option<&str>,
         partitions: &HashMap<String, NamespacePartition>,
     ) -> Result<Vec<MemoryId>> {
-        let approx_dims = query.len().min(8).max(1);
+        let approx_dims = query.len().clamp(1, 8);
         let query_prefix = &query[..approx_dims];
         let query_mag = magnitude(query_prefix)?;
         let mut approx_scored = Vec::new();
@@ -273,8 +266,7 @@ impl VectorIndex {
     /// Save HNSW index to disk (no-op if HNSW not enabled)
     pub fn save_hnsw(&self, path: &std::path::Path) -> std::io::Result<()> {
         if let Some(ref hnsw) = self.hnsw_backend {
-            hnsw.save_to_file(path)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            hnsw.save_to_file(path).map_err(|e| std::io::Error::other(e.to_string()))?;
         }
         Ok(())
     }
@@ -291,7 +283,7 @@ impl VectorIndex {
 
         match HnswBackend::load_from_file(path, dimension, config) {
             Ok(backend) => Ok(Some(backend)),
-            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+            Err(e) => Err(std::io::Error::other(e.to_string())),
         }
     }
 

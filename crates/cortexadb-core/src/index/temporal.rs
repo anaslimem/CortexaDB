@@ -83,7 +83,11 @@ impl TemporalIndex {
             }
         }
 
-        if earliest == u64::MAX { None } else { Some(earliest) }
+        if earliest == u64::MAX {
+            None
+        } else {
+            Some(earliest)
+        }
     }
 
     /// Get latest timestamp with memories

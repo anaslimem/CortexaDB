@@ -5,4 +5,4 @@
 # allow-clippy-pedantic-in-test = true
 
 # Specific lints
-warn-on-all-items-with-docs = true
+# Keep this file limited to options supported by the current Clippy version.

@@ -11,14 +11,14 @@ use crate::core::command::Command;
 use crate::core::memory_entry::{MemoryEntry, MemoryId};
 use crate::core::state_machine::StateMachine;
 use crate::engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy};
-use crate::index::IndexLayer;
 use crate::index::vector::VectorBackendMode;
+use crate::index::IndexLayer;
 use crate::query::{
     IntentAnchors, QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan,
     QueryPlanner, StageTrace,
 };
 use crate::storage::checkpoint::{
-    LoadedCheckpoint, checkpoint_path_from_wal, load_checkpoint, save_checkpoint,
+    checkpoint_path_from_wal, load_checkpoint, save_checkpoint, LoadedCheckpoint,
 };
 use crate::storage::compaction::CompactionReport;
 use crate::storage::wal::{CommandId, WriteAheadLog};
