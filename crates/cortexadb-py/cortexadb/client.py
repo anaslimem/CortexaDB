@@ -1,4 +1,5 @@
 import typing as t
+import copy
 
 from ._cortexadb import (
     CortexaDBError,
@@ -159,6 +160,8 @@ class CortexaDB:
     ):
         self._embedder = embedder
         self._recorder = _recorder
+        self._last_replay_report: t.Optional[t.Dict[str, t.Any]] = None
+        self._last_export_replay_report: t.Optional[t.Dict[str, t.Any]] = None
         try:
             try:
                 self._inner = _cortexadb.CortexaDB.open(
@@ -260,6 +263,7 @@ class CortexaDB:
         db_path: str,
         *,
         sync: str = "strict",
+        strict: bool = False,
     ) -> "CortexaDB":
         """
         Replay a log file into a fresh database, returning the populated instance.
@@ -271,6 +275,8 @@ class CortexaDB:
             log_path:  Path to the NDJSON replay log file.
             db_path:   Directory path for the new database.
             sync:      Sync policy for the replayed database.
+            strict:    If True, fail fast on malformed/failed operations.
+                       If False (default), skip invalid operations and continue.
 
         Returns:
             A :class:`CortexaDB` instance with all recorded operations applied.
@@ -296,51 +302,187 @@ class CortexaDB:
 
         # old_id → new_id mapping (connect ops use original IDs)
         id_map: t.Dict[int, int] = {}
+        report: t.Dict[str, t.Any] = {
+            "strict": strict,
+            "total_ops": 0,
+            "applied": 0,
+            "skipped": 0,
+            "failed": 0,
+            "op_counts": {
+                "remember": 0,
+                "connect": 0,
+                "delete": 0,
+                "checkpoint": 0,
+                "compact": 0,
+                "unknown": 0,
+            },
+            "failures": [],
+        }
 
-        for record in reader.operations():
+        def add_failure(
+            *,
+            index: int,
+            op: str,
+            reason: str,
+            record: t.Dict[str, t.Any],
+            counts_as_failed: bool = False,
+        ) -> None:
+            if counts_as_failed:
+                report["failed"] += 1
+            else:
+                report["skipped"] += 1
+            if len(report["failures"]) < 50:
+                report["failures"].append(
+                    {
+                        "index": index,
+                        "op": op,
+                        "reason": reason,
+                        "record": record,
+                    }
+                )
+
+        def validate_record(op: str, record: t.Dict[str, t.Any]) -> t.Optional[str]:
+            if op == "remember":
+                if "embedding" not in record:
+                    return "remember record missing 'embedding'"
+                if not isinstance(record["embedding"], list):
+                    return "remember record 'embedding' must be a list"
+            elif op == "connect":
+                for field in ("from_id", "to_id", "relation"):
+                    if field not in record:
+                        return f"connect record missing '{field}'"
+            elif op == "delete":
+                if "id" not in record:
+                    return "delete record missing 'id'"
+            elif op in ("checkpoint", "compact"):
+                return None
+            else:
+                return f"unknown replay op '{op}'"
+            return None
+
+        for index, record in enumerate(reader.operations(), start=1):
+            report["total_ops"] += 1
             op = record.get("op")
+            if not isinstance(op, str):
+                if strict:
+                    raise CortexaDBConfigError(
+                        f"Replay op #{index} has invalid/missing 'op': {record!r}"
+                    )
+                report["op_counts"]["unknown"] += 1
+                add_failure(index=index, op="unknown", reason="missing/invalid 'op'", record=record)
+                continue
+
+            if op in report["op_counts"]:
+                report["op_counts"][op] += 1
+            else:
+                report["op_counts"]["unknown"] += 1
+
+            validation_error = validate_record(op, record)
+            if validation_error is not None:
+                if strict:
+                    raise CortexaDBConfigError(
+                        f"Replay op #{index} ({op}) invalid: {validation_error}"
+                    )
+                add_failure(index=index, op=op, reason=validation_error, record=record)
+                continue
 
             if op == "remember":
-                embedding: t.List[float] = record["embedding"]
-                new_id = db._inner.remember_embedding(
-                    embedding=embedding,
-                    metadata=record.get("metadata"),
-                    namespace=record.get("namespace", "default"),
-                    content=record.get("text", ""),
-                )
-                old_id = record.get("id")
-                if old_id is not None:
-                    id_map[old_id] = new_id
+                try:
+                    embedding: t.List[float] = record["embedding"]
+                    new_id = db._inner.remember_embedding(
+                        embedding=embedding,
+                        metadata=record.get("metadata"),
+                        namespace=record.get("namespace", "default"),
+                        content=record.get("text", ""),
+                    )
+                    old_id = record.get("id")
+                    if old_id is not None:
+                        id_map[old_id] = new_id
+                    report["applied"] += 1
+                except Exception as e:
+                    if strict:
+                        raise CortexaDBError(
+                            f"Replay op #{index} (remember) failed: {e}"
+                        )
+                    add_failure(
+                        index=index,
+                        op=op,
+                        reason=f"remember failed: {e}",
+                        record=record,
+                        counts_as_failed=True,
+                    )
 
             elif op == "connect":
-                old_from = record["from_id"]
-                old_to = record["to_id"]
-                new_from = id_map.get(old_from, old_from)
-                new_to = id_map.get(old_to, old_to)
                 try:
+                    old_from = record["from_id"]
+                    old_to = record["to_id"]
+                    new_from = id_map.get(old_from, old_from)
+                    new_to = id_map.get(old_to, old_to)
                     db._inner.connect(new_from, new_to, record["relation"])
+                    report["applied"] += 1
                 except Exception:
-                    pass  # non-fatal: IDs may not exist if log is partial
+                    if strict:
+                        raise CortexaDBError(
+                            f"Replay op #{index} (connect) failed for ids "
+                            f"{record.get('from_id')}->{record.get('to_id')}"
+                        )
+                    add_failure(
+                        index=index,
+                        op=op,
+                        reason="connect failed (possibly unresolved IDs)",
+                        record=record,
+                        counts_as_failed=True,
+                    )
 
             elif op == "delete":
-                old_id = record.get("id")
-                new_id = id_map.get(old_id, old_id)
                 try:
+                    old_id = record.get("id")
+                    new_id = id_map.get(old_id, old_id)
                     db._inner.delete_memory(new_id)
+                    report["applied"] += 1
                 except Exception:
-                    pass
+                    if strict:
+                        raise CortexaDBError(
+                            f"Replay op #{index} (delete) failed for id {record.get('id')}"
+                        )
+                    add_failure(
+                        index=index,
+                        op=op,
+                        reason="delete failed (possibly missing ID)",
+                        record=record,
+                        counts_as_failed=True,
+                    )
 
             elif op == "checkpoint":
                 try:
                     db._inner.checkpoint()
+                    report["applied"] += 1
                 except Exception:
-                    pass  # non-fatal on fresh DB
+                    if strict:
+                        raise CortexaDBError(f"Replay op #{index} (checkpoint) failed")
+                    add_failure(
+                        index=index,
+                        op=op,
+                        reason="checkpoint failed",
+                        record=record,
+                        counts_as_failed=True,
+                    )
             elif op == "compact":
                 try:
                     db._inner.compact()
+                    report["applied"] += 1
                 except Exception:
-                    pass  # non-fatal on fresh DB
+                    if strict:
+                        raise CortexaDBError(f"Replay op #{index} (compact) failed")
+                    add_failure(
+                        index=index,
+                        op=op,
+                        reason="compact failed",
+                        record=record,
+                        counts_as_failed=True,
+                    )
 
+        db._last_replay_report = report
         return db
 
     # ------------------------------------------------------------------
@@ -716,6 +858,14 @@ class CortexaDB:
         if os.path.exists(log_path):
             os.remove(log_path)
 
+        report: t.Dict[str, t.Any] = {
+            "checked": 0,
+            "exported": 0,
+            "skipped_missing_id": 0,
+            "skipped_missing_embedding": 0,
+            "errors": 0,
+        }
+
         with ReplayWriter(log_path, dimension=dim, sync="strict") as writer:
             # Iterate memories by scanning IDs 1..entries range.
             # We use a generous upper bound and skip gaps.
@@ -729,6 +879,7 @@ class CortexaDB:
                     mem = self._inner.get(candidate)
                     embedding = getattr(mem, "embedding", None)
                     if not embedding:
+                        report["skipped_missing_embedding"] += 1
                         candidate += 1
                         checked += 1
                         continue
@@ -746,10 +897,15 @@ class CortexaDB:
                         metadata=metadata,
                     )
                     found += 1
+                    report["exported"] += 1
+                except CortexaDBNotFoundError:
+                    report["skipped_missing_id"] += 1
                 except Exception:
-                    pass
+                    report["errors"] += 1
                 candidate += 1
                 checked += 1
+            report["checked"] = checked
+        self._last_export_replay_report = report
 
     def get(self, mid: int) -> Memory:
         """Retrieve a full memory by ID."""
@@ -780,6 +936,20 @@ class CortexaDB:
     def stats(self) -> Stats:
         """Get database statistics."""
         return self._inner.stats()
+
+    @property
+    def last_replay_report(self) -> t.Optional[t.Dict[str, t.Any]]:
+        """Diagnostic report from the most recent replay() call."""
+        if self._last_replay_report is None:
+            return None
+        return copy.deepcopy(self._last_replay_report)
+
+    @property
+    def last_export_replay_report(self) -> t.Optional[t.Dict[str, t.Any]]:
+        """Diagnostic report from the most recent export_replay() call."""
+        if self._last_export_replay_report is None:
+            return None
+        return copy.deepcopy(self._last_export_replay_report)
 
     def __repr__(self) -> str:
         s = self._inner.stats()

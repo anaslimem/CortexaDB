@@ -3,6 +3,7 @@
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
 [![Version](https://img.shields.io/badge/Version-0.1.5-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/cortexadb)
 
 **CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
 
@@ -214,8 +215,10 @@ db.load("document.pdf", strategy="recursive")
 | `.delete_memory(id)` | Permanently removes a memory and updates all indexes. |
 | `.compact()` | Reclaims space by removing deleted entries from disk. |
 | `.checkpoint()` | Truncates the WAL and snapshots the current state for fast startup. |
-| `.export_replay(path)` | Exports current state to a replay log (NDJSON). |
-| `CortexaDB.replay(log_path, db_path)` | Rebuilds a database from a replay log. |
+| `.export_replay(path)` | Exports current state as a snapshot replay log (NDJSON). |
+| `CortexaDB.replay(log_path, db_path, ...)` | Rebuilds a database from a replay log. Supports `strict` mode. |
+| `.last_replay_report` | Diagnostic report dict from the most recent `replay()` call. |
+| `.last_export_replay_report` | Diagnostic report dict from the most recent `export_replay()` call. |
 
 ### Configuration Options
 When calling `CortexaDB.open()`, you can tune the behavior:
@@ -224,6 +227,36 @@ When calling `CortexaDB.open()`, you can tune the behavior:
 - `max_bytes`: Limits total stored bytes (triggers auto-eviction).
 - `index_mode`: `"exact"`, `"hnsw"`, or an HNSW config dict.
 - `record`: Path to a log file for capturing the entire session for replay.
+
+### Replay Notes
+
+`CortexaDB.replay()` accepts a `strict` flag to control error handling:
+
+| Mode | Behavior |
+|------|----------|
+| `strict=False` (default) | Skips malformed/failed operations and continues |
+| `strict=True` | Raises `CortexaDBError` immediately on the first bad operation |
+
+After a `replay()` or `export_replay()` call, a diagnostic report is available:
+
+```python
+db = CortexaDB.replay("session.log", "restored.mem", strict=False)
+report = db.last_replay_report
+print(report["total_ops"])   # total operations in the log
+print(report["applied"])     # successfully applied
+print(report["skipped"])     # skipped (malformed but non-fatal)
+print(report["failed"])      # failed (execution error, non-fatal)
+print(report["op_counts"])   # per-type counts: remember, connect, delete, ...
+print(report["failures"])    # list of up to 50 failure details
+
+# After export_replay:
+db.export_replay("snapshot.log")
+export_report = db.last_export_replay_report
+print(export_report["exported"])                  # memories written
+print(export_report["skipped_missing_embedding"]) # entries without vectors
+print(export_report["skipped_missing_id"])        # gaps in ID space
+print(export_report["errors"])                    # unexpected errors
+```
 
 ---
 

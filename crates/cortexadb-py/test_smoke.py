@@ -370,6 +370,85 @@ def test_replay_reader_header():
     # Cleanup
     os.remove(LOG_PATH)
 
+
+def test_replay_non_strict_unknown_op_reports_skip(cleanup_replay):
+    with open(LOG_PATH, "w", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    "cortexadb_replay": "1.0",
+                    "dimension": 3,
+                    "sync": "strict",
+                    "recorded_at": "2026-03-01T00:00:00Z",
+                }
+            )
+            + "\n"
+        )
+        f.write(json.dumps({"op": "unknown_op", "foo": "bar"}) + "\n")
+
+    db = CortexaDB.replay(LOG_PATH, REPLAY_DB, strict=False)
+    assert len(db) == 0
+    report = db.last_replay_report
+    assert report is not None
+    assert report["skipped"] == 1
+    assert report["failed"] == 0
+    assert report["op_counts"]["unknown"] == 1
+
+
+def test_replay_strict_unknown_op_raises(cleanup_replay):
+    with open(LOG_PATH, "w", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    "cortexadb_replay": "1.0",
+                    "dimension": 3,
+                    "sync": "strict",
+                    "recorded_at": "2026-03-01T00:00:00Z",
+                }
+            )
+            + "\n"
+        )
+        f.write(json.dumps({"op": "unknown_op", "foo": "bar"}) + "\n")
+
+    with pytest.raises(CortexaDBError, match="unknown replay op"):
+        CortexaDB.replay(LOG_PATH, REPLAY_DB, strict=True)
+
+
+def test_replay_non_strict_malformed_remember_skips(cleanup_replay):
+    with open(LOG_PATH, "w", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    "cortexadb_replay": "1.0",
+                    "dimension": 3,
+                    "sync": "strict",
+                    "recorded_at": "2026-03-01T00:00:00Z",
+                }
+            )
+            + "\n"
+        )
+        # Missing required `embedding`.
+        f.write(json.dumps({"op": "remember", "text": "bad remember"}) + "\n")
+
+    db = CortexaDB.replay(LOG_PATH, REPLAY_DB, strict=False)
+    report = db.last_replay_report
+    assert report is not None
+    assert report["op_counts"]["remember"] == 1
+    assert report["skipped"] == 1
+    assert len(db) == 0
+
+
+def test_export_replay_sets_report(cleanup_replay):
+    db = CortexaDB.open(DB_PATH, dimension=3)
+    db.remember("One", embedding=[1.0, 0.0, 0.0])
+    db.remember("Two", embedding=[0.0, 1.0, 0.0])
+
+    db.export_replay(LOG_PATH)
+    report = db.last_export_replay_report
+    assert report is not None
+    assert (report["exported"] + report["skipped_missing_embedding"]) >= 2
+    assert report["checked"] >= report["exported"]
+
 def test_hybrid_use_graph():
     import cortexadb
     db = cortexadb.CortexaDB.open(DB_PATH, dimension=2, sync="strict")
