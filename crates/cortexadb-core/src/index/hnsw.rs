@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use thiserror::Error;
 
 use crate::core::memory_entry::MemoryId;
@@ -59,7 +59,7 @@ pub enum IndexMode {
 
 #[derive(Clone)]
 pub struct HnswBackend {
-    index: Arc<Mutex<usearch::Index>>,
+    index: Arc<RwLock<usearch::Index>>,
     dimension: usize,
     config: HnswConfig,
 }
@@ -90,7 +90,7 @@ impl HnswBackend {
 
         let _ = index.reserve(10000);
 
-        Ok(Self { index: Arc::new(Mutex::new(index)), dimension, config })
+        Ok(Self { index: Arc::new(RwLock::new(index)), dimension, config })
     }
 
     pub fn add(&self, id: MemoryId, vector: &[f32]) -> Result<()> {
@@ -101,7 +101,7 @@ impl HnswBackend {
             });
         }
 
-        let index = self.index.lock().map_err(|_| HnswError::LockError)?;
+        let index = self.index.write().map_err(|_| HnswError::LockError)?;
         index
             .add(id.0 as usearch::Key, vector)
             .map_err(|e| HnswError::UsearchError(e.to_string()))?;
@@ -122,7 +122,7 @@ impl HnswBackend {
             });
         }
 
-        let index = self.index.lock().map_err(|_| HnswError::LockError)?;
+        let index = self.index.read().map_err(|_| HnswError::LockError)?;
 
         if index.capacity() == 0 {
             return Err(HnswError::NoVectors);
@@ -145,13 +145,13 @@ impl HnswBackend {
     }
 
     pub fn remove(&self, id: MemoryId) -> Result<()> {
-        let index = self.index.lock().map_err(|_| HnswError::LockError)?;
+        let index = self.index.write().map_err(|_| HnswError::LockError)?;
         index.remove(id.0 as usearch::Key).map_err(|e| HnswError::UsearchError(e.to_string()))?;
         Ok(())
     }
 
     pub fn len(&self) -> usize {
-        self.index.lock().map(|i| i.size()).unwrap_or(0)
+        self.index.read().map(|i| i.size()).unwrap_or(0)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -159,7 +159,7 @@ impl HnswBackend {
     }
 
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
-        let index = self.index.lock().map_err(|_| HnswError::LockError)?;
+        let index = self.index.read().map_err(|_| HnswError::LockError)?;
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -194,7 +194,7 @@ impl HnswBackend {
         let path_str = path.to_string_lossy().to_string();
         index.load(&path_str).map_err(|e| HnswError::UsearchError(e.to_string()))?;
 
-        Ok(Self { index: Arc::new(Mutex::new(index)), dimension, config })
+        Ok(Self { index: Arc::new(RwLock::new(index)), dimension, config })
     }
 
     pub fn dimension(&self) -> usize {
