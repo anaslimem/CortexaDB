@@ -872,19 +872,37 @@ impl CortexaDBStore {
         };
         let mut indexes = indexes;
 
-        if has_loaded_hnsw {
-            return Ok(indexes);
-        }
+        let existing_ids: HashSet<MemoryId> = indexes.vector.indexed_ids().into_iter().collect();
 
+        // Add or update missing embeddings from the state machine into the loaded HNSW
         for entry in state_machine.all_memories() {
             if let Some(embedding) = entry.embedding.clone() {
-                indexes.vector_index_mut().index_in_namespace(
-                    &entry.namespace,
-                    entry.id,
-                    embedding,
-                )?;
+                if !existing_ids.contains(&entry.id) {
+                    indexes.vector_index_mut().index_in_namespace(
+                        &entry.namespace,
+                        entry.id,
+                        embedding,
+                    )?;
+                }
             }
         }
+
+        // Remove IDs from HNSW that are no longer in the state machine (e.g. they were deleted in the replayed WAL)
+        if has_loaded_hnsw {
+            let state_ids: HashSet<MemoryId> = state_machine
+                .all_memories()
+                .into_iter()
+                .filter(|e| e.embedding.is_some())
+                .map(|e| e.id)
+                .collect();
+
+            for existing_id in existing_ids {
+                if !state_ids.contains(&existing_id) {
+                    let _ = indexes.vector_index_mut().remove(existing_id);
+                }
+            }
+        }
+
         Ok(indexes)
     }
 
