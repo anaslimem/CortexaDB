@@ -281,3 +281,62 @@ fn test_capacity_eviction_keeps_max_entries() {
     // After inserting 3 entries with max_entries=2, one should have been evicted.
     assert_eq!(db.stats().entries, 2, "max_entries=2 must evict oldest entry");
 }
+
+// ---------------------------------------------------------------------------
+// HNSW Recovery sync tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_hnsw_recovery_sync() {
+    use cortexadb_core::engine::SyncPolicy;
+    use cortexadb_core::index::hnsw::{HnswConfig, MetricKind};
+    use cortexadb_core::index::IndexMode;
+    use cortexadb_core::store::CheckpointPolicy;
+
+    let dir = TempDir::new().unwrap();
+    let config = CortexaDBConfig {
+        vector_dimension: 3,
+        sync_policy: SyncPolicy::Strict,
+        checkpoint_policy: CheckpointPolicy::Disabled,
+        capacity_policy: cortexadb_core::engine::CapacityPolicy::new(None, None),
+        index_mode: IndexMode::Hnsw(HnswConfig {
+            m: 16,
+            ef_construction: 200,
+            ef_search: 50,
+            metric: MetricKind::Cos,
+        }),
+    };
+
+    let id_target: u64;
+    let id_deleted: u64;
+    {
+        let db = open_db_with_config(&dir, config.clone());
+        db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        id_deleted = db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+
+        // Checkpoint saves the HNSW index to disk right now (with these 2 items).
+        db.checkpoint().unwrap();
+
+        // Insert a new item AFTER the checkpoint but BEFORE the crash
+        id_target = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+
+        // Delete an item that WAS saved in the HNSW on disk, AFTER the checkpoint
+        db.delete_memory(id_deleted).unwrap();
+
+        // The process crashes/drops here. HNSW index on disk is STALE.
+    }
+
+    // Recover from the directory.
+    let db = open_db_with_config(&dir, config);
+
+    // Assert the deleted memory is truly gone
+    assert!(db.get_memory(id_deleted).is_err(), "deleted entry shouldn't be recovered");
+
+    // Assert the uncheckpointed insertion survived
+    assert!(db.get_memory(id_target).is_ok(), "uncheckpointed entry must survive");
+
+    // Perform an HNSW search to ensure the vector index was properly synced during recovery
+    let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+    assert!(!hits.is_empty());
+    assert_eq!(hits[0].id, id_target, "top hit should be the post-checkpoint entry");
+}
