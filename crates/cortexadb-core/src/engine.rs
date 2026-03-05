@@ -292,6 +292,18 @@ impl Engine {
         Ok(())
     }
 
+    /// Flush memory buffers to the OS page cache without a blocking disk sync.
+    pub fn flush_buffers(&mut self) -> Result<()> {
+        self.wal.flush_buffers()?;
+        self.segments.flush_buffers()?;
+        Ok(())
+    }
+
+    /// Extract cloned file handles for WAL and current Segment to perform background fsync.
+    pub fn get_file_handles(&self) -> Result<(std::fs::File, Option<std::fs::File>)> {
+        Ok((self.wal.get_file_handle()?, self.segments.get_file_handle()?))
+    }
+
     /// Execute a command, then enforce capacity in the same deterministic command pipeline.
     pub fn execute_command_with_capacity(
         &mut self,

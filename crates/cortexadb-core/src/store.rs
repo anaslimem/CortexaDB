@@ -426,8 +426,32 @@ impl CortexaDBStore {
 
                 if should_flush {
                     let mut write_state = writer.lock().expect("writer lock poisoned");
-                    if let Err(err) = write_state.engine.flush() {
-                        log::error!("cortexadb sync manager flush error: {err}");
+                    if let Err(err) = write_state.engine.flush_buffers() {
+                        log::error!("cortexadb sync manager flush_buffers error: {err}");
+                        continue;
+                    }
+
+                    // Extract cloned file handles to perform blocking fsync outside the lock
+                    let handles = match write_state.engine.get_file_handles() {
+                        Ok(hs) => Some(hs),
+                        Err(err) => {
+                            log::error!("cortexadb sync manager get_file_handles error: {err}");
+                            None
+                        }
+                    };
+
+                    // Drop the massive global lock so other agents can continue inserting memories!
+                    drop(write_state);
+
+                    if let Some((mut wal_file, mut seg_file)) = handles {
+                        if let Err(err) = wal_file.sync_all() {
+                            log::error!("cortexadb slow fsync error on wal: {err}");
+                        }
+                        if let Some(mut s) = seg_file.take() {
+                            if let Err(err) = s.sync_all() {
+                                log::error!("cortexadb slow fsync error on segment: {err}");
+                            }
+                        }
                     }
                 }
             }
