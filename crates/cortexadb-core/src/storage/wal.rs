@@ -128,6 +128,17 @@ impl WriteAheadLog {
         Ok(())
     }
 
+    /// Flush the memory buffer to the OS page cache without a blocking disk sync
+    pub fn flush_buffers(&mut self) -> Result<()> {
+        self.file.flush()?;
+        Ok(())
+    }
+
+    /// Get a cloned handle to the underlying file for background fsync
+    pub fn get_file_handle(&self) -> Result<File> {
+        Ok(self.file.get_ref().try_clone()?)
+    }
+
     /// Read all commands from WAL (used for recovery)
     pub fn read_all<P: AsRef<Path>>(path: P) -> Result<Vec<(CommandId, Command)>> {
         Ok(Self::read_all_tolerant(path)?.commands)

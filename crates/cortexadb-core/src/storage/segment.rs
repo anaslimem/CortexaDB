@@ -380,6 +380,24 @@ impl SegmentStorage {
         Ok(())
     }
 
+    /// Flush the memory buffer to the OS page cache without blocking on a disk sync
+    pub fn flush_buffers(&mut self) -> Result<()> {
+        if let Some(ref mut file) = self.current_file {
+            file.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Get a cloned handle to the underlying current segment file for background fsync
+    pub fn get_file_handle(&self) -> Result<Option<File>> {
+        if let Some(ref file) = self.current_file {
+            let cloned = file.get_ref().try_clone()?;
+            Ok(Some(cloned))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Get segments that need compaction (high deletion ratio)
     pub fn get_compactable_segments(&self) -> Vec<u32> {
         let mut segments_state: HashMap<u32, (usize, usize)> = HashMap::new();
