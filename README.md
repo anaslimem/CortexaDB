@@ -2,7 +2,7 @@
 
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
-[![Version](https://img.shields.io/badge/Version-0.1.6-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
+[![Version](https://img.shields.io/badge/Version-0.1.7-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads)](https://pepy.tech/projects/cortexadb)
 
 **CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
@@ -11,11 +11,12 @@ Think of it as **SQLite, but with semantic and relational intelligence for your 
 
 ---
 
-## What's New in v0.1.6
+## What's New in v0.1.7
 
-- **Benchmark Suite** - Added comprehensive benchmarking with HNSW vs Exact comparison
-- **HNSW Performance Fix** - Fixed segmentation fault issue with usearch
-- **5x Speedup** - HNSW now runs ~5x faster than exact search with 95% recall
+- **Vector Index Compaction** - `.compact()` now actively drops tombstones from memory and rebuilds the `usearch` index on-the-fly, reclaiming massive amounts of RAM after heavy deletions.
+- **Concurrent Read Scaling** - Upgraded the internal HNSW index lock from a `Mutex` to an `RwLock`, unlocking blazing-fast highly concurrent vector searches.
+- **Pipelined Disk I/O** - Decoupled slow `.fsync()` disk operations from the global write lock. Background syncs no longer block active agents from inserting new memories.
+- **HNSW Recovery Integrity** - Fixed a critical condition where vectors could go missing from the index if the database crashed mid-checkpoint.
 
 ---
 
@@ -213,7 +214,7 @@ db.load("document.pdf", strategy="recursive")
 | `.connect(id1, id2, rel)` | Creates a directed edge between two memory entries. |
 | `.namespace(name)` | Returns a scoped view of the database for a specific agent/context. |
 | `.delete_memory(id)` | Permanently removes a memory and updates all indexes. |
-| `.compact()` | Reclaims space by removing deleted entries from disk. |
+| `.compact()` | Reclaims space by removing deleted entries from disk **and rebuilds the vector index to reclaim RAM**. |
 | `.checkpoint()` | Truncates the WAL and snapshots the current state for fast startup. |
 | `.export_replay(path)` | Exports current state as a snapshot replay log (NDJSON). |
 | `CortexaDB.replay(log_path, db_path, ...)` | Rebuilds a database from a replay log. Supports `strict` mode. |
@@ -264,6 +265,46 @@ print(export_report["errors"])                    # unexpected errors
 
 <details>
 <summary><b>Click to see the Rust Architecture</b></summary>
+
+```
+┌──────────────────────────────────────────────────┐
+│              Python API (PyO3 Bindings)          │
+│   CortexaDB, Namespace, Embedder, chunk(), etc.  │
+└────────────────────────┬─────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────┐
+│               CortexaDB Facade                   │
+│        High-level API (remember, ask, etc.)      │
+└────────────────────────┬─────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────┐
+│              CortexaDBStore                      │
+│    Concurrency coordinator & durability layer    │
+│  ┌────────────────┐  ┌────────────────────────┐  │
+│  │ WriteState     │  │ ReadSnapshot           │  │
+│  │ (Mutex)        │  │ (ArcSwap, lock-free)   │  │
+│  └────────────────┘  └────────────────────────┘  │
+└───────┬──────────────────┬───────────────┬───────┘
+        │                  │               │
+┌───────▼─────┐  ┌───────▼───────┐  ┌────▼──────────-─┐
+│   Engine    │  │   Segments    │  │  Index Layer    │
+│   (WAL)     │  │   (Storage)   │  │                 │
+│             │  │               │  │  VectorIndex    │
+│  Command    │  │  MemoryEntry  │  │  HnswBackend    │
+│  recording  │  │  persistence  │  │  GraphIndex     │
+│             │  │               │  │  TemporalIndex  │
+│  Crash      │  │  CRC32        │  │                 │
+│  recovery   │  │  checksums    │  │  HybridQuery    │
+└─────────────┘  └───────────────┘  └─────────────────┘
+                         │
+              ┌──────────▼──────────┐
+              │    State Machine    │
+              │   (In-memory state) │
+              │  - Memory entries   │
+              │  - Graph edges      │
+              │  - Temporal index   │
+              └─────────────────────┘
+```
 
 ### Why Rust?
 CortexaDB is written in Rust to provide **memory safety without a garbage collector**, ensuring predictable performance (sub-100ms startup) and low resource overhead—critical for "embedded" use cases where the DB runs inside your agent's process.
