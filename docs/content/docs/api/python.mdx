@@ -1,0 +1,444 @@
+---
+title: Python API
+description: Complete Python API reference
+---
+
+Complete reference for the CortexaDB Python package.
+
+## CortexaDB
+
+The main database class.
+
+### `CortexaDB.open(path, **kwargs)`
+
+Opens or creates a database at the specified path.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `path` | `str` | Required | Database directory path |
+| `dimension` | `int?` | `None` | Vector dimension. Required if no embedder is set |
+| `embedder` | `Embedder?` | `None` | Embedding provider for auto-embedding |
+| `sync` | `str` | `"strict"` | Sync policy: `"strict"`, `"async"`, or `"batch"` |
+| `max_entries` | `int?` | `None` | Maximum number of memories before eviction |
+| `max_bytes` | `int?` | `None` | Maximum storage size in bytes before eviction |
+| `index_mode` | `str \| dict` | `"exact"` | `"exact"`, `"hnsw"`, or HNSW config dict |
+| `record` | `str?` | `None` | Path to replay log file for recording |
+
+**Returns:** `CortexaDB`
+
+**Example:**
+```python
+from cortexadb import CortexaDB
+from cortexadb.providers.openai import OpenAIEmbedder
+
+# With embedder
+db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
+
+# With manual dimension
+db = CortexaDB.open("agent.mem", dimension=128, sync="batch")
+
+# With HNSW indexing
+db = CortexaDB.open("agent.mem", dimension=128, index_mode={
+    "type": "hnsw", "m": 16, "ef_search": 50, "metric": "cos"
+})
+```
+
+---
+
+### `CortexaDB.replay(log_path, db_path, **kwargs)`
+
+Rebuilds a database from a replay log file.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `log_path` | `str` | Required | Path to the replay log file |
+| `db_path` | `str` | Required | Path for the new database |
+| `sync` | `str` | `"strict"` | Sync policy for the new database |
+| `strict` | `bool` | `False` | If `True`, raises on first error. If `False`, skips bad operations |
+
+**Returns:** `CortexaDB`
+
+**Example:**
+```python
+db = CortexaDB.replay("session.log", "restored.mem", strict=False)
+report = db.last_replay_report
+```
+
+---
+
+## Memory Operations
+
+### `.remember(text, embedding=None, metadata=None)`
+
+Stores a new memory entry. If an embedder is configured and no embedding is provided, the text is auto-embedded.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `text` | `str` | Required | Text content to store |
+| `embedding` | `list[float]?` | `None` | Pre-computed embedding vector |
+| `metadata` | `dict[str, str]?` | `None` | Key-value metadata pairs |
+
+**Returns:** `int` - The assigned memory ID
+
+**Example:**
+```python
+mid = db.remember("User prefers dark mode")
+mid = db.remember("text", metadata={"source": "onboarding"})
+mid = db.remember("text", embedding=[0.1, 0.2, ...])
+```
+
+---
+
+### `.ask(query, embedding=None, top_k=5, use_graph=False, recency_bias=False)`
+
+Performs a hybrid search across the database.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | `str` | Required | Search query text |
+| `embedding` | `list[float]?` | `None` | Pre-computed query embedding |
+| `top_k` | `int` | `5` | Number of results to return |
+| `use_graph` | `bool` | `False` | Enable graph expansion via BFS |
+| `recency_bias` | `bool` | `False` | Boost recent memories in scoring |
+
+**Returns:** `list[Hit]`
+
+**Example:**
+```python
+hits = db.ask("What does the user prefer?")
+hits = db.ask("query", top_k=10, use_graph=True, recency_bias=True)
+
+for hit in hits:
+    print(f"ID: {hit.id}, Score: {hit.score:.3f}")
+```
+
+---
+
+### `.get_memory(mid)`
+
+Retrieves a full memory entry by ID.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `mid` | `int` | Memory ID |
+
+**Returns:** `Memory`
+
+**Raises:** `CortexaDBNotFoundError` if the memory doesn't exist.
+
+**Example:**
+```python
+mem = db.get_memory(42)
+print(mem.id)          # 42
+print(mem.content)     # b"User prefers dark mode"
+print(mem.namespace)   # "default"
+print(mem.metadata)    # {"source": "onboarding"}
+print(mem.created_at)  # 1709654400
+print(mem.importance)  # 0.0
+print(mem.embedding)   # [0.1, 0.2, ...] or None
+```
+
+---
+
+### `.delete_memory(mid)`
+
+Permanently deletes a memory and updates all indexes.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `mid` | `int` | Memory ID to delete |
+
+**Raises:** `CortexaDBNotFoundError` if the memory doesn't exist.
+
+**Example:**
+```python
+db.delete_memory(42)
+```
+
+---
+
+## Graph Operations
+
+### `.connect(from_id, to_id, relation)`
+
+Creates a directed edge between two memories.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `from_id` | `int` | Source memory ID |
+| `to_id` | `int` | Target memory ID |
+| `relation` | `str` | Relationship label |
+
+**Example:**
+```python
+db.connect(1, 2, "relates_to")
+db.connect(1, 3, "caused_by")
+```
+
+> Both memories must be in the same namespace. Cross-namespace edges are forbidden.
+
+---
+
+### `.get_neighbors(mid)`
+
+Returns all outgoing edges from a memory.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `mid` | `int` | Memory ID |
+
+**Returns:** `list[Edge]` where each Edge has `to` (int) and `relation` (str) fields.
+
+**Example:**
+```python
+neighbors = db.get_neighbors(1)
+for edge in neighbors:
+    print(f"→ {edge.to} ({edge.relation})")
+```
+
+---
+
+## Document Ingestion
+
+### `.ingest(text, strategy="recursive", chunk_size=512, overlap=50, metadata=None, namespace=None)`
+
+Chunks text and stores each chunk as a memory.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `text` | `str` | Required | Text to chunk and store |
+| `strategy` | `str` | `"recursive"` | Chunking strategy |
+| `chunk_size` | `int` | `512` | Target chunk size in characters |
+| `overlap` | `int` | `50` | Overlap between chunks |
+| `metadata` | `dict?` | `None` | Metadata to attach to all chunks |
+| `namespace` | `str?` | `None` | Target namespace |
+
+**Returns:** `list[int]` - Memory IDs of stored chunks
+
+---
+
+### `.load(file_path, strategy="markdown", chunk_size=512, overlap=50, metadata=None, namespace=None)`
+
+Loads a file, chunks it, and stores each chunk.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `file_path` | `str` | Required | Path to the file |
+| `strategy` | `str` | `"markdown"` | Chunking strategy |
+| `chunk_size` | `int` | `512` | Target chunk size |
+| `overlap` | `int` | `50` | Overlap between chunks |
+| `metadata` | `dict?` | `None` | Metadata for all chunks |
+| `namespace` | `str?` | `None` | Target namespace |
+
+**Supported formats:** `.txt`, `.md`, `.json`, `.docx` (requires `cortexadb[docs]`), `.pdf` (requires `cortexadb[pdf]`)
+
+**Example:**
+```python
+db.load("README.md", strategy="markdown")
+db.load("paper.pdf", strategy="recursive", chunk_size=1024)
+```
+
+---
+
+### `.ingest_document(text, chunk_size=512, overlap=50, metadata=None, namespace=None)`
+
+Legacy method for chunking and storing text. Uses fixed chunking.
+
+---
+
+## Namespace
+
+### `.namespace(name, readonly=False)`
+
+Returns a scoped view of the database for a specific namespace.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | Required | Namespace name |
+| `readonly` | `bool` | `False` | If `True`, write operations raise errors |
+
+**Returns:** `Namespace`
+
+**Example:**
+```python
+ns = db.namespace("agent_a")
+mid = ns.remember("text")
+hits = ns.ask("query")
+ns.delete_memory(mid)
+ns.ingest_document("long text")
+```
+
+---
+
+## Maintenance Operations
+
+### `.compact()`
+
+Reclaims disk space by removing deleted entries from segment files.
+
+### `.flush()`
+
+Forces all pending writes to be synced to disk.
+
+### `.checkpoint()`
+
+Creates a binary snapshot of the current state and truncates the WAL. Also saves the HNSW index if using HNSW mode.
+
+### `.stats()`
+
+Returns database statistics.
+
+**Returns:** `Stats`
+
+```python
+stats = db.stats()
+print(stats.entries)              # Total memory count
+print(stats.indexed_embeddings)   # Embeddings in vector index
+print(stats.wal_length)           # WAL file size in bytes
+print(stats.vector_dimension)     # Configured vector dimension
+print(stats.storage_version)      # Storage format version
+```
+
+---
+
+## Replay Properties
+
+### `.last_replay_report`
+
+Diagnostic report from the most recent `replay()` call.
+
+**Type:** `dict`
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `total_ops` | `int` | Total operations in the log |
+| `applied` | `int` | Successfully applied |
+| `skipped` | `int` | Skipped (malformed) |
+| `failed` | `int` | Failed (execution error) |
+| `op_counts` | `dict` | Per-type counts |
+| `failures` | `list` | Up to 50 failure details |
+
+### `.last_export_replay_report`
+
+Diagnostic report from the most recent `export_replay()` call.
+
+**Type:** `dict`
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `exported` | `int` | Memories written |
+| `skipped_missing_embedding` | `int` | Entries without vectors |
+| `skipped_missing_id` | `int` | Gaps in ID space |
+| `errors` | `list` | Unexpected errors |
+
+---
+
+## Export
+
+### `.export_replay(path)`
+
+Exports the current database state as a replay log.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `str` | Output file path |
+
+---
+
+## Types
+
+### `Hit`
+
+Query result from `.ask()`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `int` | Memory ID |
+| `score` | `float` | Relevance score (0.0 to 1.0) |
+
+### `Memory`
+
+Full memory entry from `.get_memory()`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `int` | Memory ID |
+| `namespace` | `str` | Namespace name |
+| `content` | `bytes` | Raw content |
+| `embedding` | `list[float]?` | Vector embedding |
+| `metadata` | `dict[str, str]` | Key-value metadata |
+| `created_at` | `int` | Unix timestamp |
+| `importance` | `float` | Importance score |
+
+### `Stats`
+
+Database statistics from `.stats()`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entries` | `int` | Total memory count |
+| `indexed_embeddings` | `int` | Embeddings in index |
+| `wal_length` | `int` | WAL size in bytes |
+| `vector_dimension` | `int` | Vector dimension |
+| `storage_version` | `int` | Format version |
+
+### `ChunkResult`
+
+Result from `chunk()`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `text` | `str` | Chunk content |
+| `index` | `int` | Zero-based index |
+| `metadata` | `dict?` | Optional metadata |
+
+---
+
+## Standalone Functions
+
+### `chunk(text, strategy="recursive", chunk_size=512, overlap=50)`
+
+Chunks text without storing it.
+
+**Returns:** `list[ChunkResult]`
+
+```python
+from cortexadb import chunk
+
+chunks = chunk("Long text...", strategy="recursive", chunk_size=512, overlap=50)
+```
+
+---
+
+## Exceptions
+
+| Exception | Description |
+|-----------|-------------|
+| `CortexaDBError` | Base exception for all CortexaDB errors |
+| `CortexaDBNotFoundError` | Memory or file not found |
+| `CortexaDBConfigError` | Invalid configuration |
+| `CortexaDBIOError` | I/O failure |

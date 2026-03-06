@@ -1,0 +1,74 @@
+# Installation
+
+## Python
+
+CortexaDB is available on PyPI:
+
+```bash
+pip install cortexadb
+```
+
+### Optional Dependencies
+
+For document support, install the extras:
+
+```bash
+# Word document support (.docx)
+pip install cortexadb[docs]
+
+# PDF support (.pdf)
+pip install cortexadb[pdf]
+```
+
+### Install from GitHub
+
+To install the latest development version directly from GitHub:
+
+```bash
+pip install "cortexadb @ git+https://github.com/anaslimem/CortexaDB.git#subdirectory=crates/cortexadb-py"
+```
+
+### Requirements
+
+- Python 3.8+
+- Supported platforms: macOS (arm64, x86_64), Linux (x86_64, aarch64)
+
+> **Note:** Windows builds are temporarily unavailable due to a compatibility issue in the usearch library.
+
+---
+
+## Rust
+
+Add CortexaDB to your `Cargo.toml`:
+
+```toml
+[dependencies]
+cortexadb-core = { git = "https://github.com/anaslimem/CortexaDB.git" }
+```
+
+### Requirements
+
+- Rust 1.70+
+- C++ compiler (for usearch dependency)
+
+---
+
+## Verifying the Installation
+
+### Python
+
+```python
+from cortexadb import CortexaDB
+
+db = CortexaDB.open("/tmp/test.mem", dimension=64)
+print(db.stats())  # Should print Stats object
+```
+
+### Rust
+
+```rust
+use cortexadb_core::CortexaDB;
+
+let db = CortexaDB::open("/tmp/test.mem", 64)?;
+println!("{:?}", db.stats()?);
+```

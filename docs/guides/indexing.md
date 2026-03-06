@@ -1,0 +1,156 @@
+# Indexing
+
+CortexaDB supports two vector indexing modes: **Exact** (brute-force) and **HNSW** (approximate nearest neighbor). Choose based on your dataset size and latency requirements.
+
+## Comparison
+
+| Mode | Use Case | Recall | Speed | Memory |
+|------|----------|--------|-------|--------|
+| `exact` | Small datasets (<10K entries) | 100% | O(n) | Low |
+| `hnsw` | Large datasets (10K+ entries) | ~95% | O(log n) | Higher |
+
+---
+
+## Exact Mode (Default)
+
+Brute-force cosine similarity scan over all stored embeddings.
+
+```python
+db = CortexaDB.open("db.mem", dimension=128)
+# or explicitly:
+db = CortexaDB.open("db.mem", dimension=128, index_mode="exact")
+```
+
+**Pros:**
+- 100% recall — never misses a result
+- No additional memory overhead
+- No build time
+
+**Cons:**
+- O(n) query time — scales linearly with dataset size
+- Becomes slow beyond ~10,000 entries
+
+---
+
+## HNSW Mode
+
+Approximate nearest neighbor search using the [USearch](https://github.com/unum-cloud/usearch) library. HNSW (Hierarchical Navigable Small World) builds a graph-based index for sub-linear query time.
+
+### Basic Usage
+
+```python
+db = CortexaDB.open("db.mem", dimension=128, index_mode="hnsw")
+```
+
+### Custom Parameters
+
+```python
+db = CortexaDB.open("db.mem", dimension=128, index_mode={
+    "type": "hnsw",
+    "m": 16,                # connections per node
+    "ef_search": 50,        # query-time search width
+    "ef_construction": 200, # build-time search width
+    "metric": "cos"         # distance metric
+})
+```
+
+### Parameters
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `m` | 16 | 4-64 | Connections per node. Higher = more memory, higher recall |
+| `ef_search` | 50 | 10-500 | Query search width. Higher = better recall, slower search |
+| `ef_construction` | 200 | 50-500 | Build search width. Higher = better index, slower build |
+| `metric` | `cos` | `cos`, `l2` | Distance metric |
+
+### Tuning Guide
+
+**For higher recall (>99%):**
+```python
+index_mode={"type": "hnsw", "m": 32, "ef_search": 200, "ef_construction": 400}
+```
+
+**For faster queries (lower latency):**
+```python
+index_mode={"type": "hnsw", "m": 8, "ef_search": 20}
+```
+
+**For memory-constrained environments:**
+```python
+index_mode={"type": "hnsw", "m": 8, "ef_construction": 100}
+```
+
+---
+
+## Distance Metrics
+
+### Cosine (`cos`) - Default
+
+Measures the angle between two vectors, ignoring magnitude.
+
+```python
+index_mode={"type": "hnsw", "metric": "cos"}
+```
+
+**Best for:**
+- Text/semantic embeddings
+- Embeddings from models trained with cosine loss
+- Any scenario where direction matters more than magnitude
+
+### L2 / Euclidean (`l2`)
+
+Measures straight-line distance between vectors.
+
+```python
+index_mode={"type": "hnsw", "metric": "l2"}
+```
+
+**Best for:**
+- Image embeddings where magnitude matters
+- Recommendation systems comparing user ratings
+- Geometric data (GPS coordinates)
+- Models trained with L2/MSE loss
+
+---
+
+## Automatic Persistence
+
+HNSW indexes are automatically persisted to disk:
+
+| Event | Action |
+|-------|--------|
+| `checkpoint()` | HNSW index saved to `cortexadb.hnsw` |
+| Database close | HNSW index automatically saved |
+| Database open | HNSW index loaded from disk (if exists) |
+
+No extra configuration needed. The index is rebuilt automatically if the file is missing.
+
+---
+
+## Trade-offs
+
+| Dimension | Increase For | Decrease For |
+|-----------|-------------|--------------|
+| `ef_search` | Better recall | Faster queries |
+| `m` | Higher recall | Less memory usage |
+| `ef_construction` | Better index quality | Faster build time |
+
+### Decision Flow
+
+```
+Dataset size < 10,000?
+  └── Yes → Use "exact" (100% recall, simple)
+  └── No  → Use "hnsw"
+              │
+              Need >99% recall?
+              └── Yes → m=32, ef_search=200
+              └── No  → Default parameters are fine
+```
+
+---
+
+## Next Steps
+
+- [Query Engine](./query-engine.md) - How indexing integrates with hybrid search
+- [Benchmarks](../resources/benchmarks.md) - Performance numbers for exact vs HNSW
+- [Configuration](./configuration.md) - All configuration options
