@@ -1,7 +1,4 @@
 {
   "title": "Resources",
-  "pages": [
-    "benchmarks",
-    "examples"
-  ]
+  "pages": ["benchmarks", "examples"]
 }

@@ -1,7 +1,4 @@
 {
   "title": "API Reference",
-  "pages": [
-    "python",
-    "rust"
-  ]
+  "pages": ["python", "rust"]
 }

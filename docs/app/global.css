@@ -1,8 +1,8 @@
-@import 'tailwindcss';
-@import 'fumadocs-ui/css/neutral.css';
-@import 'fumadocs-ui/css/preset.css';
-@import 'fumadocs-ui/css/style.css';
-@import 'fumadocs-ui/css/lib/shiki.css';
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+@import "fumadocs-ui/css/style.css";
+@import "fumadocs-ui/css/lib/shiki.css";
 
 :root {
   --fd-toc-width: 240px;
