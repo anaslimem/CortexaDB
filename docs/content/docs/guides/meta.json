@@ -1,0 +1,14 @@
+{
+  "title": "Guides",
+  "pages": [
+    "core-concepts",
+    "storage-engine",
+    "query-engine",
+    "indexing",
+    "chunking",
+    "namespaces",
+    "embedders",
+    "replay",
+    "configuration"
+  ]
+}

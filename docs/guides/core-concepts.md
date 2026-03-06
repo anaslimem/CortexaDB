@@ -1,0 +1,182 @@
+# Core Concepts
+
+This guide explains the architecture and design principles behind CortexaDB.
+
+## Overview
+
+CortexaDB is an **embedded database** — it runs inside your application's process, not as a separate server. It stores all data in a single directory on disk and provides an in-memory query engine for fast retrieval.
+
+The database is built around three pillars:
+
+1. **Vector Search** - Find semantically similar memories using embedding similarity
+2. **Graph Relations** - Connect memories with directed edges and traverse them
+3. **Temporal Awareness** - Filter and boost results based on when memories were created
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────┐
+│              Python API (PyO3 Bindings)           │
+│   CortexaDB, Namespace, Embedder, chunk(), etc.  │
+└────────────────────────┬─────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────┐
+│               CortexaDB Facade                    │
+│        High-level API (remember, ask, etc.)       │
+└────────────────────────┬─────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────┐
+│              CortexaDBStore                        │
+│    Concurrency coordinator & durability layer     │
+│  ┌────────────────┐  ┌────────────────────────┐  │
+│  │ WriteState     │  │ ReadSnapshot           │  │
+│  │ (Mutex)        │  │ (ArcSwap, lock-free)   │  │
+│  └────────────────┘  └────────────────────────┘  │
+└───────┬──────────────────┬───────────────┬───────┘
+        │                  │               │
+┌───────▼──────┐  ┌───────▼───────┐  ┌────▼───────────┐
+│   Engine     │  │   Segments    │  │  Index Layer    │
+│   (WAL)      │  │   (Storage)   │  │                 │
+│              │  │               │  │  VectorIndex    │
+│  Command     │  │  MemoryEntry  │  │  HnswBackend    │
+│  recording   │  │  persistence  │  │  GraphIndex     │
+│              │  │               │  │  TemporalIndex  │
+│  Crash       │  │  CRC32        │  │                 │
+│  recovery    │  │  checksums    │  │  HybridQuery    │
+└──────────────┘  └───────────────┘  └─────────────────┘
+                         │
+              ┌──────────▼──────────┐
+              │    State Machine     │
+              │   (In-memory state)  │
+              │  - Memory entries    │
+              │  - Graph edges       │
+              │  - Temporal index    │
+              └─────────────────────┘
+```
+
+---
+
+## Key Components
+
+### Facade
+
+The `CortexaDB` facade is the primary entry point. It provides the high-level API (`remember`, `ask`, `connect`, etc.) and delegates to the store for durability and concurrency.
+
+### Store
+
+The `CortexaDBStore` coordinates concurrent access:
+
+- **Single Writer**: A `Mutex<WriteState>` ensures writes are serialized and deterministic
+- **Concurrent Readers**: An `ArcSwap<ReadSnapshot>` provides lock-free read access — readers never block writers and vice versa
+- **Background Sync**: A dedicated thread handles disk fsync based on the configured [sync policy](./configuration.md#sync-policies)
+
+### State Machine
+
+The in-memory state machine holds the current database state:
+
+- All memory entries indexed by ID
+- Graph edges (directed, per-namespace)
+- Temporal index (BTreeMap of timestamp to memory IDs)
+- Next ID counter
+
+Every mutation goes through the state machine, ensuring consistency between disk and queries.
+
+### Engine (WAL)
+
+The Write-Ahead Log is the source of truth for durability. Every command (insert, delete, connect) is first appended to the WAL before updating the state machine. On startup, the WAL is replayed to reconstruct the state.
+
+### Segments
+
+Large memory payloads are stored in append-only segment files. Each segment is capped at 10MB before rotating to a new file. Segments use CRC32 checksums for integrity verification.
+
+### Index Layer
+
+The index layer provides fast retrieval through multiple backends:
+
+- **VectorIndex** - Cosine similarity search (exact or HNSW)
+- **GraphIndex** - BFS/DFS traversal of memory connections
+- **TemporalIndex** - Time-range filtering
+
+These are combined by the [hybrid query engine](./query-engine.md) for multi-signal retrieval.
+
+---
+
+## Data Model
+
+### Memory Entry
+
+A memory is the fundamental unit of storage:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `u64` | Auto-incrementing unique identifier |
+| `namespace` | `String` | Isolation scope (default: `"default"`) |
+| `content` | `bytes` | Raw content (typically UTF-8 text) |
+| `embedding` | `Vec<f32>?` | Optional vector embedding |
+| `metadata` | `Dict[str, str]` | Key-value metadata pairs |
+| `created_at` | `u64` | Unix timestamp (seconds) |
+| `importance` | `f32` | User-defined importance score |
+
+### Graph Edges
+
+Edges are directed relationships between memories:
+
+```
+Memory A --[relates_to]--> Memory B
+```
+
+- Edges are namespaced — you cannot create edges across namespaces
+- Each memory can have multiple outgoing edges
+- Used by the query engine for graph expansion during hybrid search
+
+### Hit (Query Result)
+
+```python
+Hit(id=42, score=0.87)
+```
+
+A query result containing the memory ID and a relevance score (0.0 to 1.0).
+
+---
+
+## Write Path
+
+1. Command is constructed (e.g., `InsertMemory`)
+2. Command is appended to the WAL (with CRC32 checksum)
+3. Memory payload is written to the current segment file
+4. State machine is updated in-memory
+5. Vector index is updated (if embedding is present)
+6. Read snapshot is atomically swapped for readers
+7. Disk fsync happens based on sync policy
+
+## Read Path
+
+1. Query embedding is compared against the vector index
+2. Top candidates are fetched (exact scan or HNSW)
+3. Optional graph expansion via BFS
+4. Optional temporal filtering
+5. Scores are combined with configurable weights
+6. Top-k results are returned as `Hit` objects
+
+---
+
+## Crash Recovery
+
+On startup, CortexaDB recovers through:
+
+1. **Load checkpoint** (if exists) — fast binary snapshot of the state machine
+2. **Replay WAL** — apply any commands written after the checkpoint
+3. **Rebuild segment index** — scan segment files to build the offset index
+4. **Repair mismatches** — sync missing vectors from the state machine to the HNSW index
+
+This ensures zero data loss for any committed write, even after a crash.
+
+---
+
+## Next Steps
+
+- [Storage Engine](./storage-engine.md) - Deep dive into WAL, segments, and checkpoints
+- [Query Engine](./query-engine.md) - How hybrid search works
+- [Configuration](./configuration.md) - Tune CortexaDB for your use case

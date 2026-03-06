@@ -1,0 +1,185 @@
+---
+title: Chunking
+description: Document ingestion and chunking strategies
+---
+
+CortexaDB provides built-in text chunking for breaking documents into smaller pieces suitable for embedding and retrieval. The chunking engine is implemented in Rust for high performance.
+
+## Overview
+
+When ingesting long documents, you need to split them into chunks that:
+- Fit within embedding model token limits
+- Preserve semantic coherence
+- Maintain context via overlap
+
+CortexaDB provides 5 chunking strategies to handle different document types.
+
+---
+
+## Strategies
+
+### Fixed
+
+Simple character-based chunking with word-boundary snapping.
+
+```python
+chunks = chunk(text, strategy="fixed", chunk_size=512, overlap=50)
+```
+
+- Splits text into chunks of approximately `chunk_size` characters
+- Snaps to word boundaries (never splits mid-word)
+- Overlap is measured in characters from the tail of each chunk
+
+**Best for:** Simple text where structure doesn't matter.
+
+### Recursive (Default)
+
+Hierarchical splitting that tries increasingly granular separators.
+
+```python
+chunks = chunk(text, strategy="recursive", chunk_size=512, overlap=50)
+```
+
+Split order:
+1. Triple newlines (`\n\n\n`)
+2. Double newlines (`\n\n`) — paragraph breaks
+3. Single newlines (`\n`)
+4. Sentence endings (`.`, `!`, `?`)
+5. Clause separators (`,`, `;`, `:`, ` `)
+6. Individual spaces
+
+Falls back to fixed chunking if no separator works.
+
+**Best for:** General-purpose text, articles, prose.
+
+### Semantic
+
+Paragraph-based splitting that groups related paragraphs together.
+
+```python
+chunks = chunk(text, strategy="semantic", chunk_size=2048, overlap=50)
+```
+
+- Splits on `\n\n` (paragraph boundaries)
+- Greedily packs consecutive paragraphs up to `chunk_size` (default 2048)
+- Overlap is applied from trailing words
+
+**Best for:** Articles, blog posts, long-form writing where paragraphs are meaningful units.
+
+### Markdown
+
+Structure-aware splitting for Markdown documents.
+
+```python
+chunks = chunk(text, strategy="markdown", chunk_size=512, overlap=50)
+```
+
+- Recognizes Markdown elements: headers, lists, code blocks, paragraphs
+- Preserves headers as metadata context
+- Each chunk knows its type (header, list, code_block, paragraph)
+
+**Best for:** Technical documentation, READMEs, Markdown-formatted notes.
+
+### JSON
+
+Structured data chunking that flattens JSON into key-value pairs.
+
+```python
+chunks = chunk(json_text, strategy="json")
+```
+
+- Flattens JSON objects into individual key-value entries
+- Each chunk contains `metadata.key` and `metadata.value`
+- Useful for structured configuration or data files
+
+**Best for:** JSON configuration files, API responses, structured data.
+
+---
+
+## Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `strategy` | `"recursive"` | Chunking strategy to use |
+| `chunk_size` | `512` | Target chunk size in characters |
+| `overlap` | `50` | Number of overlapping characters between chunks |
+
+---
+
+## Usage
+
+### Direct Chunking
+
+```python
+from cortexadb import chunk
+
+text = "Long document text here..."
+
+# Returns list of ChunkResult objects
+chunks = chunk(text, strategy="recursive", chunk_size=512, overlap=50)
+
+for c in chunks:
+    print(f"Chunk {c.index}: {c.text[:50]}...")
+    if c.metadata:
+        print(f"  Metadata: {c.metadata}")
+```
+
+### Ingest into Database
+
+```python
+# Chunk and store text (uses embedder for auto-embedding)
+ids = db.ingest("Long article text...", strategy="recursive", chunk_size=512)
+
+# Chunk and store with namespace
+ids = db.ingest("text", strategy="markdown", namespace="docs")
+```
+
+### Load from File
+
+```python
+# Load a file, auto-detect format, chunk, and store
+db.load("document.pdf", strategy="recursive")
+db.load("README.md", strategy="markdown")
+db.load("config.json", strategy="json")
+```
+
+---
+
+## ChunkResult
+
+Each chunk is returned as a `ChunkResult` object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `text` | `str` | The chunk text content |
+| `index` | `int` | Zero-based chunk index |
+| `metadata` | `dict?` | Optional metadata (e.g., `key`/`value` for JSON chunks) |
+
+---
+
+## Supported File Formats
+
+| Format | Extension | Requires |
+|--------|-----------|----------|
+| Plain Text | `.txt` | Built-in |
+| Markdown | `.md` | Built-in |
+| JSON | `.json` | Built-in |
+| Word | `.docx` | `pip install cortexadb[docs]` |
+| PDF | `.pdf` | `pip install cortexadb[pdf]` |
+
+---
+
+## Tips
+
+- Use `recursive` as the default strategy — it works well for most text
+- Use `markdown` for technical docs to preserve structure
+- Set `overlap` to 10-20% of `chunk_size` for good context continuity
+- For very large documents, combine `load()` with HNSW indexing for fast retrieval
+- The JSON strategy ignores `chunk_size` and `overlap` — each key-value pair is one chunk
+
+---
+
+## Next Steps
+
+- [Embedders](/docs/guides/embedders) - Configure embedding providers for auto-embedding
+- [Query Engine](/docs/guides/query-engine) - How chunked memories are retrieved

@@ -1,7 +1,4 @@
----
-title: CortexaDB Documentation
-description: Simple, fast, and hard-durable embedded database for AI agent memory
----
+# CortexaDB Documentation
 
 **CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file experience (no server required) with native support for vectors, graphs, and temporal search.
 
@@ -12,31 +9,27 @@ Think of it as **SQLite, but with semantic and relational intelligence for your 
 ## Documentation Overview
 
 ### Getting Started
-
-- [Installation](/docs/getting-started/installation) - Install CortexaDB via pip or Cargo
-- [Quickstart](/docs/getting-started/quickstart) - Your first database in 5 minutes
+- [Installation](./getting-started/installation.md) - Install CortexaDB via pip or Cargo
+- [Quickstart](./getting-started/quickstart.md) - Your first database in 5 minutes
 
 ### Guides
-
-- [Core Concepts](/docs/guides/core-concepts) - Architecture and how CortexaDB works
-- [Storage Engine](/docs/guides/storage-engine) - WAL, segments, checkpoints, and compaction
-- [Query Engine](/docs/guides/query-engine) - Hybrid search with vector, graph, and temporal scoring
-- [Indexing](/docs/guides/indexing) - Exact search vs HNSW approximate nearest neighbor
-- [Chunking](/docs/guides/chunking) - Document ingestion and chunking strategies
-- [Namespaces](/docs/guides/namespaces) - Multi-agent memory isolation
-- [Embedders](/docs/guides/embedders) - Embedding providers (OpenAI, Gemini, Ollama, Hash)
-- [Replay & Recording](/docs/guides/replay) - Deterministic session recording and replay
-- [Configuration](/docs/guides/configuration) - All configuration options explained
+- [Core Concepts](./guides/core-concepts.md) - Architecture and how CortexaDB works
+- [Storage Engine](./guides/storage-engine.md) - WAL, segments, checkpoints, and compaction
+- [Query Engine](./guides/query-engine.md) - Hybrid search with vector, graph, and temporal scoring
+- [Indexing](./guides/indexing.md) - Exact search vs HNSW approximate nearest neighbor
+- [Chunking](./guides/chunking.md) - Document ingestion and chunking strategies
+- [Namespaces](./guides/namespaces.md) - Multi-agent memory isolation
+- [Embedders](./guides/embedders.md) - Embedding providers (OpenAI, Gemini, Ollama, Hash)
+- [Replay & Recording](./guides/replay.md) - Deterministic session recording and replay
+- [Configuration](./guides/configuration.md) - All configuration options explained
 
 ### API Reference
-
-- [Python API](/docs/api/python) - Complete Python API reference
-- [Rust API](/docs/api/rust) - Rust crate API reference
+- [Python API](./api/python.md) - Complete Python API reference
+- [Rust API](./api/rust.md) - Rust crate API reference
 
 ### Resources
-
-- [Benchmarks](/docs/resources/benchmarks) - Performance benchmarks and methodology
-- [Examples](/docs/resources/examples) - Code examples for common use cases
+- [Benchmarks](./resources/benchmarks.md) - Performance benchmarks and methodology
+- [Examples](./resources/examples.md) - Code examples for common use cases
 
 ---
 
