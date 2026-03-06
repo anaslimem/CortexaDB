@@ -533,6 +533,46 @@ impl VectorIndex {
         }
     }
 
+    /// Compact the vector index by permanently removing tombstones from exact partitions
+    /// and completely rebuilding the approximate nearest neighbor (HNSW) index to free memory.
+    pub fn compact(&mut self) -> Result<usize> {
+        let mut empty_namespaces = Vec::new();
+
+        // 1. Compact exact partitions
+        for (ns, partition) in &mut self.partitions {
+            Self::compact_partition(partition);
+            if partition.embeddings.is_empty() {
+                empty_namespaces.push(ns.clone());
+            }
+        }
+
+        // 2. Remove empty partitions
+        for ns in empty_namespaces {
+            self.partitions.remove(&ns);
+        }
+
+        // 3. Rebuild HNSW backend if enabled
+        if let Some(ref old_hnsw) = self.hnsw_backend {
+            let config = old_hnsw.config.clone();
+            
+            // Create a fresh, clean HNSW backend
+            let new_hnsw = HnswBackend::new(self.vector_dimension, config)
+                .map_err(|_e| VectorError::NoEmbeddings)?;
+                
+            // Re-insert all live embeddings into the fresh backend
+            for partition in self.partitions.values() {
+                for (id, embedding) in &partition.embeddings {
+                    let _ = new_hnsw.add(*id, embedding);
+                }
+            }
+            
+            // Swap out the bloated instance for the pristine one
+            self.hnsw_backend = Some(Arc::new(new_hnsw));
+        }
+
+        Ok(self.len())
+    }
+
     fn partition_iter<'a>(
         &'a self,
         namespace: Option<&str>,
@@ -971,5 +1011,35 @@ mod tests {
         assert_eq!(index.len(), 7);
         let results = index.search_scoped(&[1.0, 0.0, 0.0], 20, Some("agent1"), false, 7).unwrap();
         assert!(results.iter().all(|(id, _)| *id >= MemoryId(3)));
+    }
+    #[test]
+    fn test_vector_index_compaction() {
+        let mut index = VectorIndex::new(3);
+        index.set_backend_mode(VectorBackendMode::Ann { ann_search_multiplier: 2 });
+        index.enable_hnsw(HnswConfig::default()).unwrap();
+
+        // Insert 10 items
+        for i in 0..10 {
+            index.index(MemoryId(i), vec![i as f32, 0.0, 0.0]).unwrap();
+        }
+        
+        // Remove 8 items (they become tombstones in HNSW)
+        for i in 2..10 {
+            index.remove(MemoryId(i)).unwrap();
+        }
+
+        assert_eq!(index.len(), 2);
+        
+        // Compact it to rebuild the HNSW index
+        let compacted_count = index.compact().unwrap();
+        assert_eq!(compacted_count, 2);
+        
+        // Ensure the items are still searchable via HNSW
+        let results = index.search(&[0.5, 0.0, 0.0], 2).unwrap();
+        assert_eq!(results.len(), 2);
+        
+        let ids: Vec<u64> = results.iter().map(|r| r.0.0).collect();
+        assert!(ids.contains(&0));
+        assert!(ids.contains(&1));
     }
 }

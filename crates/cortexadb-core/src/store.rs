@@ -443,11 +443,12 @@ impl CortexaDBStore {
                     // Drop the massive global lock so other agents can continue inserting memories!
                     drop(write_state);
 
-                    if let Some((mut wal_file, mut seg_file)) = handles {
-                        if let Err(err) = wal_file.sync_all() {
+                    if let Some((_wal_file, mut seg_file)) = handles {
+                        // WAL file doesn't need to be mut for sync_all
+                        if let Err(err) = _wal_file.sync_all() {
                             log::error!("cortexadb slow fsync error on wal: {err}");
                         }
-                        if let Some(mut s) = seg_file.take() {
+                        if let Some(s) = seg_file.as_mut() {
                             if let Err(err) = s.sync_all() {
                                 log::error!("cortexadb slow fsync error on segment: {err}");
                             }
@@ -727,7 +728,10 @@ impl CortexaDBStore {
 
     pub fn compact_segments(&self) -> Result<CompactionReport> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
-        Ok(writer.engine.compact_segments()?)
+        let report = writer.engine.compact_segments()?;
+        writer.indexes.vector_index_mut().compact()?;
+        self.publish_snapshot_from_write_state(&writer);
+        Ok(report)
     }
 
     pub fn state_machine(&self) -> StateMachine {
@@ -1317,4 +1321,57 @@ mod tests {
         assert_eq!(recovered.state_machine().len(), 1);
         assert!(recovered.state_machine().get_memory(MemoryId(1)).is_ok());
     }
+
+    #[test]
+    fn test_store_compaction_rebuilds_hnsw() {
+        let temp = TempDir::new().unwrap();
+        let wal = temp.path().join("store_compact_hnsw.wal");
+        let seg = temp.path().join("segments_compact_hnsw");
+
+        let store = CortexaDBStore::new_with_policies(
+            &wal,
+            &seg,
+            3, // dimension
+            SyncPolicy::Strict,
+            CheckpointPolicy::Disabled,
+            CapacityPolicy::new(None, None),
+            crate::index::hnsw::IndexMode::Hnsw(crate::index::hnsw::HnswConfig::default()),
+        )
+        .unwrap();
+
+        // Add 5 items
+        for i in 0..5 {
+            let entry = MemoryEntry::new(MemoryId(i), "agent_x".to_string(), b"data".to_vec(), 1000)
+                .with_embedding(vec![1.0, 0.0, 0.0]);
+            store.insert_memory(entry).unwrap();
+        }
+
+        assert_eq!(store.indexed_embeddings(), 5);
+
+        // Remove 3 items (they become tombstones in HNSW)
+        for i in 2..5 {
+            store.delete_memory(MemoryId(i)).unwrap();
+        }
+
+        assert_eq!(store.indexed_embeddings(), 2);
+
+        // Trigger compaction. This compacts the segments and completely rebuilds the HNSW index!
+        store.compact_segments().unwrap();
+
+        assert_eq!(store.indexed_embeddings(), 2);
+
+        // Ensure the remaining elements are still perfectly searchable
+        let search_results = store
+            .snapshot()
+            .indexes()
+            .vector
+            .search_scoped(&[1.0, 0.0, 0.0], 5, Some("agent_x"), false, 1)
+            .unwrap();
+        assert_eq!(search_results.len(), 2);
+
+        let ids: Vec<u64> = search_results.iter().map(|s| s.0.0).collect();
+        assert!(ids.contains(&0));
+        assert!(ids.contains(&1));
+    }
 }
+
