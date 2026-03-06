@@ -61,7 +61,7 @@ pub enum IndexMode {
 pub struct HnswBackend {
     index: Arc<RwLock<usearch::Index>>,
     dimension: usize,
-    config: HnswConfig,
+    pub config: HnswConfig,
 }
 
 impl std::fmt::Debug for HnswBackend {
