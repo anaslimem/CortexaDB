@@ -388,7 +388,7 @@ python benchmark/run_benchmark.py \
 ---
 
 ## License & Status
-CortexaDB is currently in **Beta (v0.1.6)**. It is released under the **MIT** and **Apache-2.0** licenses.  
+CortexaDB is currently in **Beta (v0.1.7)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
 
 ---
