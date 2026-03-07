@@ -9,70 +9,50 @@
 [![Version](https://img.shields.io/badge/Version-0.1.7-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads)](https://pepy.tech/projects/cortexadb)
 
-**CortexaDB** is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. It provides a single-file-like experience (no server required) but with native support for vectors, graphs, and temporal search.
-
-Think of it as **SQLite, but with semantic and relational intelligence for your agents.**
+**CortexaDB** is a lightweight, high-performance embedded database built in Rust, specifically designed to serve as the long-term memory for AI agents. It provides a single-file, zero-dependency storage solution that combines the simplicity of SQLite with the semantic power of vector search, graph relationships, and temporal indexing.
 
 ---
 
-## What's New in v0.1.7
+### The Problem: Why CortexaDB?
 
-- **Vector Index Compaction** - `.compact()` now actively drops tombstones from memory and rebuilds the `usearch` index on-the-fly, reclaiming massive amounts of RAM after heavy deletions.
-- **Concurrent Read Scaling** - Upgraded the internal HNSW index lock from a `Mutex` to an `RwLock`, unlocking blazing-fast highly concurrent vector searches.
-- **Pipelined Disk I/O** - Decoupled slow `.fsync()` disk operations from the global write lock. Background syncs no longer block active agents from inserting new memories.
-- **HNSW Recovery Integrity** - Fixed a critical condition where vectors could go missing from the index if the database crashed mid-checkpoint.
+Current AI agent frameworks often struggle with "memory" once the context window fills up. Developers usually have to choose between complex, over-engineered vector databases (that require a running server) or simple JSON files (that are slow and lose searchability at scale). 
+
+CortexaDB exists to provide a **middle ground**: a hard-durable, embedded memory engine that runs inside your agent's process. It ensures your agent never forgets, starting instantly with zero overhead, and maintaining millisecond query latencies even as it learns thousands of new facts.
 
 ---
 
-## Quickstart
-
-### Python (Recommended)
-CortexaDB is designed to be extremely easy to use from Python via high-performance Rust bindings.
+### Quickstart
 
 ```python
 from cortexadb import CortexaDB
 from cortexadb.providers.openai import OpenAIEmbedder
 
-# Open database with embedder (auto-embeds text)
+# 1. Open database with an embedder for automatic text-to-vector
 db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
 
-# Store memories
-db.remember("The user prefers dark mode.")
-db.remember("User works at Stripe.")
-
-# Load a file (TXT, MD, JSON, DOCX, PDF)
-db.load("document.pdf", strategy="recursive")
-
-# Ask questions (Semantic Search)
-hits = db.ask("What does the user like?")
-for hit in hits:
-    print(f"ID: {hit.id}, Score: {hit.score}")
-
-# Connect memories (Graph Relationships)
+# 2. Store facts and connect them logically
+mid1 = db.remember("The user prefers dark mode.")
+mid2 = db.remember("User works at Stripe.")
 db.connect(mid1, mid2, "relates_to")
+
+# 3. Query with semantic and graph intelligence
+hits = db.ask("What are the user's preferences?", use_graph=True)
+print(f"Top Hit: {hits[0].id} (Score: {hits[0].score})")
 ```
 
 ---
 
-## Installation
+### Installation
 
-### Python
-CortexaDB is available on PyPI and can be installed via `pip`:
+CortexaDB is available on PyPI for Python and can be added via Cargo for Rust.
 
+**Python**
 ```bash
-# Recommended: Install from PyPI
 pip install cortexadb
-
-# With document support (DOCX, PDF)
-pip install cortexadb[docs]
-pip install cortexadb[pdf]
-
-# From GitHub (Install latest release)
-pip install "cortexadb @ git+https://github.com/anaslimem/CortexaDB.git#subdirectory=crates/cortexadb-py"
+pip install cortexadb[docs,pdf]  # Optional: For PDF/Docx support
 ```
 
-### Rust
-Add CortexaDB to your `Cargo.toml`:
+**Rust**
 ```toml
 [dependencies]
 cortexadb-core = { git = "https://github.com/anaslimem/CortexaDB.git" }
@@ -80,195 +60,21 @@ cortexadb-core = { git = "https://github.com/anaslimem/CortexaDB.git" }
 
 ---
 
-## Key Features
+### Core Capabilities
 
-- **Hybrid Retrieval**: Combine vector similarity (semantic), graph relations (structural), and recency (temporal) in a single query.
-- **Smart Chunking**: Multiple strategies for document ingestion - `fixed`, `recursive`, `semantic`, `markdown`, `json`.
-- **File Support**: Load documents directly - TXT, MD, JSON, DOCX, PDF.
-- **HNSW Indexing**: Ultra-fast approximate nearest neighbor search using USearch (95%+ recall at millisecond latency).
-- **Hard Durability**: Write-Ahead Log (WAL) and Segmented logs ensure your agent never forgets, even after a crash.
-- **Multi-Agent Namespaces**: Isolate memories between different agents or workspaces within a single database file.
-- **Deterministic Replay**: Record operations to a log file and replay them exactly to debug agent behavior or migrate data.
-- **Automatic Capacity Management**: Set `max_entries` or `max_bytes` and let CortexaDB handle LRU/Importance-based eviction automatically.
-- **Crash-Safe Compaction**: Background maintenance that keeps your storage lean without risking data loss.
+- **Hybrid Retrieval**: Search by semantic similarity (Vector), structural relationship (Graph), and time-based recency in a single query.
+- **Ultra-Fast Indexing**: Uses **HNSW (USearch)** for sub-millisecond approximate nearest neighbor search with 95%+ recall.
+- **Hard Durability**: A Write-Ahead Log (WAL) and segmented storage ensure zero data loss, even after a crash.
+- **Smart Document Ingestion**: Built-in recursive, semantic, and markdown chunking for TXT, MD, PDF, and DOCX files.
+- **Privacy First**: Completely local and embedded. Your agent's data never leaves its environment unless you want it to.
+- **Deterministic Replay**: Capture session operations for debugging or syncing memory across different agents.
 
 ---
-
-## HNSW Indexing
-
-CortexaDB uses **USearch** for high-performance approximate nearest neighbor search. Switch between exact and HNSW modes based on your needs:
-
-| Mode | Use Case | Recall | Speed |
-|------|----------|--------|-------|
-| `exact` | Small datasets (<10K) | 100% | O(n) |
-| `hnsw` | Large datasets | 95%+ | O(log n) |
-
-### Automatic Persistence
-
-HNSW indexing now includes **automatic persistence**:
-
-- On `checkpoint()` - HNSW index is saved to disk
-- On database close/drop - HNSW index is automatically saved
-- On restart - HNSW index is loaded from disk (fast recovery!)
-
-No extra configuration needed - just use `index_mode="hnsw"` and it just works.
-
-```python
-from cortexadb import CortexaDB, HashEmbedder
-
-# Default: exact (brute-force)
-db = CortexaDB.open("db.mem", dimension=128)
-
-# Or use HNSW for large-scale search
-db = CortexaDB.open("db.mem", dimension=128, index_mode="hnsw")
-
-# HNSW with custom parameters
-db = CortexaDB.open("db.mem", dimension=128, index_mode={
-    "type": "hnsw",
-    "m": 16,           # connections per node
-    "ef_search": 50,   # query-time search width
-    "ef_construction": 200,  # build-time search width
-    "metric": "cos"    # distance metric: "cos" (cosine) or "l2" (euclidean)
-})
-
-# L2/Euclidean metric - best for image embeddings, recommendation systems
-db = CortexaDB.open("db.mem", dimension=128, index_mode={
-    "type": "hnsw",
-    "metric": "l2"
-})
-```
-### HNSW Parameters
-
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| `m` | 16 | 4-64 | Connections per node. Higher = more memory, higher recall. |
-| `ef_search` | 50 | 10-500 | Query search width. Higher = better recall, slower search. |
-| `ef_construction` | 200 | 50-500 | Build search width. Higher = better index, slower build. |
-| `metric` | `cos` | `cos`, `l2` | Distance metric. `cos` = Cosine, `l2` = Euclidean/L2 |
-
-### Choosing a Distance Metric
-
-| Metric | Best For | Description |
-|--------|----------|-------------|
-| `cos` (default) | Text/semantic search | Measures angle between vectors. Ignores magnitude. |
-| `l2` | Image embeddings, recommendation systems | Measures straight-line distance. Considers both direction and magnitude. |
-
-**When to use L2:**
-- Image embeddings where magnitude matters
-- Recommendation systems comparing user ratings
-- Geometric data (e.g., GPS coordinates)
-- When your embedding model was trained with L2 loss
-
-**Trade-offs:**
-- **Speed vs Recall**: Increase `ef_search` for better results, decrease for speed
-- **Memory vs Quality**: Increase `m` for higher recall, uses more memory  
-- **Build Time vs Quality**: Increase `ef_construction` for better index, slower initial build
-- **Cosine vs L2**: Use `cos` for text/semantic search, `l2` for image/recommendation data
-
----
-
-## Chunking Strategies
-
-CortexaDB provides 5 smart chunking strategies for document ingestion:
-
-| Strategy | Use Case |
-|----------|----------|
-| `fixed` | Simple character-based with word-boundary snap |
-| `recursive` | General purpose - splits paragraphs → sentences → words |
-| `semantic` | Articles, blogs - split by paragraphs |
-| `markdown` | Technical docs - preserves headers, lists, code blocks |
-| `json` | Structured data - flattens to key-value pairs |
-
-```python
-from cortexadb import CortexaDB, chunk
-
-# Use chunk() directly
-chunks = chunk(text, strategy="recursive", chunk_size=512, overlap=50)
-
-# Or use db.ingest() / db.load()
-db.ingest("text...", strategy="markdown")
-db.load("document.pdf", strategy="recursive")
-```
-
----
-
-## File Format Support
-
-| Format | Extension | Install |
-|--------|-----------|---------|
-| Plain Text | `.txt` | Built-in |
-| Markdown | `.md` | Built-in |
-| JSON | `.json` | Built-in |
-| Word | `.docx` | `pip install cortexadb[docs]` |
-| PDF | `.pdf` | `pip install cortexadb[pdf]` |
-
----
-
-## API Guide
-
-### Core Operations
-
-| Method | Description |
-|--------|-------------|
-| `CortexaDB.open(path, ...)` | Opens or creates a database at the specified path. |
-| `.remember(text, ...)` | Stores a new memory. Auto-embeds if an embedder is configured. |
-| `.ingest(text, ...)` | Ingests text with smart chunking. |
-| `.load(path, ...)` | Loads and ingests a file. |
-| `.ask(query, ...)` | Performs a hybrid search across vectors, graphs, and time. |
-| `.connect(id1, id2, rel)` | Creates a directed edge between two memory entries. |
-| `.namespace(name)` | Returns a scoped view of the database for a specific agent/context. |
-| `.delete_memory(id)` | Permanently removes a memory and updates all indexes. |
-| `.compact()` | Reclaims space by removing deleted entries from disk **and rebuilds the vector index to reclaim RAM**. |
-| `.checkpoint()` | Truncates the WAL and snapshots the current state for fast startup. |
-| `.export_replay(path)` | Exports current state as a snapshot replay log (NDJSON). |
-| `CortexaDB.replay(log_path, db_path, ...)` | Rebuilds a database from a replay log. Supports `strict` mode. |
-| `.last_replay_report` | Diagnostic report dict from the most recent `replay()` call. |
-| `.last_export_replay_report` | Diagnostic report dict from the most recent `export_replay()` call. |
-
-### Configuration Options
-When calling `CortexaDB.open()`, you can tune the behavior:
-- `sync`: `"strict"` (safest), `"async"` (fastest), or `"batch"` (balanced).
-- `max_entries`: Limits the total number of memories (triggers auto-eviction).
-- `max_bytes`: Limits total stored bytes (triggers auto-eviction).
-- `index_mode`: `"exact"`, `"hnsw"`, or an HNSW config dict.
-- `record`: Path to a log file for capturing the entire session for replay.
-
-### Replay Notes
-
-`CortexaDB.replay()` accepts a `strict` flag to control error handling:
-
-| Mode | Behavior |
-|------|----------|
-| `strict=False` (default) | Skips malformed/failed operations and continues |
-| `strict=True` | Raises `CortexaDBError` immediately on the first bad operation |
-
-After a `replay()` or `export_replay()` call, a diagnostic report is available:
-
-```python
-db = CortexaDB.replay("session.log", "restored.mem", strict=False)
-report = db.last_replay_report
-print(report["total_ops"])   # total operations in the log
-print(report["applied"])     # successfully applied
-print(report["skipped"])     # skipped (malformed but non-fatal)
-print(report["failed"])      # failed (execution error, non-fatal)
-print(report["op_counts"])   # per-type counts: remember, connect, delete, ...
-print(report["failures"])    # list of up to 50 failure details
-
-# After export_replay:
-db.export_replay("snapshot.log")
-export_report = db.last_export_replay_report
-print(export_report["exported"])                  # memories written
-print(export_report["skipped_missing_embedding"]) # entries without vectors
-print(export_report["skipped_missing_id"])        # gaps in ID space
-print(export_report["errors"])                    # unexpected errors
-```
-
----
-
-## Technical Essentials: How it's built
 
 <details>
-<summary><b>Click to see the Rust Architecture</b></summary>
+<summary><b>Technical Architecture & Benchmarks</b></summary>
+
+### Rust Architecture Overview
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -290,7 +96,7 @@ print(export_report["errors"])                    # unexpected errors
 │  └────────────────┘  └────────────────────────┘  │
 └───────┬──────────────────┬───────────────┬───────┘
         │                  │               │
-┌───────▼─────┐  ┌───────▼───────┐  ┌────▼──────────-─┐
+┌───────▼─────┐  ┌───────▼───────┐  ┌────▼───────────┐
 │   Engine    │  │   Segments    │  │  Index Layer    │
 │   (WAL)     │  │   (Storage)   │  │                 │
 │             │  │               │  │  VectorIndex    │
@@ -302,102 +108,29 @@ print(export_report["errors"])                    # unexpected errors
 └─────────────┘  └───────────────┘  └─────────────────┘
                          │
               ┌──────────▼──────────┐
-              │    State Machine    │
-              │   (In-memory state) │
-              │  - Memory entries   │
-              │  - Graph edges      │
-              │  - Temporal index   │
+              │    State Machine     │
+              │   (In-memory state)  │
+              │  - Memory entries    │
+              │  - Graph edges       │
+              │  - Temporal index    │
               └─────────────────────┘
 ```
 
-### Why Rust?
-CortexaDB is written in Rust to provide **memory safety without a garbage collector**, ensuring predictable performance (sub-100ms startup) and low resource overhead—critical for "embedded" use cases where the DB runs inside your agent's process.
+### Performance Benchmarks (v0.1.7)
+Measured with 10,000 embeddings (384-dimensions) on a standard SSD.
 
-### The Storage Engine
-CortexaDB follows a **Log-Structured** design:
-1. **WAL (Write-Ahead Log)**: Every command is first appended to a durable log with CRC32 checksums.
-2. **Segment Storage**: Large memory payloads are stored in append-only segments.
-3. **Deterministic State Machine**: On startup, the database replays the log into an in-memory state machine. This ensures 100% consistency between the disk and your queries.
-
-### Hybrid Query Engine
-Unlike standard vector DBs, CortexaDB doesn't just look at distance. Our query planner can:
-- **Vector**: Find semantic matches using Cosine Similarity.
-- **Graph**: Discover related concepts by traversing edges created with `.connect()`.
-- **Temporal**: Boost or filter results based on when they were "remembered".
-
-### Smart Chunking
-The chunking engine is built in Rust for performance:
-- 5 strategies covering most use cases
-- Word-boundary awareness to avoid splitting words
-- Overlap support for context continuity
-- JSON flattening for structured data
-
-### Versioned Serialization
-We use a custom versioned serialization layer (with a "magic-byte" header). This allows us to update the CortexaDB engine without breaking your existing database files—it knows how to read "legacy" data while writing new records in the latest format.
+| Mode | Query (p50) | Throughput | Recall |
+|------|-------------|-----------|--------|
+| Exact (baseline) | 1.34ms | 690 QPS | 100% |
+| HNSW | 0.29ms | 3,203 QPS | 95% |
 
 </details>
-
----
-
-## Benchmarks
-
-CortexaDB has been benchmarked with **10,000 embeddings** at **384 dimensions** (typical sentence-transformer size).
-
-### Results
-
-| Mode | Indexing Time | Query (p50) | Throughput | Recall |
-|------|--------------|-------------|-----------|--------|
-| Exact (baseline) | 138s | 1.34ms | 690 QPS | 100% |
-| HNSW | 151s | 0.29ms | 3,203 QPS | 95% |
-
-→ **HNSW is ~5x faster than exact search while maintaining 95% recall**
-
-### Benchmark Methodology
-
-- **Dataset**: 10,000 embeddings × 384 dimensions (realistic sentence-transformer size)
-- **Indexing**: Time to build fresh index from scratch
-- **Query Latency**: p50/p95/p99 measured across 1,000 queries (after 100 warmup queries)
-- **Recall**: Percentage of HNSW results that match brute-force exact search
-
-### Running Benchmarks
-
-```bash
-# 1. Build the Rust extension
-cd crates/cortexadb-py
-maturin develop --release
-cd ../..
-
-# 2. Generate test embeddings
-python benchmark/generate_embeddings.py --count 10000 --dimensions 384
-
-# 3. Run benchmarks
-python benchmark/run_benchmark.py --index-mode exact   # baseline (100% recall)
-python benchmark/run_benchmark.py --index-mode hnsw    # fast mode (~95% recall)
-
-# Results are saved to benchmark/results/
-```
-
-### Custom Benchmark Options
-
-```bash
-python benchmark/run_benchmark.py \
-    --count 10000 \
-    --dimensions 384 \
-    --top-k 10 \
-    --warmup 100 \
-    --queries 1000 \
-    --index-mode hnsw
-```
 
 ---
 
 ## License & Status
 CortexaDB is currently in **Beta (v0.1.7)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
-
----
-
-**^** Windows builds are temporarily unavailable due to a Windows compatibility issue in the usearch library.
 
 ---
 > *CortexaDB — Because agents shouldn't have to choose between speed and a soul (memory).*
