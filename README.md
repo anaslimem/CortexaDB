@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/anaslimem/CortexaDB/main/logo.png" alt="CortexaDB Logo" width="200" />
+</p>
+
 # CortexaDB: SQLite for AI Agents
 
 [![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
