@@ -28,8 +28,12 @@ export const homeOptions = {
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: 'CortexaDB',
-      icon: <img src="/logo.png" className="w-6 h-6 rounded" alt="CortexaDB Logo" />,
+      title: (
+        <div className="flex items-center gap-2">
+          <img src="/logo.png" className="w-6 h-6 rounded" alt="CortexaDB Logo" />
+          <span className="font-semibold">CortexaDB</span>
+        </div>
+      ),
     },
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
