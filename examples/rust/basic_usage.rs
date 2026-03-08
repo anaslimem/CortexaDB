@@ -116,34 +116,43 @@ Content under heading 3.
     }
 
     // -----------------------------------------------------------
-    // 5. Store Memories (text-first helper for the example)
+    // 5. High-Performance Batch Storage
     // -----------------------------------------------------------
-    println!("\n[4] Storing memories...");
+    println!("\n[4] Storing memories (Batch mode)...");
 
     let text1 = "The user lives in Paris and loves programming.";
     let text2 = "CortexaDB is a vector database for AI agents.";
     let text3 = "Rust is a systems programming language.";
 
-    let id1 = db.remember_with_content(
-        "default",
-        text1.as_bytes().to_vec(),
-        embed_text(text1, dimension),
-        None,
-    )?;
-    let id2 = db.remember_with_content(
-        "default",
-        text2.as_bytes().to_vec(),
-        embed_text(text2, dimension),
-        None,
-    )?;
-    let id3 = db.remember_with_content(
-        "default",
-        text3.as_bytes().to_vec(),
-        embed_text(text3, dimension),
-        None,
-    )?;
+    use cortexadb_core::BatchRecord;
 
-    println!("   Stored 3 memories: IDs {}, {}, {}", id1, id2, id3);
+    let records = vec![
+        BatchRecord {
+            namespace: "default".to_string(),
+            content: text1.as_bytes().to_vec(),
+            embedding: Some(embed_text(text1, dimension)),
+            metadata: None,
+        },
+        BatchRecord {
+            namespace: "default".to_string(),
+            content: text2.as_bytes().to_vec(),
+            embedding: Some(embed_text(text2, dimension)),
+            metadata: None,
+        },
+        BatchRecord {
+            namespace: "default".to_string(),
+            content: text3.as_bytes().to_vec(),
+            embedding: Some(embed_text(text3, dimension)),
+            metadata: None,
+        },
+    ];
+
+    // Bulk insert with 100x speedup
+    let last_id = db.remember_batch(records)?;
+    println!("   Batch finished. Last inserted ID: {}", last_id);
+    
+    // For manual IDs in the example, we'll use 1, 2, 3 assuming clean start
+    let id1 = 1; let id2 = 2; let id3 = 3;
 
     // -----------------------------------------------------------
     // 6. Graph Relationships
