@@ -1,4 +1,4 @@
-from .client import CortexaDB, Namespace
+from .client import CortexaDB, Collection
 from ._cortexadb import (
     Hit,
     Memory,
@@ -15,7 +15,7 @@ from .replay import ReplayWriter, ReplayReader, ReplayHeader
 
 __all__ = [
     "CortexaDB",
-    "Namespace",
+    "Collection",
     "Hit",
     "Memory",
     "Stats",

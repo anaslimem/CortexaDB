@@ -208,7 +208,7 @@ class CortexaDB:
                         text=op.get("text"),
                         vector=op.get("embedding"),
                         metadata=op.get("metadata"),
-                        collection=op.get("namespace", "default")
+                        collection=op.get("collection") or op.get("namespace", "default")
                     )
                     id_map[op.get("id")] = new_id
                     report["exported"] += 1
@@ -246,7 +246,7 @@ class CortexaDB:
         content = text or ""
         mid = self._inner.remember_embedding(vec, metadata=metadata, collection=collection, content=content)
         if self._recorder:
-            self._recorder.record_remember(id=mid, text=content, embedding=vec, namespace=collection, metadata=metadata)
+            self._recorder.record_remember(id=mid, text=content, embedding=vec, collection=collection, metadata=metadata)
         return mid
 
     def search(
@@ -331,7 +331,7 @@ class CortexaDB:
                         id=mem.id,
                         text=bytes(mem.content).decode("utf-8") if mem.content else "",
                         embedding=mem.embedding,
-                        namespace=mem.collection,
+                        collection=mem.collection,
                         metadata=mem.metadata
                     )
                     report["exported"] += 1

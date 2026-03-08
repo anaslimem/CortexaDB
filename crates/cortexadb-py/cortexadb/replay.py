@@ -16,7 +16,7 @@ Line 1 — header (JSON object):
 
 Lines 2..N — operation records (one JSON object per line):
 
-    {"op": "remember", "id": 1, "text": "...", "embedding": [...], "namespace": "default", "metadata": null}
+    {"op": "remember", "id": 1, "text": "...", "embedding": [...], "collection": "default", "metadata": null}
     {"op": "connect",  "from_id": 1, "to_id": 2, "relation": "caused_by"}
     {"op": "compact"}
 
@@ -56,7 +56,7 @@ class ReplayWriter:
     Example::
 
         writer = ReplayWriter("session.log", dimension=128, sync="strict")
-        writer.record_remember(id=1, text="hello", embedding=[...], namespace="default")
+        writer.record_remember(id=1, text="hello", embedding=[...], collection="default")
         writer.close()
     """
 
@@ -84,7 +84,7 @@ class ReplayWriter:
         id: int,
         text: str,
         embedding: List[float],
-        namespace: str,
+        collection: str,
         metadata: Optional[Dict[str, str]],
     ) -> None:
         """Append a ``remember`` operation."""
@@ -93,7 +93,7 @@ class ReplayWriter:
             "id": id,
             "text": text,
             "embedding": embedding,
-            "namespace": namespace,
+            "collection": collection,
             "metadata": metadata,
         })
 

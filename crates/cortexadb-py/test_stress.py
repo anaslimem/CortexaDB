@@ -65,7 +65,7 @@ def test_concurrent_compaction(clean_db_path):
         # Delete 300 entries to exceed the 20% threshold in segment 0 (if rotation happened)
         # Actually, let's just make sure we have enough deleted entries.
         for i in range(300):
-            db.delete_memory(i + 1) # IDs start at 1
+            db.delete(i + 1) # IDs start at 1
 
         assert len(db) == 700
 

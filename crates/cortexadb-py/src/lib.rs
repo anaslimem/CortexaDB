@@ -209,6 +209,8 @@ struct PyMemory {
     #[pyo3(get)]
     collection: String,
     #[pyo3(get)]
+    namespace: String,
+    #[pyo3(get)]
     created_at: u64,
     #[pyo3(get)]
     importance: f32,
@@ -545,6 +547,7 @@ impl PyCortexaDB {
         Ok(PyMemory {
             id: entry.id,
             collection: entry.namespace.clone(),
+            namespace: entry.namespace.clone(),
             created_at: entry.created_at,
             importance: entry.importance,
             content: entry.content.clone(),
