@@ -6,7 +6,7 @@
     "query-engine",
     "indexing",
     "chunking",
-    "namespaces",
+    "collections",
     "embedders",
     "replay",
     "configuration"

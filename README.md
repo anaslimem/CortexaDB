@@ -72,10 +72,11 @@ pip install cortexadb[docs,pdf]  # Optional: For PDF/Docx support
 <details>
 <summary><b>Technical Architecture & Benchmarks</b></summary>
 
-### Performance Benchmarks (v0.1.7)
-Measured on M2 Mac with 1,000 chunks of text.
+### Performance Benchmarks (v0.1.8)
 
-| Operation | v0.1.6 (Sync) | v0.1.7 (Batch) | Improvement |
+CortexaDB `v0.1.8` introduced a new batching architecture. Measured on an M2 Mac with 1,000 chunks of text:
+
+| Operation | v0.1.6 (Sync) | v0.1.8 (Batch) | Improvement |
 |-----------|---------------|----------------|-------------|
 | Ingestion | 12.4s         | **0.12s**      | **103x Faster** |
 | Memory Add| 15ms          | 1ms            | 15x Faster |
@@ -86,7 +87,7 @@ Measured on M2 Mac with 1,000 chunks of text.
 ---
 
 ## License & Status
-CortexaDB is currently in **Beta (v0.1.7)**. It is released under the **MIT** and **Apache-2.0** licenses.  
+CortexaDB is currently in **Beta (v0.1.8)**. It is released under the **MIT** and **Apache-2.0** licenses.  
 We are actively refining the API and welcome feedback!
 
 ---

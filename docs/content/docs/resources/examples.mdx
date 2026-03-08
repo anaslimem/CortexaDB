@@ -14,14 +14,14 @@ from cortexadb.providers.openai import OpenAIEmbedder
 db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
 
 # Store memories
-mid1 = db.remember("The user prefers dark mode.")
-mid2 = db.remember("User works at Stripe.")
-mid3 = db.remember("User's favorite language is Python.")
+mid1 = db.add("The user prefers dark mode.")
+mid2 = db.add("User works at Stripe.")
+mid3 = db.add("User's favorite language is Python.")
 
 # Search
-hits = db.ask("What programming language does the user like?")
+hits = db.query("What programming language does the user like?").execute()
 for hit in hits:
-    mem = db.get_memory(hit.id)
+    mem = db.get(hit.id)
     print(f"[{hit.score:.3f}] {mem.content.decode()}")
 ```
 
@@ -33,9 +33,9 @@ for hit in hits:
 db = CortexaDB.open("knowledge.mem", embedder=embedder)
 
 # Store entities
-alice = db.remember("Alice is a software engineer at Acme Corp")
-bob = db.remember("Bob is Alice's manager")
-acme = db.remember("Acme Corp builds developer tools")
+alice = db.add("Alice is a software engineer at Acme Corp")
+bob = db.add("Bob is Alice's manager")
+acme = db.add("Acme Corp builds developer tools")
 
 # Create relationships
 db.connect(alice, bob, "reports_to")
@@ -43,7 +43,7 @@ db.connect(alice, acme, "works_at")
 db.connect(bob, acme, "works_at")
 
 # Query with graph expansion
-hits = db.ask("Who works at Acme?", use_graph=True)
+hits = db.query("Who works at Acme?").use_graph().execute()
 ```
 
 ---
@@ -54,25 +54,25 @@ hits = db.ask("Who works at Acme?", use_graph=True)
 db = CortexaDB.open("agents.mem", embedder=embedder)
 
 # Each agent has isolated memory
-planner = db.namespace("planner")
-researcher = db.namespace("researcher")
-writer = db.namespace("writer")
+planner = db.collection("planner")
+researcher = db.collection("researcher")
+writer = db.collection("writer")
 
 # Agents store memories independently
-planner.remember("Task: Write a blog post about vector databases")
-researcher.remember("Found: CortexaDB supports HNSW indexing")
-researcher.remember("Found: Typical recall is 95% with HNSW")
-writer.remember("Draft intro: Vector databases are transforming AI...")
+planner.add("Task: Write a blog post about vector databases")
+researcher.add("Found: CortexaDB supports HNSW indexing")
+researcher.add("Found: Typical recall is 95% with HNSW")
+writer.add("Draft intro: Vector databases are transforming AI...")
 
 # Each agent queries only its own memories
-research = researcher.ask("What did I find about indexing?")
+research = researcher.query("What did I find about indexing?").execute()
 
 # Shared knowledge base (readonly for agents)
-shared = db.namespace("shared")
-shared.remember("Company style guide: Use active voice")
+shared = db.collection("shared")
+shared.add("Company style guide: Use active voice")
 
-agent_view = db.namespace("shared", readonly=True)
-guidelines = agent_view.ask("What is the writing style?")
+agent_view = db.collection("shared", readonly=True)
+guidelines = agent_view.query("What is the writing style?").execute()
 ```
 
 ---
@@ -94,9 +94,9 @@ Long article about machine learning...
 ids = db.ingest(article, strategy="semantic", chunk_size=2048)
 
 # Query across all ingested documents
-hits = db.ask("How do I configure the API?", top_k=10)
+hits = db.query("How do I configure the API?").limit(10).execute()
 for hit in hits:
-    mem = db.get_memory(hit.id)
+    mem = db.get(hit.id)
     print(f"[{hit.score:.3f}] {mem.content.decode()[:100]}...")
 ```
 
@@ -107,8 +107,8 @@ for hit in hits:
 ```python
 # Record a session
 db = CortexaDB.open("agent.mem", embedder=embedder, record="session.log")
-db.remember("User asked about pricing")
-db.remember("Showed enterprise plan")
+db.add("User asked about pricing")
+db.add("Showed enterprise plan")
 db.connect(1, 2, "led_to")
 
 # Later: replay the session for debugging
@@ -164,7 +164,7 @@ db = CortexaDB.open(
 
 # Old, low-importance memories are automatically evicted
 for i in range(20000):
-    db.remember(f"Memory #{i}")
+    db.add(f"Memory #{i}")
 
 stats = db.stats()
 print(f"Entries: {stats.entries}")  # ~10000 (eviction kicked in)
@@ -178,14 +178,14 @@ print(f"Entries: {stats.entries}")  # ~10000 (eviction kicked in)
 db = CortexaDB.open("agent.mem", embedder=embedder)
 
 # Store with metadata
-db.remember("Dark mode enabled", metadata={"category": "preference"})
-db.remember("Meeting at 3pm", metadata={"category": "schedule"})
-db.remember("Likes Python", metadata={"category": "preference"})
+db.add("Dark mode enabled", metadata={"category": "preference"})
+db.add("Meeting at 3pm", metadata={"category": "schedule"})
+db.add("Likes Python", metadata={"category": "preference"})
 
 # Filter by metadata (if supported by your query)
-hits = db.ask("What are the user's preferences?")
+hits = db.query("What are the user's preferences?").execute()
 for hit in hits:
-    mem = db.get_memory(hit.id)
+    mem = db.get(hit.id)
     print(f"{mem.content.decode()} [{mem.metadata}]")
 ```
 
