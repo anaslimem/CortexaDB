@@ -142,11 +142,11 @@ No extra configuration needed. The index is rebuilt automatically if the file is
 
 ```
 Dataset size < 10,000?
-  └── Yes → Use "exact" (100% recall, simple)
+  ├── Yes → Use "exact" (100% recall, simple)
   └── No  → Use "hnsw"
               │
               Need >99% recall?
-              └── Yes → m=32, ef_search=200
+              ├── Yes → m=32, ef_search=200
               └── No  → Default parameters are fine
 ```
 

@@ -244,7 +244,7 @@ class CortexaDB:
         vector = vector or kwargs.get("vector") or kwargs.get("embedding")
         vec = self._resolve_embedding(text, vector)
         content = text or ""
-        mid = self._inner.remember_embedding(vec, metadata=metadata, namespace=collection, content=content)
+        mid = self._inner.remember_embedding(vec, metadata=metadata, collection=collection, content=content)
         if self._recorder:
             self._recorder.record_remember(id=mid, text=content, embedding=vec, namespace=collection, metadata=metadata)
         return mid
@@ -265,12 +265,12 @@ class CortexaDB:
         if collections is None:
             base_hits = self._inner.ask_embedding(vec, top_k=limit, filter=filter)
         elif len(collections) == 1:
-            base_hits = self._inner.ask_in_namespace(collections[0], vec, top_k=limit, filter=filter)
+            base_hits = self._inner.ask_in_collection(collections[0], vec, top_k=limit, filter=filter)
         else:
             seen_ids = set()
             base_hits = []
             for ns in collections:
-                for hit in self._inner.ask_in_namespace(ns, vec, top_k=limit, filter=filter):
+                for hit in self._inner.ask_in_collection(ns, vec, top_k=limit, filter=filter):
                     if hit.id not in seen_ids:
                         seen_ids.add(hit.id)
                         base_hits.append(hit)
@@ -285,7 +285,7 @@ class CortexaDB:
                     for target_id, _ in self._inner.get_neighbors(hit.id):
                         if collections:
                             # Only add neighbor if it's in requested collections
-                            if self.get(target_id).namespace not in collections:
+                            if self.get(target_id).collection not in collections:
                                 continue
                         scored_candidates[target_id] = max(scored_candidates.get(target_id, 0), hit.score * 0.9)
                 except: pass
@@ -331,7 +331,7 @@ class CortexaDB:
                         id=mem.id,
                         text=bytes(mem.content).decode("utf-8") if mem.content else "",
                         embedding=mem.embedding,
-                        namespace=mem.namespace,
+                        namespace=mem.collection,
                         metadata=mem.metadata
                     )
                     report["exported"] += 1
@@ -353,7 +353,7 @@ class CortexaDB:
         """High-performance batch add."""
         facade_records = [
             BatchRecord(
-                namespace=r.get("collection") or r.get("namespace") or "default",
+                collection=r.get("collection") or r.get("namespace") or "default",
                 content=r.get("text") or "",
                 embedding=self._resolve_embedding(r.get("text"), r.get("vector")),
                 metadata=r.get("metadata")

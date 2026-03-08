@@ -6,11 +6,11 @@ from cortexadb.providers.openai import OpenAIEmbedder
 db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
 
 # Store memories
-db.remember("User prefers dark mode")
-db.remember("User works at Stripe")
+db.add("User prefers dark mode")
+db.add("User works at Stripe")
 
 # Semantic search
-hits = db.ask("What does the user like?")
+hits = db.query("What does the user like?").execute()
 # => [Hit(id=1, score=0.87), Hit(id=2, score=0.72)]`;
 
 const kw = 'color: #D73A49'; // keyword
@@ -39,11 +39,11 @@ const lines = [
   { style: '', text: '())' },
   { style: '', text: '' },
   { style: cm, text: '# Store memories' },
-  { style: '', text: 'db.remember("User prefers dark mode")' },
-  { style: '', text: 'db.remember("User works at Stripe")' },
+  { style: '', text: 'db.add("User prefers dark mode")' },
+  { style: '', text: 'db.add("User works at Stripe")' },
   { style: '', text: '' },
   { style: cm, text: '# Semantic search' },
-  { style: '', text: 'hits = db.ask("What does the user like?")' },
+  { style: '', text: 'hits = db.query("What does the user like?").execute()' },
   { style: cm, text: '# => [Hit(id=1, score=0.87), Hit(id=2, score=0.72)]' },
 ];
 

@@ -7,7 +7,7 @@ CortexaDB can record every operation to a log file and replay it to recreate an 
 
 ## Overview
 
-Recording captures all write operations (remember, connect, delete, compact, checkpoint) as NDJSON (newline-delimited JSON). Replay reads the log and re-applies each operation to build a new database.
+Recording captures all write operations (add, connect, delete, compact, checkpoint) as NDJSON (newline-delimited JSON). Replay reads the log and re-applies each operation to build a new database.
 
 ---
 
@@ -94,7 +94,7 @@ print(report["total_ops"])   # Total operations in the log
 print(report["applied"])     # Successfully applied
 print(report["skipped"])     # Skipped (malformed but non-fatal)
 print(report["failed"])      # Failed (execution error, non-fatal)
-print(report["op_counts"])   # Per-type counts: {"remember": 5, "connect": 2, ...}
+print(report["op_counts"])   # Per-type counts: {"add": 5, "connect": 2, ...}
 print(report["failures"])    # List of up to 50 failure details
 ```
 

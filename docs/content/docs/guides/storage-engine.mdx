@@ -25,9 +25,9 @@ The WAL is the primary durability mechanism. Every write operation is first appe
 ### Record Format
 
 ```
-┌──────────┬──────────┬─────────────────────────┐
-│ len (u32)│ crc (u32)│ payload (bincode Command)│
-└──────────┴──────────┴─────────────────────────┘
+┌──────────┬──────────┬───────────────────────────┐
+│len (u32) │crc (u32) │payload (bincode Command)  │
+└──────────┴──────────┴───────────────────────────┘
 ```
 
 Each WAL entry contains:
@@ -71,7 +71,7 @@ data/
 
 ```
 ┌──────────┬──────────┬──────────────────────────────┐
-│ len (u32)│ crc (u32)│ payload (bincode MemoryEntry) │
+│len (u32) │crc (u32) │payload (bincode MemoryEntry) │
 └──────────┴──────────┴──────────────────────────────┘
 ```
 
@@ -158,7 +158,6 @@ db.compact()
 1. Does WAL exist?
    ├── No  → Fresh database
    └── Yes → Recovery mode
-              │
               ├── Load checkpoint (if exists)
               │   └── Deserialize state machine
               │

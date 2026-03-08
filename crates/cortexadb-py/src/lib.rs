@@ -113,14 +113,14 @@ fn parse_index_mode(index_mode: Bound<'_, PyAny>) -> PyResult<cortexadb_core::In
 /// A record for batch insertion.
 ///
 /// Attributes:
-///     namespace (str): Namespace to store in.
+///     collection (str): Collection to store in.
 ///     content (str/bytes): Content to store.
 ///     embedding (list[float] | None): Embedding vector.
 ///     metadata (dict[str, str] | None): Metadata.
 #[pyclass(name = "BatchRecord")]
 #[derive(Clone)]
 struct PyBatchRecord {
-    pub namespace: String,
+    pub collection: String,
     pub content: Vec<u8>,
     pub embedding: Option<Vec<f32>>,
     pub metadata: Option<HashMap<String, String>>,
@@ -129,9 +129,9 @@ struct PyBatchRecord {
 #[pymethods]
 impl PyBatchRecord {
     #[new]
-    #[pyo3(signature = (namespace, content, *, embedding=None, metadata=None))]
+    #[pyo3(signature = (collection, content, *, embedding=None, metadata=None))]
     fn new(
-        namespace: String,
+        collection: String,
         content: Bound<'_, PyAny>,
         embedding: Option<Vec<f32>>,
         metadata: Option<HashMap<String, String>>,
@@ -146,7 +146,7 @@ impl PyBatchRecord {
             ));
         };
 
-        Ok(Self { namespace, content: content_bytes, embedding, metadata })
+        Ok(Self { collection, content: content_bytes, embedding, metadata })
     }
 }
 
@@ -195,7 +195,7 @@ impl PyHit {
 ///
 /// Attributes:
 ///     id (int): Memory identifier.
-///     namespace (str): Namespace this memory belongs to.
+///     collection (str): Collection this memory belongs to.
 ///     embedding (list[float] | None): Stored embedding vector.
 ///     metadata (dict[str, str]): Key-value metadata.
 ///     created_at (int): Unix timestamp when the memory was created.
@@ -207,7 +207,7 @@ struct PyMemory {
     #[pyo3(get)]
     id: u64,
     #[pyo3(get)]
-    namespace: String,
+    collection: String,
     #[pyo3(get)]
     created_at: u64,
     #[pyo3(get)]
@@ -232,8 +232,8 @@ impl PyMemory {
 
     fn __repr__(&self) -> String {
         format!(
-            "Memory(id={}, namespace='{}', created_at={})",
-            self.id, self.namespace, self.created_at
+            "Memory(id={}, collection='{}', created_at={})",
+            self.id, self.collection, self.created_at
         )
     }
 }
@@ -371,7 +371,7 @@ impl PyCortexaDB {
     /// Args:
     ///     embedding: List of floats (must match configured dimension).
     ///     metadata: Optional dict of string key-value pairs.
-    ///     namespace: Namespace to store in (default: "default").
+    ///     collection: Collection to store in (default: "default").
     ///
     /// Returns:
     ///     int: The assigned memory ID.
@@ -379,15 +379,15 @@ impl PyCortexaDB {
     /// Raises:
     ///     CortexaDBError: If the embedding dimension is wrong.
     #[pyo3(
-        text_signature = "(self, embedding, *, metadata=None, namespace='default', content='')",
-        signature = (embedding, *, metadata=None, namespace="default".to_string(), content="".to_string())
+        text_signature = "(self, embedding, *, metadata=None, collection='default', content='')",
+        signature = (embedding, *, metadata=None, collection="default".to_string(), content="".to_string())
     )]
     fn remember_embedding(
         &self,
         py: Python<'_>,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
-        namespace: String,
+        collection: String,
         content: String,
     ) -> PyResult<u64> {
         if embedding.len() != self.dimension {
@@ -401,10 +401,10 @@ impl PyCortexaDB {
         let id = py
             .allow_threads(|| {
                 if content.is_empty() {
-                    self.inner.remember_in_namespace(&namespace, embedding, metadata)
+                    self.inner.remember_in_namespace(&collection, embedding, metadata)
                 } else {
                     self.inner.remember_with_content(
-                        &namespace,
+                        &collection,
                         content.into_bytes(),
                         embedding,
                         metadata,
@@ -439,7 +439,7 @@ impl PyCortexaDB {
         let facade_records: Vec<facade::BatchRecord> = records
             .into_iter()
             .map(|r| facade::BatchRecord {
-                namespace: r.namespace,
+                namespace: r.collection,
                 content: r.content,
                 embedding: r.embedding,
                 metadata: r.metadata,
@@ -489,26 +489,26 @@ impl PyCortexaDB {
         Ok(results.into_iter().map(|m| PyHit { id: m.id, score: m.score }).collect())
     }
 
-    /// Search within a single namespace, filtering in Rust before returning results.
+    /// Search within a single collection, filtering in Rust before returning results.
     ///
     /// Args:
-    ///     namespace: Namespace string to filter by.
+    ///     collection: Collection string to filter by.
     ///     embedding: Query vector (must match configured dimension).
     ///     top_k:     Maximum number of hits to return (default 5).
     ///
     /// Returns:
-    ///     List of Hit objects ranked by score, scoped to the namespace.
+    ///     List of Hit objects ranked by score, scoped to the collection.
     ///
     /// Raises:
     ///     CortexaDBError: If the embedding dimension is wrong.
     #[pyo3(
-        text_signature = "(self, namespace, embedding, *, top_k=5, filter=None)",
-        signature = (namespace, embedding, *, top_k=5, filter=None)
+        text_signature = "(self, collection, embedding, *, top_k=5, filter=None)",
+        signature = (collection, embedding, *, top_k=5, filter=None)
     )]
-    fn ask_in_namespace(
+    fn ask_in_collection(
         &self,
         py: Python<'_>,
-        namespace: &str,
+        collection: &str,
         embedding: Vec<f32>,
         top_k: usize,
         filter: Option<HashMap<String, String>>,
@@ -521,9 +521,8 @@ impl PyCortexaDB {
             )));
         }
 
-        let ns = namespace.to_string();
         let results = py
-            .allow_threads(|| self.inner.ask_in_namespace(&ns, embedding, top_k, filter))
+            .allow_threads(|| self.inner.ask_in_namespace(collection, embedding, top_k, filter))
             .map_err(map_cortexadb_err)?;
 
         Ok(results.into_iter().map(|m| m.into()).collect::<Vec<PyHit>>())
@@ -545,7 +544,7 @@ impl PyCortexaDB {
 
         Ok(PyMemory {
             id: entry.id,
-            namespace: entry.namespace.clone(),
+            collection: entry.namespace.clone(),
             created_at: entry.created_at,
             importance: entry.importance,
             content: entry.content.clone(),

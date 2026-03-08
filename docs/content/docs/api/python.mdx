@@ -139,7 +139,7 @@ Retrieves a full memory entry by ID.
 mem = db.get(42)
 print(mem.id)          # 42
 print(mem.content)     # b"User prefers dark mode"
-print(mem.namespace)   # "default"
+print(mem.collection)  # "default"
 print(mem.metadata)    # {"source": "onboarding"}
 print(mem.created_at)  # 1709654400
 print(mem.importance)  # 0.0
@@ -207,14 +207,14 @@ Returns all outgoing edges from a memory.
 ```python
 neighbors = db.get_neighbors(1)
 for edge in neighbors:
-    print(f"→ {edge.to} ({edge.relation})")
+    print(f"→ {edge[0]} ({edge[1]})")
 ```
 
 ---
 
 ## Document Ingestion
 
-### `.ingest(text, strategy="recursive", chunk_size=512, overlap=50, metadata=None, namespace=None)`
+### `.ingest(text, strategy="recursive", chunk_size=512, overlap=50, metadata=None, collection=None)`
 
 Chunks text and stores each chunk as a memory.
 
@@ -233,7 +233,7 @@ Chunks text and stores each chunk as a memory.
 
 ---
 
-### `.load(file_path, strategy="markdown", chunk_size=512, overlap=50, metadata=None, namespace=None)`
+### `.load(file_path, strategy="markdown", chunk_size=512, overlap=50, metadata=None, collection=None)`
 
 Loads a file, chunks it, and stores each chunk.
 
@@ -365,7 +365,7 @@ Exports the current database state as a replay log.
 
 ### `Hit`
 
-Query result from `.ask()`.
+Query result from `.query().execute()`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -379,7 +379,7 @@ Full memory entry from `.get()`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `int` | Memory ID |
-| `namespace` | `str` | Collection name (internal key) |
+| `collection` | `str` | Collection name |
 | `content` | `bytes` | Raw content |
 | `embedding` | `list[float]?` | Vector embedding |
 | `metadata` | `dict[str, str]` | Key-value metadata |

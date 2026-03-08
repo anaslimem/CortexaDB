@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, Database, GitBranch, Zap, Shield, Layers } from 'lucide-react';
+import { ArrowRight, Database, GitBranch, Zap, Shield, Layers, Github, Star, Download, TrendingUp } from 'lucide-react';
 import { CodePreview } from '@/components/code-preview';
 
 const features = [
@@ -30,7 +30,7 @@ const features = [
   },
   {
     icon: Database,
-    title: 'Multi-Agent Namespaces',
+    title: 'Multi-Agent Collections',
     description: 'Isolate memories between agents within a single database file',
   },
 ];
@@ -48,17 +48,17 @@ export default function HomePage() {
             </span>
             Now in Beta
           </div>
-          
+
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-6 bg-linear-to-b from-fd-foreground to-fd-foreground/70 bg-clip-text text-transparent">
             The database for
             <br />
             AI Agent Memory
           </h1>
-          
+
           <p className="text-xl text-fd-muted-foreground max-w-2xl mx-auto mb-10">
             CortexaDB is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. Single-file, no server required.
           </p>
-          
+
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               href="/docs/getting-started/installation"
@@ -67,12 +67,52 @@ export default function HomePage() {
               Get Started
               <ArrowRight className="w-4 h-4" />
             </Link>
-            <Link
-              href="/docs/guides/core-concepts"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-lg border border-fd-border text-fd-foreground font-medium hover:bg-fd-accent transition-colors"
+            <a
+              href="https://github.com/anaslimem/CortexaDB"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-lg border border-fd-border bg-fd-card text-fd-foreground font-medium hover:bg-fd-accent transition-colors"
             >
-              Learn More
-            </Link>
+              <Github className="w-4 h-4" />
+              Star on GitHub
+              <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Stats Section */}
+      <section className="py-12 border-y border-fd-border bg-fd-muted/10">
+        <div className="max-w-6xl mx-auto px-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+            <div className="flex flex-col items-center text-center space-y-2">
+              <div className="p-3 rounded-xl bg-yellow-500/10 text-yellow-600 dark:text-yellow-500">
+                <Star className="w-6 h-6 fill-current" />
+              </div>
+              <div className="text-3xl font-bold tracking-tight">24</div>
+              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">GitHub Stars</div>
+            </div>
+            <div className="flex flex-col items-center text-center space-y-2">
+              <div className="p-3 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-500">
+                <Download className="w-6 h-6 transition-transform group-hover:scale-110" />
+              </div>
+              <div className="text-3xl font-bold tracking-tight">4.7k+</div>
+              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">PyPI Downloads</div>
+            </div>
+            <div className="flex flex-col items-center text-center space-y-2">
+              <div className="p-3 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-500">
+                <Zap className="w-6 h-6 fill-current" />
+              </div>
+              <div className="text-3xl font-bold tracking-tight text-fd-primary">103x</div>
+              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">Faster Ingestion</div>
+            </div>
+            <div className="flex flex-col items-center text-center space-y-2">
+              <div className="p-3 rounded-xl bg-green-500/10 text-green-600 dark:text-green-500">
+                <Shield className="w-6 h-6" />
+              </div>
+              <div className="text-3xl font-bold tracking-tight">Beta</div>
+              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">Production Ready</div>
+            </div>
           </div>
         </div>
       </section>
@@ -89,17 +129,17 @@ export default function HomePage() {
             </div>
             <pre className="p-6 text-sm overflow-x-auto">
               <code className="text-fd-foreground">
-{`from cortexadb import CortexaDB
+                {`from cortexadb import CortexaDB
 from cortexadb.providers.openai import OpenAIEmbedder
 
 db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
 
 # Store memories
-db.remember("User prefers dark mode")
-db.remember("User works at Stripe")
+db.add("User prefers dark mode")
+db.add("User works at Stripe")
 
 # Semantic search
-hits = db.ask("What does the user like?")
+hits = db.query("What does the user like?").execute()
 # => [Hit(id=1, score=0.87), Hit(id=2, score=0.72)]`}
               </code>
             </pre>
@@ -116,7 +156,7 @@ hits = db.ask("What does the user like?")
           <p className="text-fd-muted-foreground text-center mb-16 max-w-2xl mx-auto">
             Built from the ground up for AI agents with hybrid retrieval, knowledge graphs, and rock-solid durability.
           </p>
-          
+
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature) => (
               <div
