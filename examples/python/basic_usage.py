@@ -22,7 +22,7 @@ def main():
     if os.path.isdir(db_path):
         shutil.rmtree(db_path)
 
-    print("=== CortexaDB Python Example (v0.1.7) ===\n")
+    print("=== CortexaDB Python Example (v0.1.8) ===\n")
 
     # 1. Open database with embedder (auto-embeds text)
     # HashEmbedder generates deterministic embeddings for testing
@@ -56,7 +56,7 @@ def main():
     
     Third paragraph to complete the example.
     """
-    # v0.1.7 uses optimized batch insertion internally
+    # v0.1.8 uses optimized batch insertion internally
     ids = db.ingest(long_text, strategy="recursive", chunk_size=100, overlap=10)
     print(f"   Recursive batching: {len(ids)} chunks stored in ms")
 

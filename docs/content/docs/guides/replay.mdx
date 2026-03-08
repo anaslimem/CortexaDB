@@ -19,10 +19,10 @@ Enable recording by passing a `record` path when opening the database:
 db = CortexaDB.open("agent.mem", dimension=128, record="session.log")
 
 # All operations are now logged
-mid1 = db.remember("User likes dark mode", embedding=[...])
-mid2 = db.remember("User works at Stripe", embedding=[...])
+mid1 = db.add("User likes dark mode", vector=[...])
+mid2 = db.add("User works at Stripe", vector=[...])
 db.connect(mid1, mid2, "relates_to")
-db.delete_memory(mid1)
+db.delete(mid1)
 db.compact()
 db.checkpoint()
 ```

@@ -12,13 +12,15 @@ The high-level API for interacting with the database.
 ### Opening a Database
 
 ```rust
-use cortexadb_core::CortexaDB;
+use cortexadb_core::{CortexaDB, CortexaDBBuilder};
 
 // Simple open with default config
-let db = CortexaDB::open("/path/to/db", 128)?;
+let db = CortexaDBBuilder::new("/path/to/db", 128).build()?;
 
 // Builder pattern for advanced config
-let db = CortexaDB::builder("/path/to/db", config).build()?;
+let db = CortexaDBBuilder::new("/path/to/db", 128)
+    .with_sync_policy(cortexadb_core::engine::SyncPolicy::Async { interval_ms: 1000 })
+    .build()?;
 ```
 
 ---
@@ -138,6 +140,25 @@ Returns database statistics.
 let stats = db.stats()?;
 println!("Entries: {}", stats.entries);
 println!("Indexed: {}", stats.indexed_embeddings);
+```
+
+---
+
+## Observability / Telemetry
+
+CortexaDB uses the standard Rust [`log`](https://crates.io/crates/log) crate for all internal diagnostics and telemetry. It issues structured `debug!` and `trace!` logs instead of printing to stdout/stderr.
+
+To see CortexaDB metrics and internal operations in your application, initialize a logger (like `env_logger` or `tracing-subscriber`):
+
+```rust
+use env_logger;
+
+fn main() {
+    // Initialize the logger before opening the database
+    env_logger::init();
+    
+    // In your terminal, run with: RUST_LOG=cortexadb_core=debug cargo run
+}
 ```
 
 ---
