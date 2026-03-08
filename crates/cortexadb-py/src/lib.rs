@@ -107,6 +107,50 @@ fn parse_index_mode(index_mode: Bound<'_, PyAny>) -> PyResult<cortexadb_core::In
 }
 
 // ---------------------------------------------------------------------------
+// BatchRecord — for bulk insertion
+// ---------------------------------------------------------------------------
+
+/// A record for batch insertion.
+///
+/// Attributes:
+///     namespace (str): Namespace to store in.
+///     content (str/bytes): Content to store.
+///     embedding (list[float] | None): Embedding vector.
+///     metadata (dict[str, str] | None): Metadata.
+#[pyclass(name = "BatchRecord")]
+#[derive(Clone)]
+struct PyBatchRecord {
+    pub namespace: String,
+    pub content: Vec<u8>,
+    pub embedding: Option<Vec<f32>>,
+    pub metadata: Option<HashMap<String, String>>,
+}
+
+#[pymethods]
+impl PyBatchRecord {
+    #[new]
+    #[pyo3(signature = (namespace, content, *, embedding=None, metadata=None))]
+    fn new(
+        namespace: String,
+        content: Bound<'_, PyAny>,
+        embedding: Option<Vec<f32>>,
+        metadata: Option<HashMap<String, String>>,
+    ) -> PyResult<Self> {
+        let content_bytes = if let Ok(s) = content.extract::<String>() {
+            s.into_bytes()
+        } else if let Ok(b) = content.extract::<Vec<u8>>() {
+            b
+        } else {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "content must be str or bytes",
+            ));
+        };
+
+        Ok(Self { namespace, content: content_bytes, embedding, metadata })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Hit — lightweight query result
 // ---------------------------------------------------------------------------
 
@@ -122,6 +166,12 @@ struct PyHit {
     id: u64,
     #[pyo3(get)]
     score: f32,
+}
+
+impl From<facade::Hit> for PyHit {
+    fn from(h: facade::Hit) -> Self {
+        Self { id: h.id, score: h.score }
+    }
 }
 
 #[pymethods]
@@ -365,6 +415,44 @@ impl PyCortexaDB {
         Ok(id)
     }
 
+    /// Store a batch of memories efficiently.
+    ///
+    /// Args:
+    ///     records: List of BatchRecord objects.
+    ///
+    /// Returns:
+    ///     int: The ID of the last command executed (for flushing/waiting).
+    #[pyo3(text_signature = "(self, records)")]
+    fn remember_batch(&self, py: Python<'_>, records: Vec<PyBatchRecord>) -> PyResult<Vec<u64>> {
+        for rec in &records {
+            if let Some(emb) = &rec.embedding {
+                if emb.len() != self.dimension {
+                    return Err(CortexaDBError::new_err(format!(
+                        "embedding dimension mismatch in batch: expected {}, got {}",
+                        self.dimension,
+                        emb.len(),
+                    )));
+                }
+            }
+        }
+
+        let facade_records: Vec<facade::BatchRecord> = records
+            .into_iter()
+            .map(|r| facade::BatchRecord {
+                namespace: r.namespace,
+                content: r.content,
+                embedding: r.embedding,
+                metadata: r.metadata,
+            })
+            .collect();
+
+        let ids = py
+            .allow_threads(|| self.inner.remember_batch(facade_records))
+            .map_err(|e| CortexaDBError::new_err(e.to_string()))?;
+
+        Ok(ids)
+    }
+
     /// Query the database by embedding vector similarity.
     ///
     /// Args:
@@ -438,7 +526,7 @@ impl PyCortexaDB {
             .allow_threads(|| self.inner.ask_in_namespace(&ns, embedding, top_k, filter))
             .map_err(map_cortexadb_err)?;
 
-        Ok(results.into_iter().map(|m| PyHit { id: m.id, score: m.score }).collect())
+        Ok(results.into_iter().map(|m| m.into()).collect::<Vec<PyHit>>())
     }
 
     /// Retrieve a full memory by ID.
@@ -667,6 +755,7 @@ fn _cortexadb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCortexaDB>()?;
     m.add_class::<PyHit>()?;
     m.add_class::<PyMemory>()?;
+    m.add_class::<PyBatchRecord>()?;
     m.add_class::<PyStats>()?;
     m.add_class::<PyChunkResult>()?;
     m.add_function(wrap_pyfunction!(chunk, m)?)?;

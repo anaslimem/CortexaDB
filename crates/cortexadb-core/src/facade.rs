@@ -184,6 +184,15 @@ pub struct CortexaDB {
     next_id: std::sync::atomic::AtomicU64,
 }
 
+/// A record for batch insertion.
+#[derive(Debug, Clone)]
+pub struct BatchRecord {
+    pub namespace: String,
+    pub content: Vec<u8>,
+    pub embedding: Option<Vec<f32>>,
+    pub metadata: Option<HashMap<String, String>>,
+}
+
 impl CortexaDB {
     /// Open a CortexaDB database at the given path with a required vector dimension,
     /// using standard safe defaults.
@@ -311,6 +320,29 @@ impl CortexaDB {
 
         self.inner.insert_memory(entry)?;
         Ok(id.0)
+    }
+
+    /// Store a batch of memories efficiently.
+    pub fn remember_batch(&self, records: Vec<BatchRecord>) -> Result<Vec<u64>> {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let mut entries = Vec::with_capacity(records.len());
+        let mut ids = Vec::with_capacity(records.len());
+
+        for rec in records {
+            let id = MemoryId(self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+            let mut entry = MemoryEntry::new(id.clone(), rec.namespace, rec.content, ts);
+            if let Some(emb) = rec.embedding {
+                entry = entry.with_embedding(emb);
+            }
+            if let Some(meta) = rec.metadata {
+                entry.metadata = meta;
+            }
+            ids.push(id.0);
+            entries.push(entry);
+        }
+
+        self.inner.insert_memories_batch(entries)?;
+        Ok(ids)
     }
 
     /// Query the database for the top-k most relevant memories.

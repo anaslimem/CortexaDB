@@ -27,17 +27,21 @@ CortexaDB exists to provide a **middle ground**: a hard-durable, embedded memory
 from cortexadb import CortexaDB
 from cortexadb.providers.openai import OpenAIEmbedder
 
-# 1. Open database with an embedder for automatic text-to-vector
+# 1. Open database with an embedder 
 db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
 
-# 2. Store facts and connect them logically
-mid1 = db.remember("The user prefers dark mode.")
-mid2 = db.remember("User works at Stripe.")
+# 2. Add facts 
+mid1 = db.add("The user prefers dark mode.")
+mid2 = db.add("User works at Stripe.")
 db.connect(mid1, mid2, "relates_to")
 
-# 3. Query with semantic and graph intelligence
-hits = db.ask("What are the user's preferences?", use_graph=True)
-print(f"Top Hit: {hits[0].id} (Score: {hits[0].score})")
+# 3. Fluent Query Builder
+hits = db.query("What are the user's preferences?") \
+    .limit(5) \
+    .use_graph() \
+    .execute()
+
+print(f"Top Hit: {hits[0].id}")
 ```
 
 ---
@@ -52,77 +56,30 @@ pip install cortexadb
 pip install cortexadb[docs,pdf]  # Optional: For PDF/Docx support
 ```
 
-**Rust**
-```toml
-[dependencies]
-cortexadb-core = { git = "https://github.com/anaslimem/CortexaDB.git" }
-```
-
 ---
 
 ### Core Capabilities
 
+- **100x Faster Ingestion**: New batch insertion system allows processing 5,000+ chunks/second.
 - **Hybrid Retrieval**: Search by semantic similarity (Vector), structural relationship (Graph), and time-based recency in a single query.
-- **Ultra-Fast Indexing**: Uses **HNSW (USearch)** for sub-millisecond approximate nearest neighbor search with 95%+ recall.
-- **Hard Durability**: A Write-Ahead Log (WAL) and segmented storage ensure zero data loss, even after a crash.
-- **Smart Document Ingestion**: Built-in recursive, semantic, and markdown chunking for TXT, MD, PDF, and DOCX files.
-- **Privacy First**: Completely local and embedded. Your agent's data never leaves its environment unless you want it to.
-- **Deterministic Replay**: Capture session operations for debugging or syncing memory across different agents.
+- **Ultra-Fast Indexing**: Uses **HNSW (USearch)** for sub-millisecond approximate nearest neighbor search.
+- **Fluent API**: Chainable QueryBuilder for expressive searching and collection scoping.
+- **Hard Durability**: WAL-backed storage ensures zero data loss.
+- **Privacy First**: Completely local. Your agent's memory stays on your machine.
 
 ---
 
 <details>
 <summary><b>Technical Architecture & Benchmarks</b></summary>
 
-### Rust Architecture Overview
-
-```
-┌──────────────────────────────────────────────────┐
-│              Python API (PyO3 Bindings)          │
-│   CortexaDB, Namespace, Embedder, chunk(), etc.  │
-└────────────────────────┬─────────────────────────┘
-                         │
-┌────────────────────────▼─────────────────────────┐
-│               CortexaDB Facade                   │
-│        High-level API (remember, ask, etc.)      │
-└────────────────────────┬─────────────────────────┘
-                         │
-┌────────────────────────▼─────────────────────────┐
-│              CortexaDBStore                      │
-│    Concurrency coordinator & durability layer    │
-│  ┌────────────────┐  ┌────────────────────────┐  │
-│  │ WriteState     │  │ ReadSnapshot           │  │
-│  │ (Mutex)        │  │ (ArcSwap, lock-free)   │  │
-│  └────────────────┘  └────────────────────────┘  │
-└───────┬──────────────────┬───────────────┬───────┘
-        │                  │               │
-┌───────▼─────┐  ┌───────▼───────┐  ┌────▼───────────┐
-│   Engine    │  │   Segments    │  │  Index Layer    │
-│   (WAL)     │  │   (Storage)   │  │                 │
-│             │  │               │  │  VectorIndex    │
-│  Command    │  │  MemoryEntry  │  │  HnswBackend    │
-│  recording  │  │  persistence  │  │  GraphIndex     │
-│             │  │               │  │  TemporalIndex  │
-│  Crash      │  │  CRC32        │  │                 │
-│  recovery   │  │  checksums    │  │  HybridQuery    │
-└─────────────┘  └───────────────┘  └─────────────────┘
-                         │
-              ┌──────────▼──────────┐
-              │    State Machine     │
-              │   (In-memory state)  │
-              │  - Memory entries    │
-              │  - Graph edges       │
-              │  - Temporal index    │
-              └─────────────────────┘
-```
-
 ### Performance Benchmarks (v0.1.7)
-Measured with 10,000 embeddings (384-dimensions) on a standard SSD.
+Measured on M2 Mac with 1,000 chunks of text.
 
-| Mode | Query (p50) | Throughput | Recall |
-|------|-------------|-----------|--------|
-| Exact (baseline) | 1.34ms | 690 QPS | 100% |
-| HNSW | 0.29ms | 3,203 QPS | 95% |
+| Operation | v0.1.6 (Sync) | v0.1.7 (Batch) | Improvement |
+|-----------|---------------|----------------|-------------|
+| Ingestion | 12.4s         | **0.12s**      | **103x Faster** |
+| Memory Add| 15ms          | 1ms            | 15x Faster |
+| HNSW Search| 0.3ms        | 0.28ms         | - |
 
 </details>
 

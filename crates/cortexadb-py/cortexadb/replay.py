@@ -97,9 +97,9 @@ class ReplayWriter:
             "metadata": metadata,
         })
 
-    def record_connect(self, *, from_id: int, to_id: int, relation: str) -> None:
+    def record_connect(self, id1: int, id2: int, relation: str) -> None:
         """Append a ``connect`` operation."""
-        self._write({"op": "connect", "from_id": from_id, "to_id": to_id, "relation": relation})
+        self._write({"op": "connect", "id1": id1, "id2": id2, "relation": relation})
 
     def record_compact(self) -> None:
         """Append a ``compact`` operation."""

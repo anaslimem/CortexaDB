@@ -388,7 +388,7 @@ impl CortexaDBStore {
                                     let (guard, _) = cvar
                                         .wait_timeout(runtime, timeout)
                                         .expect("sync runtime wait poisoned");
-                                    runtime = guard;    
+                                    runtime = guard;
                                     let timed_out = runtime
                                         .dirty_since
                                         .map(|d| d.elapsed() >= max_delay)
@@ -557,6 +557,65 @@ impl CortexaDBStore {
         }
 
         self.execute_write_transaction_locked(&mut writer, WriteOp::InsertMemory(effective))
+    }
+
+    pub fn insert_memories_batch(&self, entries: Vec<MemoryEntry>) -> Result<CommandId> {
+        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
+        let mut last_cmd_id = CommandId(0);
+
+        for entry in entries {
+            let mut effective = entry;
+            // Check for previous state to handle partial updates if necessary
+            if let Ok(prev) = writer.engine.get_state_machine().get_memory(effective.id) {
+                let content_changed = prev.content != effective.content;
+                if content_changed && effective.embedding.is_none() {
+                    return Err(CortexaDBStoreError::MissingEmbeddingOnContentChange(effective.id));
+                }
+                if !content_changed && effective.embedding.is_none() {
+                    effective.embedding = prev.embedding.clone();
+                }
+            }
+
+            // Validate dimension
+            if let Some(embedding) = effective.embedding.as_ref() {
+                if embedding.len() != writer.indexes.vector.dimension() {
+                    return Err(crate::index::vector::VectorError::DimensionMismatch {
+                        expected: writer.indexes.vector.dimension(),
+                        actual: embedding.len(),
+                    }
+                    .into());
+                }
+            }
+
+            // Execute unsynced for the whole batch
+            last_cmd_id =
+                writer.engine.execute_command_unsynced(Command::InsertMemory(effective.clone()))?;
+
+            // Update vector index
+            match effective.embedding {
+                Some(embedding) => {
+                    writer.indexes.vector_index_mut().index_in_namespace(
+                        &effective.namespace,
+                        effective.id,
+                        embedding,
+                    )?;
+                }
+                None => {
+                    let _ = writer.indexes.vector_index_mut().remove(effective.id);
+                }
+            }
+        }
+
+        // Single flush for the entire batch if in strict mode
+        if sync_now {
+            writer.engine.flush()?;
+        }
+
+        // Publish snapshot once after the batch
+        self.publish_snapshot_from_write_state(&writer);
+
+        Ok(last_cmd_id)
     }
 
     pub fn delete_memory(&self, id: MemoryId) -> Result<CommandId> {
@@ -1341,8 +1400,9 @@ mod tests {
 
         // Add 5 items
         for i in 0..5 {
-            let entry = MemoryEntry::new(MemoryId(i), "agent_x".to_string(), b"data".to_vec(), 1000)
-                .with_embedding(vec![1.0, 0.0, 0.0]);
+            let entry =
+                MemoryEntry::new(MemoryId(i), "agent_x".to_string(), b"data".to_vec(), 1000)
+                    .with_embedding(vec![1.0, 0.0, 0.0]);
             store.insert_memory(entry).unwrap();
         }
 
@@ -1369,9 +1429,8 @@ mod tests {
             .unwrap();
         assert_eq!(search_results.len(), 2);
 
-        let ids: Vec<u64> = search_results.iter().map(|s| s.0.0).collect();
+        let ids: Vec<u64> = search_results.iter().map(|s| s.0 .0).collect();
         assert!(ids.contains(&0));
         assert!(ids.contains(&1));
     }
 }
-

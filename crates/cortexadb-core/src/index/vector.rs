@@ -554,18 +554,18 @@ impl VectorIndex {
         // 3. Rebuild HNSW backend if enabled
         if let Some(ref old_hnsw) = self.hnsw_backend {
             let config = old_hnsw.config.clone();
-            
+
             // Create a fresh, clean HNSW backend
             let new_hnsw = HnswBackend::new(self.vector_dimension, config)
                 .map_err(|_e| VectorError::NoEmbeddings)?;
-                
+
             // Re-insert all live embeddings into the fresh backend
             for partition in self.partitions.values() {
                 for (id, embedding) in &partition.embeddings {
                     let _ = new_hnsw.add(*id, embedding);
                 }
             }
-            
+
             // Swap out the bloated instance for the pristine one
             self.hnsw_backend = Some(Arc::new(new_hnsw));
         }
@@ -1022,23 +1022,23 @@ mod tests {
         for i in 0..10 {
             index.index(MemoryId(i), vec![i as f32, 0.0, 0.0]).unwrap();
         }
-        
+
         // Remove 8 items (they become tombstones in HNSW)
         for i in 2..10 {
             index.remove(MemoryId(i)).unwrap();
         }
 
         assert_eq!(index.len(), 2);
-        
+
         // Compact it to rebuild the HNSW index
         let compacted_count = index.compact().unwrap();
         assert_eq!(compacted_count, 2);
-        
+
         // Ensure the items are still searchable via HNSW
         let results = index.search(&[0.5, 0.0, 0.0], 2).unwrap();
         assert_eq!(results.len(), 2);
-        
-        let ids: Vec<u64> = results.iter().map(|r| r.0.0).collect();
+
+        let ids: Vec<u64> = results.iter().map(|r| r.0 .0).collect();
         assert!(ids.contains(&0));
         assert!(ids.contains(&1));
     }

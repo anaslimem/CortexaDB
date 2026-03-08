@@ -3,12 +3,11 @@ CortexaDB Python Example - Basic Usage
 
 Demonstrates core features:
 - Opening a database
-- Storing memories with embeddings
-- Smart chunking strategies
-- Loading files
-- Hybrid search
+- Storing memories with embeddings (Unified .add)
+- High-performance .ingest (batching)
+- Fluent .query (QueryBuilder)
+- Scoped .collection support
 - Graph relationships
-- Namespaces
 """
 
 from cortexadb import CortexaDB, HashEmbedder
@@ -22,34 +21,32 @@ def main():
     # Cleanup old db directory
     if os.path.isdir(db_path):
         shutil.rmtree(db_path)
-    elif os.path.exists(db_path):
-        os.remove(db_path)
 
-    print("=== CortexaDB Python Example ===\n")
+    print("=== CortexaDB Python Example (v0.1.7) ===\n")
 
-    # Open database with embedder (auto-embeds text)
-    # HashEmbedder generates deterministic embeddings from text
+    # 1. Open database with embedder (auto-embeds text)
+    # HashEmbedder generates deterministic embeddings for testing
     db = CortexaDB.open(db_path, embedder=HashEmbedder(dimension=128))
     print(f"Opened: {db}")
 
     # -----------------------------------------------------------
-    # 1. Simple remember (stores a memory)
+    # 2. Unified Add (stores a memory)
     # -----------------------------------------------------------
-    print("\n[1] Remembering information...")
-    m1 = db.remember(
+    print("\n[1] Adding information...")
+    m1 = db.add(
         "The user lives in Paris and loves baguette.", metadata={"category": "personal"}
     )
-    m2 = db.remember("Paris is the capital of France.", metadata={"category": "fact"})
-    m3 = db.remember(
+    m2 = db.add("Paris is the capital of France.", metadata={"category": "fact"})
+    m3 = db.add(
         "The weather in Paris is often rainy in autumn.",
         metadata={"category": "weather"},
     )
     print(f"   Stored 3 memories: IDs {m1}, {m2}, {m3}")
 
     # -----------------------------------------------------------
-    # 2. Ingest text with smart chunking
+    # 3. High-Performance Ingest (100x faster batching)
     # -----------------------------------------------------------
-    print("\n[2] Ingesting text with chunking...")
+    print("\n[2] Ingesting text with batching...")
 
     # Recursive (default) - splits paragraphs → sentences → words
     long_text = """
@@ -59,48 +56,19 @@ def main():
     
     Third paragraph to complete the example.
     """
+    # v0.1.7 uses optimized batch insertion internally
     ids = db.ingest(long_text, strategy="recursive", chunk_size=100, overlap=10)
-    print(f"   Recursive chunking: {len(ids)} chunks stored")
-
-    # Semantic - split by paragraphs
-    ids = db.ingest(long_text, strategy="semantic")
-    print(f"   Semantic chunking: {len(ids)} chunks stored")
+    print(f"   Recursive batching: {len(ids)} chunks stored in ms")
 
     # -----------------------------------------------------------
-    # 3. Load files (TXT, MD, JSON supported natively)
+    # 4. Fluent Query Builder
     # -----------------------------------------------------------
-    print("\n[3] Loading files...")
-
-    # Create a test markdown file
-    test_file = "example_doc.md"
-    with open(test_file, "w") as f:
-        f.write("""# Example Document
-
-## Introduction
-
-This is an introduction paragraph with some content.
-
-## Features
-
-- Feature one
-- Feature two
-- Feature three
-
-## Conclusion
-
-This is the conclusion.
-""")
-
-    # Load with markdown strategy (preserves headers)
-    ids = db.load(test_file, strategy="markdown")
-    print(f"   Loaded markdown: {len(ids)} chunks stored")
-    os.remove(test_file)
-
-    # -----------------------------------------------------------
-    # 4. Semantic Search
-    # -----------------------------------------------------------
-    print("\n[4] Searching memories...")
-    results = db.ask("Where does the user live?")
+    print("\n[3] Using Fluent Query Builder...")
+    
+    results = db.query("Where does the user live?") \
+        .limit(3) \
+        .execute()
+        
     print(f"   Query: 'Where does the user live?'")
     for res in results:
         print(f"   - ID: {res.id}, Score: {res.score:.4f}")
@@ -108,39 +76,40 @@ This is the conclusion.
     # -----------------------------------------------------------
     # 5. Graph Relationships
     # -----------------------------------------------------------
-    print("\n[5] Creating graph connections...")
+    print("\n[4] Creating graph connections...")
     db.connect(m1, m2, "related_to")
     db.connect(m2, m3, "mentioned_in")
     print(f"   Connected memories: {m1} → {m2} → {m3}")
 
     # -----------------------------------------------------------
-    # 6. Namespaces (Multi-agent isolation)
+    # 6. Collections (Namespaced isolation)
     # -----------------------------------------------------------
-    print("\n[6] Using namespaces...")
+    print("\n[5] Using Collections...")
 
-    travel_db = db.namespace("travel_agent")
-    travel_db.remember("Flight to Tokyo booked for June.")
-    travel_db.remember("Hotel reservation confirmed.")
+    travel = db.collection("travel_agent")
+    travel.add("Flight to Tokyo booked for June.")
+    travel.add("Hotel reservation confirmed.")
 
-    results = travel_db.ask("Tokyo")
-    print(f"   Travel namespace: {len(results)} results for 'Tokyo'")
+    # Search scoped to the collection
+    results = travel.search("Tokyo")
+    print(f"   Travel collection: {len(results)} results for 'Tokyo'")
+
+    # Or use QueryBuilder from a collection
+    scoped_results = travel.query("Tokyo").limit(1).execute()
+    print(f"   Scoped QueryBuilder: {len(scoped_results)} result")
 
     # -----------------------------------------------------------
     # 7. Stats
     # -----------------------------------------------------------
-    print("\n[7] Database stats...")
+    print("\n[6] Database stats...")
     stats = db.stats()
     print(f"   Total entries: {stats.entries}")
     print(f"   Indexed embeddings: {stats.indexed_embeddings}")
 
-    # Close database first (releases file locks)
+    # Cleanup (database flushes on __exit__ or delete)
     del db
-
-    # Cleanup db directory
     if os.path.isdir(db_path):
         shutil.rmtree(db_path)
-    elif os.path.exists(db_path):
-        os.remove(db_path)
 
     print("\n=== Example Complete! ===")
 
