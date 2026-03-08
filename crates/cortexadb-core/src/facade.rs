@@ -323,24 +323,26 @@ impl CortexaDB {
     }
 
     /// Store a batch of memories efficiently.
-    pub fn remember_batch(&self, records: Vec<BatchRecord>) -> Result<u64> {
+    pub fn remember_batch(&self, records: Vec<BatchRecord>) -> Result<Vec<u64>> {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let mut entries = Vec::with_capacity(records.len());
+        let mut ids = Vec::with_capacity(records.len());
 
         for rec in records {
             let id = MemoryId(self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-            let mut entry = MemoryEntry::new(id, rec.namespace, rec.content, ts);
+            let mut entry = MemoryEntry::new(id.clone(), rec.namespace, rec.content, ts);
             if let Some(emb) = rec.embedding {
                 entry = entry.with_embedding(emb);
             }
             if let Some(meta) = rec.metadata {
                 entry.metadata = meta;
             }
+            ids.push(id.0);
             entries.push(entry);
         }
 
-        let last_cmd_id = self.inner.insert_memories_batch(entries)?;
-        Ok(last_cmd_id.0)
+        self.inner.insert_memories_batch(entries)?;
+        Ok(ids)
     }
 
     /// Query the database for the top-k most relevant memories.

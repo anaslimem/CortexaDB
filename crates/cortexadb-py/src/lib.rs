@@ -423,7 +423,7 @@ impl PyCortexaDB {
     /// Returns:
     ///     int: The ID of the last command executed (for flushing/waiting).
     #[pyo3(text_signature = "(self, records)")]
-    fn remember_batch(&self, py: Python<'_>, records: Vec<PyBatchRecord>) -> PyResult<u64> {
+    fn remember_batch(&self, py: Python<'_>, records: Vec<PyBatchRecord>) -> PyResult<Vec<u64>> {
         for rec in &records {
             if let Some(emb) = &rec.embedding {
                 if emb.len() != self.dimension {
@@ -446,11 +446,11 @@ impl PyCortexaDB {
             })
             .collect();
 
-        let last_id = py
+        let ids = py
             .allow_threads(|| self.inner.remember_batch(facade_records))
-            .map_err(map_cortexadb_err)?;
+            .map_err(|e| CortexaDBError::new_err(e.to_string()))?;
 
-        Ok(last_id)
+        Ok(ids)
     }
 
     /// Query the database by embedding vector similarity.

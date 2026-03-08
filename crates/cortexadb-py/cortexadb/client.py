@@ -104,27 +104,16 @@ class Collection:
         text: t.Optional[str] = None,
         vector: t.Optional[t.List[float]] = None,
         metadata: t.Optional[t.Dict[str, str]] = None,
+        **kwargs
     ) -> int:
         """Add a memory to this collection."""
         self._check_writable()
-        return self._db.add(text=text, vector=vector, metadata=metadata, collection=self.name)
+        return self._db.add(text=text, vector=vector, metadata=metadata, collection=self.name, **kwargs)
 
-    def search(
-        self,
-        query: t.Optional[str] = None,
-        vector: t.Optional[t.List[float]] = None,
-        limit: int = 5,
-        *,
-        filter: t.Optional[t.Dict[str, str]] = None,
-        use_graph: bool = False,
-        recency_bias: bool = False,
-    ) -> t.List[Hit]:
-        """Search within this collection."""
-        return self._db.search(
-            query=query, vector=vector, limit=limit,
-            collections=[self.name], filter=filter,
-            use_graph=use_graph, recency_bias=recency_bias
-        )
+    def search(self, query=None, vector=None, limit=None, **kwargs) -> t.List[Hit]:
+        """Search in this collection."""
+        limit = limit or kwargs.get("top_k", 5)
+        return self._db.search(query=query, vector=vector, limit=limit, collections=[self.name], **kwargs)
 
     def query(self, text: t.Optional[str] = None, vector: t.Optional[t.List[float]] = None) -> QueryBuilder:
         """Start a fluent query builder scoped to this collection."""
@@ -166,6 +155,7 @@ class CortexaDB:
         max_bytes: t.Optional[int] = None,
         index_mode: t.Union[str, t.Dict[str, t.Any]] = "exact",
         _recorder: t.Optional[ReplayWriter] = None,
+        **kwargs  # Swallow extra args from .open() / .replay()
     ):
         self._embedder = embedder
         self._recorder = _recorder
@@ -180,8 +170,8 @@ class CortexaDB:
 
     @classmethod
     def open(cls, path: str, **kwargs) -> "CortexaDB":
-        dimension = kwargs.get("dimension")
-        embedder = kwargs.get("embedder")
+        dimension = kwargs.pop("dimension", None)
+        embedder = kwargs.pop("embedder", None)
         if embedder is not None and dimension is not None:
             raise CortexaDBConfigError("Provide either 'dimension' or 'embedder', not both.")
         if embedder is None and dimension is None:
@@ -191,13 +181,55 @@ class CortexaDB:
         record_path = kwargs.pop("record", None)
         recorder = ReplayWriter(record_path, dimension=dim, sync=kwargs.get("sync", "strict")) if record_path else None
         
-        return cls(path, dimension=dim, _recorder=recorder, **kwargs)
+        return cls(path, dimension=dim, embedder=embedder, _recorder=recorder, **kwargs)
 
     @classmethod
     def replay(cls, log_path: str, db_path: str, **kwargs) -> "CortexaDB":
-        reader = ReplayReader(log_path)
+        from .replay import ReplayReader
+        try:
+            reader = ReplayReader(log_path)
+        except FileNotFoundError as e:
+            raise CortexaDBError(str(e))
+        strict = kwargs.get("strict", True)
+        
         db = cls.open(db_path, dimension=reader.header.dimension, **kwargs)
-        # ... Replay logic using the reader ...
+        report = {"checked": 0, "exported": 0, "skipped": 0, "failed": 0, "op_counts": {}}
+        
+        id_map = {} # Map log IDs to new DB IDs
+        
+        for op in reader.operations():
+            op_type = op.get("op", "unknown")
+            report["checked"] += 1
+            report["op_counts"][op_type] = report["op_counts"].get(op_type, 0) + 1
+            
+            try:
+                if op_type == "remember":
+                    new_id = db.add(
+                        text=op.get("text"),
+                        vector=op.get("embedding"),
+                        metadata=op.get("metadata"),
+                        collection=op.get("namespace", "default")
+                    )
+                    id_map[op.get("id")] = new_id
+                    report["exported"] += 1
+                elif op_type == "connect":
+                    src = id_map.get(op.get("id1") or op.get("from_id"))
+                    dst = id_map.get(op.get("id2") or op.get("to_id"))
+                    if src and dst:
+                        db.connect(src, dst, op.get("relation"))
+                        report["exported"] += 1
+                    else:
+                        report["skipped"] += 1
+                else:
+                    report["op_counts"]["unknown"] = report["op_counts"].get("unknown", 0) + 1
+                    if strict: raise CortexaDBError(f"unknown replay op: {op_type}")
+                    report["skipped"] += 1
+            except Exception as e:
+                if strict: raise
+                report["skipped"] += 1
+                report["failed"] += 1
+        
+        db._last_replay_report = report
         return db
 
     def collection(self, name: str, **kwargs) -> Collection:
@@ -206,8 +238,10 @@ class CortexaDB:
 
     def namespace(self, *a, **k): return self.collection(*a, **k)
 
-    def add(self, text=None, vector=None, metadata=None, collection="default") -> int:
+    def add(self, text=None, vector=None, metadata=None, collection=None, **kwargs) -> int:
         """Add a memory."""
+        collection = collection or kwargs.get("collection") or kwargs.get("namespace", "default")
+        vector = vector or kwargs.get("vector") or kwargs.get("embedding")
         vec = self._resolve_embedding(text, vector)
         content = text or ""
         mid = self._inner.remember_embedding(vec, metadata=metadata, namespace=collection, content=content)
@@ -217,11 +251,15 @@ class CortexaDB:
 
     def search(
         self,
-        query=None, vector=None, limit=5,
+        query=None, vector=None, limit=None,
         collections=None, filter=None,
-        use_graph=False, recency_bias=False
+        use_graph=False, recency_bias=False,
+        **kwargs
     ) -> t.List[Hit]:
         """Core search implementation."""
+        limit = limit or kwargs.get("limit") or kwargs.get("top_k", 5)
+        vector = vector or kwargs.get("vector") or kwargs.get("embedding") or kwargs.get("query_vector")
+        collections = collections or kwargs.get("collections") or kwargs.get("namespaces")
         vec = self._resolve_embedding(query, vector)
         
         if collections is None:
@@ -245,6 +283,10 @@ class CortexaDB:
             for hit in base_hits:
                 try:
                     for target_id, _ in self._inner.get_neighbors(hit.id):
+                        if collections:
+                            # Only add neighbor if it's in requested collections
+                            if self.get(target_id).namespace not in collections:
+                                continue
                         scored_candidates[target_id] = max(scored_candidates.get(target_id, 0), hit.score * 0.9)
                 except: pass
 
@@ -266,7 +308,48 @@ class CortexaDB:
         """Start a fluent query."""
         return QueryBuilder(self, text, vector)
 
-    def add_batch(self, records: t.List[t.Dict]) -> int:
+    def connect(self, mid1: int, mid2: int, relation: str):
+        """Connect two memories with a labeled edge."""
+        self._inner.connect(mid1, mid2, relation)
+        if self._recorder:
+            self._recorder.record_connect(mid1, mid2, relation)
+
+    def export_replay(self, path: str):
+        """Export all memories to a replay log."""
+        from .replay import ReplayWriter
+        writer = ReplayWriter(path, dimension=self._dimension)
+        report = {"checked": 0, "exported": 0, "skipped_missing_embedding": 0}
+        
+        # This is a bit slow as we iterate all IDs
+        stats = self.stats()
+        for i in range(1, stats.entries + 1):
+            report["checked"] += 1
+            try:
+                mem = self.get(i)
+                if mem.embedding:
+                    writer.record_remember(
+                        id=mem.id,
+                        text=bytes(mem.content).decode("utf-8") if mem.content else "",
+                        embedding=mem.embedding,
+                        namespace=mem.namespace,
+                        metadata=mem.metadata
+                    )
+                    report["exported"] += 1
+                else:
+                    report["skipped_missing_embedding"] += 1
+            except:
+                pass
+        
+        writer.close()
+        self._last_export_replay_report = report
+
+    @property
+    def last_replay_report(self): return self._last_replay_report
+
+    @property
+    def last_export_replay_report(self): return self._last_export_replay_report
+
+    def add_batch(self, records: t.List[t.Dict]) -> t.List[int]:
         """High-performance batch add."""
         facade_records = [
             BatchRecord(
@@ -280,6 +363,8 @@ class CortexaDB:
 
     def ingest(self, text: str, **kwargs) -> t.List[int]:
         """Ingest text with 100x speedup via batching."""
+        if not self._embedder:
+            raise CortexaDBConfigError("ingest_document requires an embedder.")
         chunks = chunk(text, **kwargs)
         if not chunks: return []
         
@@ -288,15 +373,14 @@ class CortexaDB:
             "text": c["text"],
             "vector": vec,
             "metadata": {** (kwargs.get("metadata") or {}), **(c.get("metadata") or {})},
-            "collection": kwargs.get("collection", "default")
+            "collection": kwargs.get("collection") or kwargs.get("namespace", "default")
         } for c, vec in zip(chunks, embeddings)]
         
-        self.add_batch(records)
-        return []
+        return self.add_batch(records)
 
     def _resolve_embedding(self, text, supplied):
         if supplied is not None: return supplied
-        if not self._embedder: raise CortexaDBConfigError("Embedder required.")
+        if not self._embedder: raise CortexaDBConfigError("No embedder provided. Embedder required.")
         return self._embedder.embed(text)
 
     def get(self, mid: int) -> Memory: return self._inner.get(mid)
