@@ -388,7 +388,7 @@ impl CortexaDBStore {
                                     let (guard, _) = cvar
                                         .wait_timeout(runtime, timeout)
                                         .expect("sync runtime wait poisoned");
-                                    runtime = guard;    
+                                    runtime = guard;
                                     let timed_out = runtime
                                         .dirty_since
                                         .map(|d| d.elapsed() >= max_delay)
@@ -1400,8 +1400,9 @@ mod tests {
 
         // Add 5 items
         for i in 0..5 {
-            let entry = MemoryEntry::new(MemoryId(i), "agent_x".to_string(), b"data".to_vec(), 1000)
-                .with_embedding(vec![1.0, 0.0, 0.0]);
+            let entry =
+                MemoryEntry::new(MemoryId(i), "agent_x".to_string(), b"data".to_vec(), 1000)
+                    .with_embedding(vec![1.0, 0.0, 0.0]);
             store.insert_memory(entry).unwrap();
         }
 
@@ -1428,9 +1429,8 @@ mod tests {
             .unwrap();
         assert_eq!(search_results.len(), 2);
 
-        let ids: Vec<u64> = search_results.iter().map(|s| s.0.0).collect();
+        let ids: Vec<u64> = search_results.iter().map(|s| s.0 .0).collect();
         assert!(ids.contains(&0));
         assert!(ids.contains(&1));
     }
 }
-
