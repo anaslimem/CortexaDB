@@ -9,7 +9,7 @@ pub struct MemoryId(pub u64);
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryEntry {
     pub id: MemoryId,
-    pub namespace: String,
+    pub collection: String,
     pub content: Vec<u8>,
     pub embedding: Option<Vec<f32>>,
     pub metadata: HashMap<String, String>,
@@ -18,10 +18,10 @@ pub struct MemoryEntry {
 }
 
 impl MemoryEntry {
-    pub fn new(id: MemoryId, namespace: String, content: Vec<u8>, created_at: u64) -> Self {
+    pub fn new(id: MemoryId, collection: String, content: Vec<u8>, created_at: u64) -> Self {
         Self {
             id,
-            namespace,
+            collection,
             content,
             embedding: None,
             metadata: HashMap::new(),
@@ -50,7 +50,7 @@ mod tests {
         let entry =
             MemoryEntry::new(MemoryId(1), "default".to_string(), b"test content".to_vec(), 1000);
         assert_eq!(entry.id, MemoryId(1));
-        assert_eq!(entry.namespace, "default");
+        assert_eq!(entry.collection, "default");
         assert_eq!(entry.importance, 0.0);
         assert_eq!(entry.embedding, None);
     }

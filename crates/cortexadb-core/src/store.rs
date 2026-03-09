@@ -595,8 +595,8 @@ impl CortexaDBStore {
             // Update vector index
             match effective.embedding {
                 Some(embedding) => {
-                    writer.indexes.vector_index_mut().index_in_namespace(
-                        &effective.namespace,
+                    writer.indexes.vector_index_mut().index_in_collection(
+                        &effective.collection,
                         effective.id,
                         embedding,
                     )?;
@@ -618,9 +618,9 @@ impl CortexaDBStore {
         Ok(last_cmd_id)
     }
 
-    pub fn delete_memory(&self, id: MemoryId) -> Result<CommandId> {
+    pub fn delete(&self, id: MemoryId) -> Result<CommandId> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
-        self.execute_write_transaction_locked(&mut writer, WriteOp::DeleteMemory(id))
+        self.execute_write_transaction_locked(&mut writer, WriteOp::Delete(id))
     }
 
     pub fn add_edge(&self, from: MemoryId, to: MemoryId, relation: String) -> Result<CommandId> {
@@ -872,8 +872,8 @@ impl CortexaDBStore {
                     writer.engine.execute_command_unsynced(Command::InsertMemory(entry.clone()))?
                 };
                 match entry.embedding {
-                    Some(embedding) => writer.indexes.vector_index_mut().index_in_namespace(
-                        &entry.namespace,
+                    Some(embedding) => writer.indexes.vector_index_mut().index_in_collection(
+                        &entry.collection,
                         entry.id,
                         embedding,
                     )?,
@@ -883,11 +883,11 @@ impl CortexaDBStore {
                 }
                 id
             }
-            WriteOp::DeleteMemory(id) => {
+            WriteOp::Delete(id) => {
                 let cmd_id = if sync_now {
-                    writer.engine.execute_command(Command::DeleteMemory(id))?
+                    writer.engine.execute_command(Command::Delete(id))?
                 } else {
-                    writer.engine.execute_command_unsynced(Command::DeleteMemory(id))?
+                    writer.engine.execute_command_unsynced(Command::Delete(id))?
                 };
                 let _ = writer.indexes.vector_index_mut().remove(id);
                 cmd_id
@@ -965,8 +965,8 @@ impl CortexaDBStore {
         for entry in state_machine.all_memories() {
             if let Some(embedding) = entry.embedding.clone() {
                 if !existing_ids.contains(&entry.id) {
-                    indexes.vector_index_mut().index_in_namespace(
-                        &entry.namespace,
+                    indexes.vector_index_mut().index_in_collection(
+                        &entry.collection,
                         entry.id,
                         embedding,
                     )?;
@@ -1055,7 +1055,7 @@ impl Drop for CortexaDBStore {
 
 enum WriteOp {
     InsertMemory(MemoryEntry),
-    DeleteMemory(MemoryId),
+    Delete(MemoryId),
     AddEdge { from: MemoryId, to: MemoryId, relation: String },
     RemoveEdge { from: MemoryId, to: MemoryId },
 }
@@ -1102,7 +1102,7 @@ mod tests {
         store.insert_memory(b).unwrap();
 
         let mut options = QueryOptions::with_top_k(2);
-        options.namespace = Some("agent1".to_string());
+        options.collection = Some("agent1".to_string());
         let out = store.query("hello", options, &TestEmbedder).unwrap();
         assert_eq!(out.hits.len(), 2);
     }
@@ -1119,7 +1119,7 @@ mod tests {
         store.insert_memory(entry).unwrap();
         assert_eq!(store.indexed_embeddings(), 1);
 
-        store.delete_memory(MemoryId(10)).unwrap();
+        store.delete(MemoryId(10)).unwrap();
         assert_eq!(store.indexed_embeddings(), 0);
     }
 
@@ -1141,7 +1141,7 @@ mod tests {
         assert_eq!(recovered.indexed_embeddings(), 1);
 
         let mut options = QueryOptions::with_top_k(1);
-        options.namespace = Some("agent1".to_string());
+        options.collection = Some("agent1".to_string());
         let out = recovered.query("hello", options, &TestEmbedder).unwrap();
         assert_eq!(out.hits.len(), 1);
         assert_eq!(out.hits[0].id, MemoryId(77));
@@ -1246,7 +1246,7 @@ mod tests {
 
         let snapshot = store.snapshot();
         let mut options = QueryOptions::with_top_k(10);
-        options.namespace = Some("agent1".to_string());
+        options.collection = Some("agent1".to_string());
         let plan = QueryPlanner::plan(options, snapshot.indexes().vector.len());
 
         let snapshot_for_query = Arc::clone(&snapshot);
@@ -1410,7 +1410,7 @@ mod tests {
 
         // Remove 3 items (they become tombstones in HNSW)
         for i in 2..5 {
-            store.delete_memory(MemoryId(i)).unwrap();
+            store.delete(MemoryId(i)).unwrap();
         }
 
         assert_eq!(store.indexed_embeddings(), 2);

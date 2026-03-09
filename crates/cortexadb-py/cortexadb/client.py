@@ -4,16 +4,12 @@ from ._cortexadb import (
     CortexaDBError,
     Hit,
     Memory,
-    Stats,
     BatchRecord,
-    CortexaDBNotFoundError,
     CortexaDBConfigError,
-    CortexaDBIOError,
 )
 from . import _cortexadb
 from .embedder import Embedder
 from .chunker import chunk
-from .loader import load_file, get_file_metadata
 from .replay import ReplayWriter, ReplayReader
 
 
@@ -130,15 +126,13 @@ class Collection:
         self._db.delete(mid)
 
     # Legacy Aliases
-    def remember(self, *a, **k): return self.add(*a, **k)
-    def ask(self, *a, **k): return self.search(*a, **k)
-    def ingest_document(self, *a, **k): return self.ingest(*a, **k)
-    def delete_memory(self, mid: int): self.delete(mid)
+    # All removed.
 
     def __repr__(self) -> str:
         return f"Collection(name={self.name!r}, mode={'readonly' if self._readonly else 'readwrite'})"
 
 
+# Deprecated Alias
 Namespace = Collection
 
 
@@ -185,7 +179,6 @@ class CortexaDB:
 
     @classmethod
     def replay(cls, log_path: str, db_path: str, **kwargs) -> "CortexaDB":
-        from .replay import ReplayReader
         try:
             reader = ReplayReader(log_path)
         except FileNotFoundError as e:
@@ -203,12 +196,12 @@ class CortexaDB:
             report["op_counts"][op_type] = report["op_counts"].get(op_type, 0) + 1
             
             try:
-                if op_type == "remember":
+                if op_type == "add":
                     new_id = db.add(
                         text=op.get("text"),
                         vector=op.get("embedding"),
                         metadata=op.get("metadata"),
-                        collection=op.get("collection") or op.get("namespace", "default")
+                        collection=op.get("collection") or "default"
                     )
                     id_map[op.get("id")] = new_id
                     report["exported"] += 1
@@ -224,7 +217,7 @@ class CortexaDB:
                     report["op_counts"]["unknown"] = report["op_counts"].get("unknown", 0) + 1
                     if strict: raise CortexaDBError(f"unknown replay op: {op_type}")
                     report["skipped"] += 1
-            except Exception as e:
+            except Exception:
                 if strict: raise
                 report["skipped"] += 1
                 report["failed"] += 1
@@ -236,17 +229,17 @@ class CortexaDB:
         """Access a scoped collection."""
         return Collection(self, name, **kwargs)
 
-    def namespace(self, *a, **k): return self.collection(*a, **k)
+
 
     def add(self, text=None, vector=None, metadata=None, collection=None, **kwargs) -> int:
         """Add a memory."""
-        collection = collection or kwargs.get("collection") or kwargs.get("namespace", "default")
+        collection = collection or kwargs.get("collection") or "default"
         vector = vector or kwargs.get("vector") or kwargs.get("embedding")
         vec = self._resolve_embedding(text, vector)
         content = text or ""
-        mid = self._inner.remember_embedding(vec, metadata=metadata, collection=collection, content=content)
+        mid = self._inner.add_embedding(vec, metadata=metadata, collection=collection, content=content)
         if self._recorder:
-            self._recorder.record_remember(id=mid, text=content, embedding=vec, collection=collection, metadata=metadata)
+            self._recorder.record_add(id=mid, text=content, embedding=vec, collection=collection, metadata=metadata)
         return mid
 
     def search(
@@ -259,18 +252,18 @@ class CortexaDB:
         """Core search implementation."""
         limit = limit or kwargs.get("limit") or kwargs.get("top_k", 5)
         vector = vector or kwargs.get("vector") or kwargs.get("embedding") or kwargs.get("query_vector")
-        collections = collections or kwargs.get("collections") or kwargs.get("namespaces")
+        collections = collections or kwargs.get("collections") or kwargs.get("collection")
         vec = self._resolve_embedding(query, vector)
         
         if collections is None:
-            base_hits = self._inner.ask_embedding(vec, top_k=limit, filter=filter)
+            base_hits = self._inner.search_embedding(vec, top_k=limit, filter=filter)
         elif len(collections) == 1:
-            base_hits = self._inner.ask_in_collection(collections[0], vec, top_k=limit, filter=filter)
+            base_hits = self._inner.search_in_collection(collections[0], vec, top_k=limit, filter=filter)
         else:
             seen_ids = set()
             base_hits = []
             for ns in collections:
-                for hit in self._inner.ask_in_collection(ns, vec, top_k=limit, filter=filter):
+                for hit in self._inner.search_in_collection(ns, vec, top_k=limit, filter=filter):
                     if hit.id not in seen_ids:
                         seen_ids.add(hit.id)
                         base_hits.append(hit)
@@ -327,7 +320,7 @@ class CortexaDB:
             try:
                 mem = self.get(i)
                 if mem.embedding:
-                    writer.record_remember(
+                    writer.record_add(
                         id=mem.id,
                         text=bytes(mem.content).decode("utf-8") if mem.content else "",
                         embedding=mem.embedding,
@@ -353,18 +346,18 @@ class CortexaDB:
         """High-performance batch add."""
         facade_records = [
             BatchRecord(
-                collection=r.get("collection") or r.get("namespace") or "default",
+                collection=r.get("collection") or "default",
                 content=r.get("text") or "",
                 embedding=self._resolve_embedding(r.get("text"), r.get("vector")),
                 metadata=r.get("metadata")
             ) for r in records
         ]
-        return self._inner.remember_batch(facade_records)
+        return self._inner.add_batch(facade_records)
 
     def ingest(self, text: str, **kwargs) -> t.List[int]:
         """Ingest text with 100x speedup via batching."""
         if not self._embedder:
-            raise CortexaDBConfigError("ingest_document requires an embedder.")
+            raise CortexaDBConfigError("ingest requires an embedder.")
         chunks = chunk(text, **kwargs)
         if not chunks: return []
         
@@ -373,7 +366,7 @@ class CortexaDB:
             "text": c["text"],
             "vector": vec,
             "metadata": {** (kwargs.get("metadata") or {}), **(c.get("metadata") or {})},
-            "collection": kwargs.get("collection") or kwargs.get("namespace", "default")
+            "collection": kwargs.get("collection") or "default"
         } for c, vec in zip(chunks, embeddings)]
         
         return self.add_batch(records)
@@ -384,7 +377,7 @@ class CortexaDB:
         return self._embedder.embed(text)
 
     def get(self, mid: int) -> Memory: return self._inner.get(mid)
-    def delete(self, mid: int): self._inner.delete_memory(mid)
+    def delete(self, mid: int): self._inner.delete(mid)
     def compact(self): self._inner.compact()
     def checkpoint(self): self._inner.checkpoint()
     def stats(self): return self._inner.stats()
@@ -397,7 +390,4 @@ class CortexaDB:
         return False
 
     # Legacy Aliases
-    def remember(self, *a, **k): return self.add(*a, **k)
-    def ask(self, *a, **k): return self.search(*a, **k)
-    def ingest_document(self, *a, **k): return self.ingest(*a, **k)
-    def delete_memory(self, mid: int): self.delete(mid)
+    # All removed.

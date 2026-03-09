@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for i in 0..cfg.ops {
         let entry = MemoryEntry::new(
             MemoryId(i),
-            cfg.namespace.clone(),
+            cfg.collection.clone(),
             format!("bench_mem_{}", i).into_bytes(),
             1_700_000_000 + i,
         )
@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 struct BenchConfig {
     ops: u64,
     vector_dim: usize,
-    namespace: String,
+    collection: String,
     data_dir: PathBuf,
     policy: SyncPolicy,
 }
@@ -85,7 +85,7 @@ impl BenchConfig {
     fn from_args(args: Vec<String>) -> Result<Self, Box<dyn std::error::Error>> {
         let mut ops: u64 = 20_000;
         let mut vector_dim: usize = 3;
-        let mut namespace = "bench".to_string();
+        let mut collection = "bench".to_string();
         let mut data_dir = std::env::temp_dir().join("cortexadb_sync_bench");
 
         let mut mode = "strict".to_string();
@@ -104,9 +104,9 @@ impl BenchConfig {
                     i += 1;
                     vector_dim = args.get(i).ok_or("missing value for --vector-dim")?.parse()?;
                 }
-                "--namespace" => {
+                "--collection" => {
                     i += 1;
-                    namespace = args.get(i).ok_or("missing value for --namespace")?.clone();
+                    collection = args.get(i).ok_or("missing value for --collection")?.clone();
                 }
                 "--data-dir" => {
                     i += 1;
@@ -151,7 +151,7 @@ impl BenchConfig {
             _ => return Err(format!("invalid mode: {} (use strict|batch|async)", mode).into()),
         };
 
-        Ok(Self { ops, vector_dim, namespace, data_dir, policy })
+        Ok(Self { ops, vector_dim, collection, data_dir, policy })
     }
 }
 
@@ -169,7 +169,7 @@ fn print_help() {
          --mode strict|batch|async\n\
          --ops <u64> (default: 20000)\n\
          --vector-dim <usize> (default: 3)\n\
-         --namespace <string> (default: bench)\n\
+         --collection <string> (default: bench)\n\
          --data-dir <path> (default: /tmp/cortexadb_sync_bench)\n\
          --batch-max-ops <usize> (default: 64)\n\
          --batch-max-delay-ms <u64> (default: 25)\n\

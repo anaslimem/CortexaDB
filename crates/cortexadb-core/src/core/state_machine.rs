@@ -11,8 +11,8 @@ pub enum StateMachineError {
     MemoryNotFound(MemoryId),
     #[error("Invalid state: {0}")]
     InvalidState(String),
-    #[error("Cross-namespace edge is not allowed: from={from:?} ({from_ns}) to={to:?} ({to_ns})")]
-    CrossNamespaceEdge { from: MemoryId, from_ns: String, to: MemoryId, to_ns: String },
+    #[error("Cross-collection edge is not allowed: from={from:?} ({from_col}) to={to:?} ({to_col})")]
+    CrossCollectionEdge { from: MemoryId, from_col: String, to: MemoryId, to_col: String },
 }
 
 pub type Result<T> = std::result::Result<T, StateMachineError>;
@@ -44,7 +44,7 @@ impl StateMachine {
     pub fn apply_command(&mut self, cmd: Command) -> Result<()> {
         match cmd {
             Command::InsertMemory(entry) => self.insert_memory(entry),
-            Command::DeleteMemory(id) => self.delete_memory(id),
+            Command::Delete(id) => self.delete(id),
             Command::AddEdge { from, to, relation } => self.add_edge(from, to, relation),
             Command::RemoveEdge { from, to } => self.remove_edge(from, to),
         }
@@ -83,7 +83,7 @@ impl StateMachine {
     }
 
     /// Delete a memory entry and its edges
-    pub fn delete_memory(&mut self, id: MemoryId) -> Result<()> {
+    pub fn delete(&mut self, id: MemoryId) -> Result<()> {
         if !self.memories.contains_key(&id) {
             return Err(StateMachineError::MemoryNotFound(id));
         }
@@ -109,12 +109,12 @@ impl StateMachine {
         let from_entry = self.memories.get(&from).ok_or(StateMachineError::MemoryNotFound(from))?;
         let to_entry = self.memories.get(&to).ok_or(StateMachineError::MemoryNotFound(to))?;
 
-        if from_entry.namespace != to_entry.namespace {
-            return Err(StateMachineError::CrossNamespaceEdge {
+        if from_entry.collection != to_entry.collection {
+            return Err(StateMachineError::CrossCollectionEdge {
                 from,
-                from_ns: from_entry.namespace.clone(),
+                from_col: from_entry.collection.clone(),
                 to,
-                to_ns: to_entry.namespace.clone(),
+                to_col: to_entry.collection.clone(),
             });
         }
 
@@ -129,10 +129,10 @@ impl StateMachine {
         Ok(())
     }
 
-    pub fn namespace_of(&self, id: MemoryId) -> Result<&str> {
+    pub fn collection_of(&self, id: MemoryId) -> Result<&str> {
         self.memories
             .get(&id)
-            .map(|e| e.namespace.as_str())
+            .map(|e| e.collection.as_str())
             .ok_or(StateMachineError::MemoryNotFound(id))
     }
 
@@ -149,10 +149,10 @@ impl StateMachine {
         self.memories.get(&id).ok_or(StateMachineError::MemoryNotFound(id))
     }
 
-    /// Get all memories in a namespace
-    pub fn get_memories_in_namespace(&self, namespace: &str) -> Vec<&MemoryEntry> {
+    /// Get all memories in a collection
+    pub fn get_memories_in_collection(&self, collection: &str) -> Vec<&MemoryEntry> {
         let mut entries: Vec<_> =
-            self.memories.values().filter(|e| e.namespace == namespace).collect();
+            self.memories.values().filter(|e| e.collection == collection).collect();
         entries.sort_by_key(|e| e.id);
         entries
     }
@@ -210,10 +210,10 @@ impl Default for StateMachine {
 mod tests {
     use super::*;
 
-    fn create_test_entry(id: u64, namespace: &str, timestamp: u64) -> MemoryEntry {
+    fn create_test_entry(id: u64, collection: &str, timestamp: u64) -> MemoryEntry {
         MemoryEntry::new(
             MemoryId(id),
-            namespace.to_string(),
+            collection.to_string(),
             format!("content_{}", id).into_bytes(),
             timestamp,
         )
@@ -238,13 +238,13 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_memory() {
+    fn test_delete() {
         let mut sm = StateMachine::new();
         let entry = create_test_entry(1, "default", 1000);
         sm.insert_memory(entry).unwrap();
         assert_eq!(sm.len(), 1);
 
-        sm.delete_memory(MemoryId(1)).unwrap();
+        sm.delete(MemoryId(1)).unwrap();
         assert_eq!(sm.len(), 0);
         assert!(sm.get_memory(MemoryId(1)).is_err());
     }
@@ -309,13 +309,13 @@ mod tests {
     }
 
     #[test]
-    fn test_namespace_filtering() {
+    fn test_collection_filtering() {
         let mut sm = StateMachine::new();
         sm.insert_memory(create_test_entry(1, "ns1", 1000)).unwrap();
         sm.insert_memory(create_test_entry(2, "ns2", 1000)).unwrap();
         sm.insert_memory(create_test_entry(3, "ns1", 1000)).unwrap();
 
-        let ns1_entries = sm.get_memories_in_namespace("ns1");
+        let ns1_entries = sm.get_memories_in_collection("ns1");
         assert_eq!(ns1_entries.len(), 2);
         assert_eq!(ns1_entries[0].id, MemoryId(1));
         assert_eq!(ns1_entries[1].id, MemoryId(3));
@@ -365,7 +365,7 @@ mod tests {
         sm.add_edge(MemoryId(1), MemoryId(2), "refers".to_string()).unwrap();
 
         // Delete memory 2
-        sm.delete_memory(MemoryId(2)).unwrap();
+        sm.delete(MemoryId(2)).unwrap();
 
         // Edge should be cleaned up
         let neighbors = sm.get_neighbors(MemoryId(1)).unwrap();
@@ -373,12 +373,12 @@ mod tests {
     }
 
     #[test]
-    fn test_cross_namespace_edge_rejected() {
+    fn test_cross_collection_edge_rejected() {
         let mut sm = StateMachine::new();
         sm.insert_memory(create_test_entry(1, "ns1", 1000)).unwrap();
         sm.insert_memory(create_test_entry(2, "ns2", 1000)).unwrap();
 
         let result = sm.add_edge(MemoryId(1), MemoryId(2), "bad".to_string());
-        assert!(matches!(result, Err(StateMachineError::CrossNamespaceEdge { .. })));
+        assert!(matches!(result, Err(StateMachineError::CrossCollectionEdge { .. })));
     }
 }

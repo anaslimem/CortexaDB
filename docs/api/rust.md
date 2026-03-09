@@ -22,29 +22,29 @@ let db = CortexaDB::builder("/path/to/db", config).build()?;
 
 ### Memory Operations
 
-#### `remember(embedding, metadata) -> Result<u64>`
+#### `add(embedding, metadata) -> Result<u64>`
 
-Stores a memory in the default namespace.
-
-```rust
-let id = db.remember(vec![0.1; 128], None)?;
-let id = db.remember(vec![0.1; 128], Some(metadata_map))?;
-```
-
-#### `remember_in_namespace(ns, embedding, metadata) -> Result<u64>`
-
-Stores a memory in a specific namespace.
+Stores a memory in the default collection.
 
 ```rust
-let id = db.remember_in_namespace("agent_a", vec![0.1; 128], None)?;
+let id = db.add(vec![0.1; 128], None)?;
+let id = db.add(vec![0.1; 128], Some(metadata_map))?;
 ```
 
-#### `remember_with_content(ns, content, embedding, metadata) -> Result<u64>`
+#### `add_in_collection(collection, embedding, metadata) -> Result<u64>`
+
+Stores a memory in a specific collection.
+
+```rust
+let id = db.add_in_collection("agent_a", vec![0.1; 128], None)?;
+```
+
+#### `add_with_content(collection, content, embedding, metadata) -> Result<u64>`
 
 Stores a memory with raw content bytes.
 
 ```rust
-let id = db.remember_with_content(
+let id = db.add_with_content(
     "default",
     b"Hello world".to_vec(),
     vec![0.1; 128],
@@ -52,23 +52,23 @@ let id = db.remember_with_content(
 )?;
 ```
 
-#### `ask(embedding, top_k, metadata_filter) -> Result<Vec<Hit>>`
+#### `search(embedding, top_k, metadata_filter) -> Result<Vec<Hit>>`
 
-Vector similarity search in the default namespace.
+Vector similarity search in the default collection.
 
 ```rust
-let hits = db.ask(vec![0.1; 128], 5, None)?;
+let hits = db.search(vec![0.1; 128], 5, None)?;
 for hit in &hits {
     println!("ID: {}, Score: {:.3}", hit.id, hit.score);
 }
 ```
 
-#### `ask_in_namespace(ns, embedding, top_k, filter) -> Result<Vec<Hit>>`
+#### `search_in_collection(collection, embedding, top_k, filter) -> Result<Vec<Hit>>`
 
-Namespace-scoped search.
+Collection-scoped search.
 
 ```rust
-let hits = db.ask_in_namespace("agent_a", vec![0.1; 128], 5, None)?;
+let hits = db.search_in_collection("agent_a", vec![0.1; 128], 5, None)?;
 ```
 
 #### `get_memory(id) -> Result<Memory>`
@@ -80,12 +80,12 @@ let mem = db.get_memory(42)?;
 println!("{:?}", mem.metadata);
 ```
 
-#### `delete_memory(id) -> Result<()>`
+#### `delete(id) -> Result<()>`
 
 Deletes a memory and updates all indexes.
 
 ```rust
-db.delete_memory(42)?;
+db.delete(42)?;
 ```
 
 ---
@@ -156,7 +156,7 @@ pub struct Hit {
 pub struct Memory {
     pub id: u64,
     pub content: Vec<u8>,
-    pub namespace: String,
+    pub collection: String,
     pub embedding: Option<Vec<f32>>,
     pub metadata: HashMap<String, String>,
     pub created_at: u64,
@@ -171,7 +171,7 @@ Internal representation used by the storage engine.
 ```rust
 pub struct MemoryEntry {
     pub id: MemoryId,
-    pub namespace: String,
+    pub collection: String,
     pub content: Vec<u8>,
     pub embedding: Option<Vec<f32>>,
     pub metadata: HashMap<String, String>,

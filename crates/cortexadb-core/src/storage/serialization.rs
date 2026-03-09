@@ -55,6 +55,6 @@ mod tests {
 
         let deserialized: MemoryEntry = deserialize_versioned(&legacy_serialized).unwrap();
         assert_eq!(deserialized.id, MemoryId(123));
-        assert_eq!(deserialized.namespace, "old");
+        assert_eq!(deserialized.collection, "old");
     }
 }

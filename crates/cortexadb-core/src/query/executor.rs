@@ -169,7 +169,7 @@ impl QueryExecutor {
         let vector_results = index_layer.vector.search_scoped(
             &query_embedding,
             candidate_k,
-            options.namespace.as_deref(),
+            options.collection.as_deref(),
             plan.use_parallel,
             plan.ann_candidate_multiplier,
         )?;
@@ -198,8 +198,8 @@ impl QueryExecutor {
                 if expansion.hops > 0 {
                     let mut expanded_ids = HashSet::new();
                     for id in candidate_scores.keys().copied() {
-                        let reachable = if let Some(ns) = options.namespace.as_deref() {
-                            GraphIndex::bfs_in_namespace(state_machine, id, expansion.hops, ns)?
+                        let reachable = if let Some(col) = options.collection.as_deref() {
+                            GraphIndex::bfs_in_collection(state_machine, id, expansion.hops, col)?
                         } else {
                             GraphIndex::bfs(state_machine, id, expansion.hops)?
                         };
@@ -207,7 +207,7 @@ impl QueryExecutor {
                             if matches_filters(
                                 state_machine,
                                 neighbor,
-                                options.namespace.as_deref(),
+                                options.collection.as_deref(),
                                 None,
                                 options.metadata_filter.as_ref(),
                             ) {
@@ -261,7 +261,7 @@ impl QueryExecutor {
 fn matches_filters(
     state_machine: &StateMachine,
     id: MemoryId,
-    namespace: Option<&str>,
+    collection: Option<&str>,
     time_range: Option<(u64, u64)>,
     metadata_filter: Option<&HashMap<String, String>>,
 ) -> bool {
@@ -270,8 +270,8 @@ fn matches_filters(
         Err(_) => return false,
     };
 
-    if let Some(ns) = namespace {
-        if entry.namespace != ns {
+    if let Some(col) = collection {
+        if entry.collection != col {
             return false;
         }
     }

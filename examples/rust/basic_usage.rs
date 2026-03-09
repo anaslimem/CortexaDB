@@ -6,7 +6,7 @@
 //! - Using chunking strategies
 //! - Hybrid search
 //! - Graph relationships
-//! - Namespace-scoped operations
+//! - Collection-scoped operations
 
 use cortexadb_core::{chunk, ChunkingStrategy, CortexaDB};
 use std::collections::hash_map::DefaultHasher;
@@ -128,19 +128,19 @@ Content under heading 3.
 
     let records = vec![
         BatchRecord {
-            namespace: "default".to_string(),
+            collection: "default".to_string(),
             content: text1.as_bytes().to_vec(),
             embedding: Some(embed_text(text1, dimension)),
             metadata: None,
         },
         BatchRecord {
-            namespace: "default".to_string(),
+            collection: "default".to_string(),
             content: text2.as_bytes().to_vec(),
             embedding: Some(embed_text(text2, dimension)),
             metadata: None,
         },
         BatchRecord {
-            namespace: "default".to_string(),
+            collection: "default".to_string(),
             content: text3.as_bytes().to_vec(),
             embedding: Some(embed_text(text3, dimension)),
             metadata: None,
@@ -148,8 +148,8 @@ Content under heading 3.
     ];
 
     // Bulk insert with 100x speedup
-    let last_id = db.remember_batch(records)?;
-    println!("   Batch finished. Last inserted ID: {}", last_id);
+    let last_id = db.add_batch(records)?;
+    println!("   Batch finished. Last inserted ID: {}", last_id.last().unwrap());
     
     // For manual IDs in the example, we'll use 1, 2, 3 assuming clean start
     let id1 = 1; let id2 = 2; let id3 = 3;
@@ -169,7 +169,7 @@ Content under heading 3.
     // -----------------------------------------------------------
     println!("\n[6] Querying memories...");
     let query = "Where does the user live?";
-    let hits = db.ask(embed_text(query, dimension), 3, None)?;
+    let hits = db.search(embed_text(query, dimension), 3, None)?;
     for hit in hits {
         let mem = db.get_memory(hit.id)?;
         let content = String::from_utf8_lossy(&mem.content);
@@ -177,24 +177,24 @@ Content under heading 3.
     }
 
     // -----------------------------------------------------------
-    // 8. Namespace-scoped retrieval
+    // 8. Collection-scoped retrieval
     // -----------------------------------------------------------
-    println!("\n[7] Namespaces...");
+    println!("\n[7] Collections...");
     let travel_text = "Flight to Tokyo booked for June.";
-    let ns_id = db.remember_with_content(
+    let col_id = db.add_with_content(
         "travel_agent",
         travel_text.as_bytes().to_vec(),
         embed_text(travel_text, dimension),
         None,
     )?;
-    println!("   Stored in namespace 'travel_agent': ID {}", ns_id);
-    let ns_hits = db.ask_in_namespace(
+    println!("   Stored in collection 'travel_agent': ID {}", col_id);
+    let col_hits = db.search_in_collection(
         "travel_agent",
         embed_text("Tokyo travel plans", dimension),
         5,
         None,
     )?;
-    println!("   travel_agent hits: {}", ns_hits.len());
+    println!("   travel_agent hits: {}", col_hits.len());
 
     // -----------------------------------------------------------
     // 9. Stats

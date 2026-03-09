@@ -24,7 +24,7 @@ The database is built around three pillars:
                          │
 ┌────────────────────────▼─────────────────────────┐
 │               CortexaDB Facade                    │
-│        High-level API (remember, ask, etc.)       │
+│        High-level API (add, search, etc.)       │
 └────────────────────────┬─────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────┐
@@ -62,7 +62,7 @@ The database is built around three pillars:
 
 ### Facade
 
-The `CortexaDB` facade is the primary entry point. It provides the high-level API (`remember`, `ask`, `connect`, etc.) and delegates to the store for durability and concurrency.
+The `CortexaDB` facade is the primary entry point. It provides the high-level API (`add`, `search`, `connect`, etc.) and delegates to the store for durability and concurrency.
 
 ### Store
 
@@ -77,7 +77,7 @@ The `CortexaDBStore` coordinates concurrent access:
 The in-memory state machine holds the current database state:
 
 - All memory entries indexed by ID
-- Graph edges (directed, per-namespace)
+- Graph edges (directed, per-collection)
 - Temporal index (BTreeMap of timestamp to memory IDs)
 - Next ID counter
 
@@ -112,7 +112,7 @@ A memory is the fundamental unit of storage:
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `u64` | Auto-incrementing unique identifier |
-| `namespace` | `String` | Isolation scope (default: `"default"`) |
+| `collection` | `String` | Isolation scope (default: `"default"`) |
 | `content` | `bytes` | Raw content (typically UTF-8 text) |
 | `embedding` | `Vec<f32>?` | Optional vector embedding |
 | `metadata` | `Dict[str, str]` | Key-value metadata pairs |
@@ -127,7 +127,7 @@ Edges are directed relationships between memories:
 Memory A --[relates_to]--> Memory B
 ```
 
-- Edges are namespaced — you cannot create edges across namespaces
+- Edges are collection-scoped — you cannot create edges across collections
 - Each memory can have multiple outgoing edges
 - Used by the query engine for graph expansion during hybrid search
 

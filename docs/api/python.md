@@ -69,7 +69,7 @@ report = db.last_replay_report
 
 ## Memory Operations
 
-### `.remember(text, embedding=None, metadata=None)`
+### `.add(text, embedding=None, metadata=None)`
 
 Stores a new memory entry. If an embedder is configured and no embedding is provided, the text is auto-embedded.
 
@@ -85,14 +85,14 @@ Stores a new memory entry. If an embedder is configured and no embedding is prov
 
 **Example:**
 ```python
-mid = db.remember("User prefers dark mode")
-mid = db.remember("text", metadata={"source": "onboarding"})
-mid = db.remember("text", embedding=[0.1, 0.2, ...])
+mid = db.add("User prefers dark mode")
+mid = db.add("text", metadata={"source": "onboarding"})
+mid = db.add("text", embedding=[0.1, 0.2, ...])
 ```
 
 ---
 
-### `.ask(query, embedding=None, top_k=5, use_graph=False, recency_bias=False)`
+### `.search(query, embedding=None, top_k=5, use_graph=False, recency_bias=False)`
 
 Performs a hybrid search across the database.
 
@@ -110,8 +110,8 @@ Performs a hybrid search across the database.
 
 **Example:**
 ```python
-hits = db.ask("What does the user prefer?")
-hits = db.ask("query", top_k=10, use_graph=True, recency_bias=True)
+hits = db.search("What does the user prefer?")
+hits = db.search("query", top_k=10, use_graph=True, recency_bias=True)
 
 for hit in hits:
     print(f"ID: {hit.id}, Score: {hit.score:.3f}")
@@ -138,7 +138,7 @@ Retrieves a full memory entry by ID.
 mem = db.get_memory(42)
 print(mem.id)          # 42
 print(mem.content)     # b"User prefers dark mode"
-print(mem.namespace)   # "default"
+print(mem.collection)  # "default"
 print(mem.metadata)    # {"source": "onboarding"}
 print(mem.created_at)  # 1709654400
 print(mem.importance)  # 0.0
@@ -147,7 +147,7 @@ print(mem.embedding)   # [0.1, 0.2, ...] or None
 
 ---
 
-### `.delete_memory(mid)`
+### `.delete(mid)`
 
 Permanently deletes a memory and updates all indexes.
 
@@ -161,7 +161,7 @@ Permanently deletes a memory and updates all indexes.
 
 **Example:**
 ```python
-db.delete_memory(42)
+db.delete(42)
 ```
 
 ---
@@ -186,7 +186,7 @@ db.connect(1, 2, "relates_to")
 db.connect(1, 3, "caused_by")
 ```
 
-> Both memories must be in the same namespace. Cross-namespace edges are forbidden.
+> Both memories must be in the same collection. Cross-collection edges are forbidden.
 
 ---
 
@@ -213,7 +213,7 @@ for edge in neighbors:
 
 ## Document Ingestion
 
-### `.ingest(text, strategy="recursive", chunk_size=512, overlap=50, metadata=None, namespace=None)`
+### `.ingest(text, strategy="recursive", chunk_size=512, overlap=50, metadata=None, collection=None)`
 
 Chunks text and stores each chunk as a memory.
 
@@ -226,13 +226,13 @@ Chunks text and stores each chunk as a memory.
 | `chunk_size` | `int` | `512` | Target chunk size in characters |
 | `overlap` | `int` | `50` | Overlap between chunks |
 | `metadata` | `dict?` | `None` | Metadata to attach to all chunks |
-| `namespace` | `str?` | `None` | Target namespace |
+| `collection` | `str?` | `None` | Target collection |
 
 **Returns:** `list[int]` - Memory IDs of stored chunks
 
 ---
 
-### `.load(file_path, strategy="markdown", chunk_size=512, overlap=50, metadata=None, namespace=None)`
+### `.load(file_path, strategy="markdown", chunk_size=512, overlap=50, metadata=None, collection=None)`
 
 Loads a file, chunks it, and stores each chunk.
 
@@ -245,7 +245,7 @@ Loads a file, chunks it, and stores each chunk.
 | `chunk_size` | `int` | `512` | Target chunk size |
 | `overlap` | `int` | `50` | Overlap between chunks |
 | `metadata` | `dict?` | `None` | Metadata for all chunks |
-| `namespace` | `str?` | `None` | Target namespace |
+| `collection` | `str?` | `None` | Target collection |
 
 **Supported formats:** `.txt`, `.md`, `.json`, `.docx` (requires `cortexadb[docs]`), `.pdf` (requires `cortexadb[pdf]`)
 
@@ -257,34 +257,32 @@ db.load("paper.pdf", strategy="recursive", chunk_size=1024)
 
 ---
 
-### `.ingest_document(text, chunk_size=512, overlap=50, metadata=None, namespace=None)`
+### `.ingest(text, chunk_size=512, overlap=50, metadata=None, collection=None)`
 
 Legacy method for chunking and storing text. Uses fixed chunking.
 
 ---
 
-## Namespace
+### `.collection(name, readonly=False)`
 
-### `.namespace(name, readonly=False)`
-
-Returns a scoped view of the database for a specific namespace.
+Returns a scoped view of the database for a specific collection.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | `str` | Required | Namespace name |
+| `name` | `str` | Required | Collection name |
 | `readonly` | `bool` | `False` | If `True`, write operations raise errors |
 
-**Returns:** `Namespace`
+**Returns:** `Collection`
 
 **Example:**
 ```python
-ns = db.namespace("agent_a")
-mid = ns.remember("text")
-hits = ns.ask("query")
-ns.delete_memory(mid)
-ns.ingest_document("long text")
+col = db.collection("agent_a")
+mid = col.add("text")
+hits = col.search("query")
+col.delete(mid)
+col.ingest("long text")
 ```
 
 ---
@@ -370,7 +368,7 @@ Exports the current database state as a replay log.
 
 ### `Hit`
 
-Query result from `.ask()`.
+Query result from `.search()`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -384,7 +382,7 @@ Full memory entry from `.get_memory()`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `int` | Memory ID |
-| `namespace` | `str` | Namespace name |
+| `collection` | `str` | Collection name |
 | `content` | `bytes` | Raw content |
 | `embedding` | `list[float]?` | Vector embedding |
 | `metadata` | `dict[str, str]` | Key-value metadata |

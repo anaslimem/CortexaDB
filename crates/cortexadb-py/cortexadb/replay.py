@@ -16,11 +16,11 @@ Line 1 — header (JSON object):
 
 Lines 2..N — operation records (one JSON object per line):
 
-    {"op": "remember", "id": 1, "text": "...", "embedding": [...], "collection": "default", "metadata": null}
+    {"op": "add", "id": 1, "text": "...", "embedding": [...], "collection": "default", "metadata": null}
     {"op": "connect",  "from_id": 1, "to_id": 2, "relation": "caused_by"}
     {"op": "compact"}
 
-The ``id`` field in ``remember`` records is the *original* memory ID assigned
+The ``id`` field in ``add`` records is the *original* memory ID assigned
 during recording.  :class:`ReplayReader` builds an old→new ID mapping when
 replaying so that ``connect`` operations translate correctly.
 """
@@ -56,7 +56,7 @@ class ReplayWriter:
     Example::
 
         writer = ReplayWriter("session.log", dimension=128, sync="strict")
-        writer.record_remember(id=1, text="hello", embedding=[...], collection="default")
+        writer.record_add(id=1, text="hello", embedding=[...], collection="default")
         writer.close()
     """
 
@@ -78,7 +78,7 @@ class ReplayWriter:
     # Op recorders
     # ------------------------------------------------------------------
 
-    def record_remember(
+    def record_add(
         self,
         *,
         id: int,
@@ -87,9 +87,9 @@ class ReplayWriter:
         collection: str,
         metadata: Optional[Dict[str, str]],
     ) -> None:
-        """Append a ``remember`` operation."""
+        """Append an ``add`` operation."""
         self._write({
-            "op": "remember",
+            "op": "add",
             "id": id,
             "text": text,
             "embedding": embedding,
@@ -171,7 +171,7 @@ class ReplayReader:
         reader = ReplayReader("session.log")
         print(reader.header)  # ReplayHeader(...)
         for op in reader.operations():
-            print(op)         # {"op": "remember", ...}
+            print(op)         # {"op": "add", ...}
     """
 
     def __init__(self, path: str) -> None:

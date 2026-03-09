@@ -27,18 +27,18 @@ db = CortexaDB.open("agent.mem", dimension=128)
 
 ```python
 # Auto-embedding (requires embedder)
-mid1 = db.remember("The user prefers dark mode.")
-mid2 = db.remember("User works at Stripe.")
+mid1 = db.add("The user prefers dark mode.")
+mid2 = db.add("User works at Stripe.")
 
 # With metadata
-mid3 = db.remember("User's name is Alice.", metadata={"source": "onboarding"})
+mid3 = db.add("User's name is Alice.", metadata={"source": "onboarding"})
 ```
 
 ### 4. Query Memories
 
 ```python
 # Semantic search
-hits = db.ask("What does the user like?")
+hits = db.search("What does the user like?")
 for hit in hits:
     print(f"ID: {hit.id}, Score: {hit.score:.3f}")
 
@@ -68,9 +68,9 @@ db.ingest("Long article text here...", strategy="markdown")
 ### 7. Use Namespaces
 
 ```python
-agent_a = db.namespace("agent_a")
-agent_a.remember("Agent A's private memory")
-hits = agent_a.ask("query only agent A's memories")
+agent_a = db.collection("agent_a")
+agent_a.add("Agent A's private memory")
+hits = agent_a.search("query only agent A's memories")
 ```
 
 ---
@@ -94,16 +94,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Store a memory with an embedding
     let embedding = vec![0.1; 128];
-    let id = db.remember(embedding.clone(), None)?;
+    let id = db.add(embedding.clone(), None)?;
 
     // Query
-    let hits = db.ask(embedding, 5, None)?;
+    let hits = db.search(embedding, 5, None)?;
     for hit in &hits {
         println!("ID: {}, Score: {:.3}", hit.id, hit.score);
     }
 
     // Connect memories
-    let id2 = db.remember(vec![0.2; 128], None)?;
+    let id2 = db.add(vec![0.2; 128], None)?;
     db.connect(id, id2, "related_to")?;
 
     // Checkpoint for fast recovery

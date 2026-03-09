@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for i in 0..entry_count {
             let embedding: Vec<f32> =
                 (0..vector_dim).map(|d| ((i * 7 + d * 13) % 100) as f32 / 100.0).collect();
-            db.remember(embedding, None)?;
+            db.add(embedding, None)?;
         }
     }
     let seed_elapsed = seed_start.elapsed();
@@ -105,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for i in 0..tail_count {
             let embedding: Vec<f32> =
                 (0..vector_dim).map(|d| ((i * 11 + d * 3) % 100) as f32 / 100.0).collect();
-            db.remember(embedding, None)?;
+            db.add(embedding, None)?;
         }
     }
 

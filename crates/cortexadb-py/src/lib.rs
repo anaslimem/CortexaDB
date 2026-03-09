@@ -154,7 +154,7 @@ impl PyBatchRecord {
 // Hit — lightweight query result
 // ---------------------------------------------------------------------------
 
-/// A scored query hit. Returned by `CortexaDB.ask_embedding()`.
+/// A scored query hit. Returned by `CortexaDB.search_embedding()`.
 ///
 /// Attributes:
 ///     id (int): Memory identifier.
@@ -208,8 +208,6 @@ struct PyMemory {
     id: u64,
     #[pyo3(get)]
     collection: String,
-    #[pyo3(get)]
-    namespace: String,
     #[pyo3(get)]
     created_at: u64,
     #[pyo3(get)]
@@ -289,8 +287,8 @@ impl PyStats {
 ///
 /// Example:
 ///     >>> db = CortexaDB.open("/tmp/agent.mem", dimension=128)
-///     >>> mid = db.remember_embedding([0.1] * 128)
-///     >>> hits = db.ask_embedding([0.1] * 128, top_k=5)
+///     >>> mid = db.add_embedding([0.1] * 128)
+///     >>> hits = db.search_embedding([0.1] * 128, top_k=5)
 ///     >>> print(hits[0].score)
 #[pyclass(name = "CortexaDB")]
 struct PyCortexaDB {
@@ -384,7 +382,7 @@ impl PyCortexaDB {
         text_signature = "(self, embedding, *, metadata=None, collection='default', content='')",
         signature = (embedding, *, metadata=None, collection="default".to_string(), content="".to_string())
     )]
-    fn remember_embedding(
+    fn add_embedding(
         &self,
         py: Python<'_>,
         embedding: Vec<f32>,
@@ -403,9 +401,9 @@ impl PyCortexaDB {
         let id = py
             .allow_threads(|| {
                 if content.is_empty() {
-                    self.inner.remember_in_namespace(&collection, embedding, metadata)
+                    self.inner.add_in_collection(&collection, embedding, metadata)
                 } else {
-                    self.inner.remember_with_content(
+                    self.inner.add_with_content(
                         &collection,
                         content.into_bytes(),
                         embedding,
@@ -425,7 +423,7 @@ impl PyCortexaDB {
     /// Returns:
     ///     int: The ID of the last command executed (for flushing/waiting).
     #[pyo3(text_signature = "(self, records)")]
-    fn remember_batch(&self, py: Python<'_>, records: Vec<PyBatchRecord>) -> PyResult<Vec<u64>> {
+    fn add_batch(&self, py: Python<'_>, records: Vec<PyBatchRecord>) -> PyResult<Vec<u64>> {
         for rec in &records {
             if let Some(emb) = &rec.embedding {
                 if emb.len() != self.dimension {
@@ -441,7 +439,7 @@ impl PyCortexaDB {
         let facade_records: Vec<facade::BatchRecord> = records
             .into_iter()
             .map(|r| facade::BatchRecord {
-                namespace: r.collection,
+                collection: r.collection,
                 content: r.content,
                 embedding: r.embedding,
                 metadata: r.metadata,
@@ -449,7 +447,7 @@ impl PyCortexaDB {
             .collect();
 
         let ids = py
-            .allow_threads(|| self.inner.remember_batch(facade_records))
+            .allow_threads(|| self.inner.add_batch(facade_records))
             .map_err(|e| CortexaDBError::new_err(e.to_string()))?;
 
         Ok(ids)
@@ -470,7 +468,7 @@ impl PyCortexaDB {
         text_signature = "(self, embedding, *, top_k=5, filter=None)",
         signature = (embedding, *, top_k=5, filter=None)
     )]
-    fn ask_embedding(
+    fn search_embedding(
         &self,
         py: Python<'_>,
         embedding: Vec<f32>,
@@ -486,7 +484,7 @@ impl PyCortexaDB {
         }
 
         let results = py
-            .allow_threads(|| self.inner.ask(embedding, top_k, filter))
+            .allow_threads(|| self.inner.search(embedding, top_k, filter))
             .map_err(map_cortexadb_err)?;
         Ok(results.into_iter().map(|m| PyHit { id: m.id, score: m.score }).collect())
     }
@@ -507,7 +505,7 @@ impl PyCortexaDB {
         text_signature = "(self, collection, embedding, *, top_k=5, filter=None)",
         signature = (collection, embedding, *, top_k=5, filter=None)
     )]
-    fn ask_in_collection(
+    fn search_in_collection(
         &self,
         py: Python<'_>,
         collection: &str,
@@ -524,7 +522,7 @@ impl PyCortexaDB {
         }
 
         let results = py
-            .allow_threads(|| self.inner.ask_in_namespace(collection, embedding, top_k, filter))
+            .allow_threads(|| self.inner.search_in_collection(collection, embedding, top_k, filter))
             .map_err(map_cortexadb_err)?;
 
         Ok(results.into_iter().map(|m| m.into()).collect::<Vec<PyHit>>())
@@ -546,8 +544,7 @@ impl PyCortexaDB {
 
         Ok(PyMemory {
             id: entry.id,
-            collection: entry.namespace.clone(),
-            namespace: entry.namespace.clone(),
+            collection: entry.collection.clone(),
             created_at: entry.created_at,
             importance: entry.importance,
             content: entry.content.clone(),
@@ -564,8 +561,8 @@ impl PyCortexaDB {
     /// Raises:
     ///     CortexaDBError: If the memory ID does not exist or deletion fails.
     #[pyo3(text_signature = "(self, mid)")]
-    fn delete_memory(&self, py: Python<'_>, mid: u64) -> PyResult<()> {
-        py.allow_threads(|| self.inner.delete_memory(mid)).map_err(map_cortexadb_err)
+    fn delete(&self, py: Python<'_>, mid: u64) -> PyResult<()> {
+        py.allow_threads(|| self.inner.delete(mid)).map_err(map_cortexadb_err)
     }
 
     /// Create an edge between two memories.

@@ -22,7 +22,7 @@ pub enum VectorError {
 
 pub type Result<T> = std::result::Result<T, VectorError>;
 
-const DEFAULT_NAMESPACE: &str = "__global__";
+const DEFAULT_COLLECTION: &str = "__global__";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VectorBackendMode {
@@ -47,8 +47,8 @@ trait AnnCandidateProvider: Send + Sync + std::fmt::Debug {
         &self,
         query: &[f32],
         ann_k: usize,
-        namespace: Option<&str>,
-        partitions: &HashMap<String, NamespacePartition>,
+        collection: Option<&str>,
+        partitions: &HashMap<String, CollectionPartition>,
     ) -> Result<Vec<MemoryId>>;
 }
 
@@ -64,16 +64,16 @@ impl AnnCandidateProvider for PrefixAnnCandidateProvider {
         &self,
         query: &[f32],
         ann_k: usize,
-        namespace: Option<&str>,
-        partitions: &HashMap<String, NamespacePartition>,
+        collection: Option<&str>,
+        partitions: &HashMap<String, CollectionPartition>,
     ) -> Result<Vec<MemoryId>> {
         let approx_dims = query.len().clamp(1, 8);
         let query_prefix = &query[..approx_dims];
         let query_mag = magnitude(query_prefix)?;
         let mut approx_scored = Vec::new();
 
-        let iter: Box<dyn Iterator<Item = (&String, &NamespacePartition)>> = match namespace {
-            Some(ns) => match partitions.get_key_value(ns) {
+        let iter: Box<dyn Iterator<Item = (&String, &CollectionPartition)>> = match collection {
+            Some(col) => match partitions.get_key_value(col) {
                 Some(one) => Box::new(std::iter::once(one)),
                 None => Box::new(std::iter::empty()),
             },
@@ -91,7 +91,7 @@ impl AnnCandidateProvider for PrefixAnnCandidateProvider {
         }
 
         if approx_scored.is_empty() {
-            if namespace.is_some() {
+            if collection.is_some() {
                 return Ok(Vec::new());
             }
             return Err(VectorError::NoEmbeddings);
@@ -118,10 +118,10 @@ impl AnnCandidateProvider for HnswReadyAnnCandidateProvider {
         &self,
         query: &[f32],
         ann_k: usize,
-        namespace: Option<&str>,
-        partitions: &HashMap<String, NamespacePartition>,
+        collection: Option<&str>,
+        partitions: &HashMap<String, CollectionPartition>,
     ) -> Result<Vec<MemoryId>> {
-        PrefixAnnCandidateProvider.candidates(query, ann_k, namespace, partitions)
+        PrefixAnnCandidateProvider.candidates(query, ann_k, collection, partitions)
     }
 }
 
@@ -152,7 +152,7 @@ impl VectorSearchBackend for AnnBackend {
 }
 
 #[derive(Debug, Clone, Default)]
-struct NamespacePartition {
+struct CollectionPartition {
     embeddings: HashMap<MemoryId, Vec<f32>>,
     tombstones: HashSet<MemoryId>,
 }
@@ -164,10 +164,10 @@ struct NamespacePartition {
 /// Supports both exact (brute-force) and HNSW approximate search.
 #[derive(Clone)]
 pub struct VectorIndex {
-    /// namespace -> partition
-    partitions: HashMap<String, NamespacePartition>,
-    /// Global lookup for ID -> namespace
-    id_to_namespace: HashMap<MemoryId, String>,
+    /// collection -> partition
+    partitions: HashMap<String, CollectionPartition>,
+    /// Global lookup for ID -> collection
+    id_to_collection: HashMap<MemoryId, String>,
     /// Dimension of embeddings (typically 384, 768, 1536)
     vector_dimension: usize,
     /// Search backend mode
@@ -196,7 +196,7 @@ impl VectorIndex {
     pub fn new(vector_dimension: usize) -> Self {
         Self {
             partitions: HashMap::new(),
-            id_to_namespace: HashMap::new(),
+            id_to_collection: HashMap::new(),
             vector_dimension,
             backend_mode: VectorBackendMode::Exact,
             backend: Arc::new(ExactBackend),
@@ -226,7 +226,7 @@ impl VectorIndex {
         };
         Ok(Self {
             partitions: HashMap::new(),
-            id_to_namespace: HashMap::new(),
+            id_to_collection: HashMap::new(),
             vector_dimension,
             backend_mode: VectorBackendMode::Exact,
             backend: Arc::new(ExactBackend),
@@ -293,12 +293,12 @@ impl VectorIndex {
 
     /// Add or update embedding for a memory
     pub fn index(&mut self, id: MemoryId, embedding: Vec<f32>) -> Result<()> {
-        self.index_in_namespace(DEFAULT_NAMESPACE, id, embedding)
+        self.index_in_collection(DEFAULT_COLLECTION, id, embedding)
     }
 
-    pub fn index_in_namespace<S: AsRef<str>>(
+    pub fn index_in_collection<S: AsRef<str>>(
         &mut self,
-        namespace: S,
+        collection: S,
         id: MemoryId,
         embedding: Vec<f32>,
     ) -> Result<()> {
@@ -309,20 +309,20 @@ impl VectorIndex {
             });
         }
 
-        let namespace = namespace.as_ref().to_string();
-        if let Some(previous_ns) = self.id_to_namespace.get(&id).cloned() {
-            if previous_ns != namespace {
-                if let Some(partition) = self.partitions.get_mut(&previous_ns) {
+        let collection = collection.as_ref().to_string();
+        if let Some(previous_col) = self.id_to_collection.get(&id).cloned() {
+            if previous_col != collection {
+                if let Some(partition) = self.partitions.get_mut(&previous_col) {
                     partition.embeddings.remove(&id);
                     partition.tombstones.remove(&id);
                 }
             }
         }
 
-        let partition = self.partitions.entry(namespace.clone()).or_default();
+        let partition = self.partitions.entry(collection.clone()).or_default();
         partition.tombstones.remove(&id);
         partition.embeddings.insert(id, embedding.clone());
-        self.id_to_namespace.insert(id, namespace);
+        self.id_to_collection.insert(id, collection);
 
         // Also add to HNSW backend if enabled
         if let Some(ref hnsw) = self.hnsw_backend {
@@ -334,9 +334,9 @@ impl VectorIndex {
 
     /// Remove embedding for a memory
     pub fn remove(&mut self, id: MemoryId) -> Result<()> {
-        if let Some(namespace) = self.id_to_namespace.get(&id).cloned() {
+        if let Some(collection) = self.id_to_collection.get(&id).cloned() {
             let mode = self.backend_mode;
-            if let Some(partition) = self.partitions.get_mut(&namespace) {
+            if let Some(partition) = self.partitions.get_mut(&collection) {
                 match mode {
                     VectorBackendMode::Exact => {
                         partition.embeddings.remove(&id);
@@ -355,10 +355,10 @@ impl VectorIndex {
                     }
                 }
                 if partition.embeddings.is_empty() {
-                    self.partitions.remove(&namespace);
+                    self.partitions.remove(&collection);
                 }
             }
-            self.id_to_namespace.remove(&id);
+            self.id_to_collection.remove(&id);
 
             // Also remove from HNSW backend if enabled
             if let Some(ref hnsw) = self.hnsw_backend {
@@ -370,10 +370,10 @@ impl VectorIndex {
 
     /// Check if memory has embedding
     pub fn has(&self, id: MemoryId) -> bool {
-        let Some(namespace) = self.id_to_namespace.get(&id) else {
+        let Some(collection) = self.id_to_collection.get(&id) else {
             return false;
         };
-        let Some(partition) = self.partitions.get(namespace) else {
+        let Some(partition) = self.partitions.get(collection) else {
             return false;
         };
         partition.embeddings.contains_key(&id) && !partition.tombstones.contains(&id)
@@ -410,7 +410,7 @@ impl VectorIndex {
         &self,
         query: &[f32],
         top_k: usize,
-        namespace: Option<&str>,
+        collection: Option<&str>,
         use_parallel: bool,
         ann_candidate_multiplier: usize,
     ) -> Result<Vec<(MemoryId, f32)>> {
@@ -447,13 +447,13 @@ impl VectorIndex {
         // Default: exact search
         match self.backend.mode() {
             VectorBackendMode::Exact => {
-                self.search_exact_scoped(query, top_k, namespace, use_parallel)
+                self.search_exact_scoped(query, top_k, collection, use_parallel)
             }
             VectorBackendMode::Ann { .. } => {
                 let ann_multiplier =
                     ann_candidate_multiplier.max(self.backend.ann_multiplier_hint()).max(1);
                 let ann_k = top_k.saturating_mul(ann_multiplier);
-                let approx = self.search_approx_candidates(query, ann_k, namespace)?;
+                let approx = self.search_approx_candidates(query, ann_k, collection)?;
                 if approx.is_empty() {
                     return Ok(Vec::new());
                 }
@@ -497,8 +497,8 @@ impl VectorIndex {
         let mut results: Vec<(MemoryId, f32)> = candidate_ids
             .iter()
             .filter_map(|id| {
-                let namespace = self.id_to_namespace.get(id)?;
-                let partition = self.partitions.get(namespace)?;
+                let collection = self.id_to_collection.get(id)?;
+                let partition = self.partitions.get(collection)?;
                 if partition.tombstones.contains(id) {
                     return None;
                 }
@@ -520,10 +520,10 @@ impl VectorIndex {
 
     /// Get all indexed memory IDs
     pub fn indexed_ids(&self) -> Vec<MemoryId> {
-        self.id_to_namespace.keys().copied().filter(|id| self.has(*id)).collect()
+        self.id_to_collection.keys().copied().filter(|id| self.has(*id)).collect()
     }
 
-    fn compact_partition(partition: &mut NamespacePartition) {
+    fn compact_partition(partition: &mut CollectionPartition) {
         if partition.tombstones.is_empty() {
             return;
         }
@@ -536,19 +536,19 @@ impl VectorIndex {
     /// Compact the vector index by permanently removing tombstones from exact partitions
     /// and completely rebuilding the approximate nearest neighbor (HNSW) index to free memory.
     pub fn compact(&mut self) -> Result<usize> {
-        let mut empty_namespaces = Vec::new();
+        let mut empty_collections = Vec::new();
 
         // 1. Compact exact partitions
-        for (ns, partition) in &mut self.partitions {
+        for (col, partition) in &mut self.partitions {
             Self::compact_partition(partition);
             if partition.embeddings.is_empty() {
-                empty_namespaces.push(ns.clone());
+                empty_collections.push(col.clone());
             }
         }
 
         // 2. Remove empty partitions
-        for ns in empty_namespaces {
-            self.partitions.remove(&ns);
+        for col in empty_collections {
+            self.partitions.remove(&col);
         }
 
         // 3. Rebuild HNSW backend if enabled
@@ -575,11 +575,11 @@ impl VectorIndex {
 
     fn partition_iter<'a>(
         &'a self,
-        namespace: Option<&str>,
-    ) -> Box<dyn Iterator<Item = (&'a String, &'a NamespacePartition)> + 'a> {
-        match namespace {
-            Some(ns) => {
-                if let Some(partition) = self.partitions.get_key_value(ns) {
+        collection: Option<&str>,
+    ) -> Box<dyn Iterator<Item = (&'a String, &'a CollectionPartition)> + 'a> {
+        match collection {
+            Some(col) => {
+                if let Some(partition) = self.partitions.get_key_value(col) {
                     Box::new(std::iter::once(partition))
                 } else {
                     Box::new(std::iter::empty())
@@ -593,13 +593,13 @@ impl VectorIndex {
         &self,
         query: &[f32],
         top_k: usize,
-        namespace: Option<&str>,
+        collection: Option<&str>,
         use_parallel: bool,
     ) -> Result<Vec<(MemoryId, f32)>> {
         let query_magnitude = magnitude(query)?;
         let mut results: Vec<(MemoryId, f32)> = Vec::new();
 
-        for (_ns, partition) in self.partition_iter(namespace) {
+        for (_col, partition) in self.partition_iter(collection) {
             let iter_results: Vec<(MemoryId, f32)> = if use_parallel {
                 partition
                     .embeddings
@@ -627,7 +627,7 @@ impl VectorIndex {
         }
 
         if results.is_empty() {
-            if namespace.is_some() {
+            if collection.is_some() {
                 return Ok(Vec::new());
             }
             return Err(VectorError::NoEmbeddings);
@@ -643,9 +643,9 @@ impl VectorIndex {
         &self,
         query: &[f32],
         ann_k: usize,
-        namespace: Option<&str>,
+        collection: Option<&str>,
     ) -> Result<Vec<MemoryId>> {
-        self.ann_provider.candidates(query, ann_k, namespace, &self.partitions)
+        self.ann_provider.candidates(query, ann_k, collection, &self.partitions)
     }
 
     fn rerank_exact(
@@ -657,10 +657,10 @@ impl VectorIndex {
         let query_mag = magnitude(query)?;
         let mut out = Vec::new();
         for id in candidate_ids {
-            let Some(ns) = self.id_to_namespace.get(id) else {
+            let Some(col) = self.id_to_collection.get(id) else {
                 continue;
             };
-            let Some(partition) = self.partitions.get(ns) else {
+            let Some(partition) = self.partitions.get(col) else {
                 continue;
             };
             if partition.tombstones.contains(id) {
@@ -969,10 +969,10 @@ mod tests {
     }
 
     #[test]
-    fn test_namespace_partition_search_scope() {
+    fn test_collection_partition_search_scope() {
         let mut index = VectorIndex::new(3);
-        index.index_in_namespace("agent1", MemoryId(1), vec![1.0, 0.0, 0.0]).unwrap();
-        index.index_in_namespace("agent2", MemoryId(2), vec![1.0, 0.0, 0.0]).unwrap();
+        index.index_in_collection("agent1", MemoryId(1), vec![1.0, 0.0, 0.0]).unwrap();
+        index.index_in_collection("agent2", MemoryId(2), vec![1.0, 0.0, 0.0]).unwrap();
 
         let scoped = index.search_scoped(&[1.0, 0.0, 0.0], 10, Some("agent1"), false, 1).unwrap();
         assert_eq!(scoped.len(), 1);
@@ -985,7 +985,7 @@ mod tests {
         index.set_backend_mode(VectorBackendMode::Ann { ann_search_multiplier: 7 });
         for i in 0..30u64 {
             let emb = if i == 29 { vec![1.0, 0.0, 0.0] } else { vec![0.6, 0.8, 0.0] };
-            index.index_in_namespace("agent1", MemoryId(i), emb).unwrap();
+            index.index_in_collection("agent1", MemoryId(i), emb).unwrap();
         }
 
         let results = index.search_scoped(&[1.0, 0.0, 0.0], 3, Some("agent1"), false, 7).unwrap();
@@ -999,7 +999,7 @@ mod tests {
         index.set_backend_mode(VectorBackendMode::Ann { ann_search_multiplier: 7 });
 
         for i in 0..10u64 {
-            index.index_in_namespace("agent1", MemoryId(i), vec![1.0, 0.0, 0.0]).unwrap();
+            index.index_in_collection("agent1", MemoryId(i), vec![1.0, 0.0, 0.0]).unwrap();
         }
         assert_eq!(index.len(), 10);
 

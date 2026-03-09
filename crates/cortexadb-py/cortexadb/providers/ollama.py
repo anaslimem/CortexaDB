@@ -14,13 +14,13 @@ Usage::
         "agent.mem",
         embedder=OllamaEmbedder(model="nomic-embed-text"),
     )
-    db.remember("We chose Stripe for payments")
-    hits = db.ask("payment provider?")
+    db.add("We chose Stripe for payments")
+    hits = db.search("payment provider?")
 """
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from ..embedder import Embedder
 

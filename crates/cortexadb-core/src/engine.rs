@@ -161,7 +161,7 @@ impl Engine {
                         repaired_segments = true;
                     }
                 }
-                Command::DeleteMemory(id) => {
+                Command::Delete(id) => {
                     // Delete may refer to a missing segment entry in crash scenarios.
                     let _ = segments.delete_entry(*id);
                 }
@@ -264,7 +264,7 @@ impl Engine {
                 // Write entry to segment storage
                 self._write_entry_to_segments(entry)?;
             }
-            Command::DeleteMemory(id) => {
+            Command::Delete(id) => {
                 // Mark as deleted in segments
                 self.segments.delete_entry(*id)?;
             }
@@ -374,9 +374,9 @@ impl Engine {
             }
 
             if sync_immediately {
-                self.execute_command(Command::DeleteMemory(id))?;
+                self.execute_command(Command::delete(id))?;
             } else {
-                self.execute_command_unsynced(Command::DeleteMemory(id))?;
+                self.execute_command_unsynced(Command::delete(id))?;
             }
             evicted_ids.push(id);
         }
@@ -408,12 +408,12 @@ impl Engine {
     }
 
     fn estimate_memory_bytes(entry: &MemoryEntry) -> u64 {
-        let namespace_bytes = entry.namespace.len() as u64;
+        let collection_bytes = entry.collection.len() as u64;
         let content_bytes = entry.content.len() as u64;
         let embedding_bytes = entry.embedding.as_ref().map(|v| (v.len() as u64) * 4).unwrap_or(0);
         let metadata_bytes: u64 =
             entry.metadata.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum();
-        namespace_bytes + content_bytes + embedding_bytes + metadata_bytes
+        collection_bytes + content_bytes + embedding_bytes + metadata_bytes
     }
 
     /// Helper: Write entry to segments
@@ -524,11 +524,11 @@ mod tests {
 
         // Lower importance + older entries should be evicted first.
         let entries = vec![
-            MemoryEntry::new(MemoryId(1), "ns".to_string(), b"a".to_vec(), 1000)
+            MemoryEntry::new(MemoryId(1), "col".to_string(), b"a".to_vec(), 1000)
                 .with_importance(0.1),
-            MemoryEntry::new(MemoryId(2), "ns".to_string(), b"b".to_vec(), 2000)
+            MemoryEntry::new(MemoryId(2), "col".to_string(), b"b".to_vec(), 2000)
                 .with_importance(0.9),
-            MemoryEntry::new(MemoryId(3), "ns".to_string(), b"c".to_vec(), 3000)
+            MemoryEntry::new(MemoryId(3), "col".to_string(), b"c".to_vec(), 3000)
                 .with_importance(0.2),
         ];
         for entry in entries {
@@ -658,7 +658,7 @@ mod tests {
             engine.execute_command(Command::InsertMemory(entry)).unwrap();
         }
         for id in [0_u64, 1, 2, 3] {
-            engine.execute_command(Command::DeleteMemory(MemoryId(id))).unwrap();
+            engine.execute_command(Command::delete(MemoryId(id))).unwrap();
         }
 
         let report = engine.compact_segments().unwrap();
@@ -744,7 +744,7 @@ mod tests {
             for i in 0..5 {
                 let entry = MemoryEntry::new(
                     MemoryId(i as u64),
-                    "namespace".to_string(),
+                    "collection".to_string(),
                     format!("memory_{}", i).into_bytes(),
                     2000 + i as u64,
                 );
@@ -764,7 +764,7 @@ mod tests {
         // Verify data is intact
         let memory = engine.get_state_machine().get_memory(MemoryId(0)).unwrap();
         assert_eq!(memory.id, MemoryId(0));
-        assert_eq!(memory.namespace, "namespace");
+        assert_eq!(memory.collection, "collection");
     }
 
     #[test]
@@ -885,7 +885,7 @@ mod tests {
             }
 
             // Delete one memory
-            engine.execute_command(Command::DeleteMemory(MemoryId(2))).unwrap();
+            engine.execute_command(Command::delete(MemoryId(2))).unwrap();
 
             assert_eq!(engine.get_state_machine().len(), 4); // 5 - 1
         }

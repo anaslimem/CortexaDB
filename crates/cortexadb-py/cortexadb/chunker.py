@@ -10,8 +10,7 @@ Wraps the Rust chunker for multiple strategies:
 """
 
 from __future__ import annotations
-from typing import List, Dict, Any, Optional
-import typing as t
+from typing import List, Dict, Any
 
 from . import _cortexadb
 

@@ -9,8 +9,8 @@ automatic embedding.
     from cortexadb.providers.openai import OpenAIEmbedder
 
     db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
-    db.remember("We chose Stripe for payments")   # embeds automatically
-    hits = db.ask("payment provider?")            # embeds query automatically
+    db.add("We chose Stripe for payments")   # embeds automatically
+    hits = db.search("payment provider?")            # embeds query automatically
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ class HashEmbedder(Embedder):
         from cortexadb import HashEmbedder
 
         db = CortexaDB.open("/tmp/test.mem", embedder=HashEmbedder(dimension=64))
-        db.remember("hello world")
+        db.add("hello world")
     """
 
     def __init__(self, dimension: int = 64) -> None:

@@ -4,3 +4,6 @@
 *.dylib
 *.pyd
 __pycache__
+*.dSYM
+*.whl
+*.egg-info

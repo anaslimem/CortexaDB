@@ -107,7 +107,7 @@ for hit in hits:
 ```python
 # Record a session
 db = CortexaDB.open("agent.mem", embedder=embedder, record="session.log")
-db.add("User asked about pricing")
+db.add("User searched about pricing")
 db.add("Showed enterprise plan")
 db.connect(1, 2, "led_to")
 
@@ -218,14 +218,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Store memories
     let emb = vec![0.1_f32; 128];
-    let id1 = db.remember(emb.clone(), None)?;
+    let id1 = db.add(emb.clone(), None)?;
 
     let mut meta = HashMap::new();
     meta.insert("source".into(), "test".into());
-    let id2 = db.remember(vec![0.2; 128], Some(meta))?;
+    let id2 = db.add(vec![0.2; 128], Some(meta))?;
 
     // Query
-    let hits = db.ask(emb, 5, None)?;
+    let hits = db.search(emb, 5, None)?;
     println!("Found {} results", hits.len());
 
     // Graph

@@ -105,7 +105,7 @@ impl GraphExpansionOptions {
 #[derive(Debug, Clone)]
 pub struct QueryOptions {
     pub top_k: usize,
-    pub namespace: Option<String>,
+    pub collection: Option<String>,
     pub time_range: Option<(u64, u64)>,
     pub graph_expansion: Option<GraphExpansionOptions>,
     pub candidate_multiplier: usize,
@@ -124,7 +124,7 @@ impl Default for QueryOptions {
     fn default() -> Self {
         Self {
             top_k: 10,
-            namespace: None,
+            collection: None,
             time_range: None,
             // Hybrid-first default: expand one hop when graph signal exists.
             graph_expansion: Some(GraphExpansionOptions::new(1)),
@@ -165,10 +165,10 @@ impl<'a> HybridQueryEngine<'a> {
         &self,
         query_text: &str,
         top_k: usize,
-        namespace: Option<&str>,
+        collection: Option<&str>,
     ) -> Result<Vec<QueryHit>> {
         let mut options = QueryOptions::with_top_k(top_k);
-        options.namespace = namespace.map(|ns| ns.to_string());
+        options.collection = collection.map(|ns| ns.to_string());
         self.query_with_options(query_text, options)
     }
 
@@ -198,7 +198,7 @@ impl<'a> HybridQueryEngine<'a> {
         let vector_results = self.index_layer.vector.search_scoped(
             &query_embedding,
             candidate_k,
-            options.namespace.as_deref(),
+            options.collection.as_deref(),
             false,
             ann_multiplier,
         )?;
@@ -216,15 +216,15 @@ impl<'a> HybridQueryEngine<'a> {
                 let mut expanded_ids = HashSet::new();
                 let base_ids: Vec<MemoryId> = candidate_scores.keys().copied().collect();
                 for id in base_ids {
-                    let reachable = if let Some(ns) = options.namespace.as_deref() {
-                        GraphIndex::bfs_in_namespace(self.state_machine, id, expansion.hops, ns)?
+                    let reachable = if let Some(col) = options.collection.as_deref() {
+                        GraphIndex::bfs_in_collection(self.state_machine, id, expansion.hops, col)?
                     } else {
                         GraphIndex::bfs(self.state_machine, id, expansion.hops)?
                     };
                     for reachable_id in reachable.keys().copied() {
                         if self.matches_filters(
                             reachable_id,
-                            options.namespace.as_deref(),
+                            options.collection.as_deref(),
                             None,
                             options.metadata_filter.as_ref(),
                         ) {
@@ -305,7 +305,7 @@ impl<'a> HybridQueryEngine<'a> {
     fn matches_filters(
         &self,
         id: MemoryId,
-        namespace: Option<&str>,
+        collection: Option<&str>,
         time_range: Option<(u64, u64)>,
         metadata_filter: Option<&HashMap<String, String>>,
     ) -> bool {
@@ -314,8 +314,8 @@ impl<'a> HybridQueryEngine<'a> {
             Err(_) => return false,
         };
 
-        if let Some(ns) = namespace {
-            if entry.namespace != ns {
+        if let Some(col) = collection {
+            if entry.collection != col {
                 return false;
             }
         }
@@ -370,7 +370,7 @@ mod tests {
         for entry in [&a, &b, &c] {
             layer
                 .vector_index_mut()
-                .index_in_namespace(&entry.namespace, entry.id, entry.embedding.clone().unwrap())
+                .index_in_collection(&entry.collection, entry.id, entry.embedding.clone().unwrap())
                 .unwrap();
         }
         sm.insert_memory(a).unwrap();
@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn test_query_with_namespace_filter() {
+    fn test_query_with_collection_filter() {
         let (sm, layer, embedder) = build_engine();
         let engine = HybridQueryEngine::new(&sm, &layer, &embedder);
 
@@ -409,7 +409,7 @@ mod tests {
         let engine = HybridQueryEngine::new(&sm, &layer, &embedder);
 
         let mut options = QueryOptions::with_top_k(10);
-        options.namespace = Some("agent1".to_string());
+        options.collection = Some("agent1".to_string());
         options.time_range = Some((1000, 1000)); // only id=1 from vector base filter
         options.graph_expansion = Some(GraphExpansionOptions::new(1)); // expands to id=2
 

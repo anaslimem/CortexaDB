@@ -127,8 +127,8 @@ for c in chunks:
 # Chunk and store text (uses embedder for auto-embedding)
 ids = db.ingest("Long article text...", strategy="recursive", chunk_size=512)
 
-# Chunk and store with namespace
-ids = db.ingest("text", strategy="markdown", namespace="docs")
+# Chunk and store with collection
+ids = db.ingest("text", strategy="markdown", collection="docs")
 ```
 
 ### Load from File

@@ -2,7 +2,7 @@
 //!
 //! This is the recommended entry point for using CortexaDB as a library.
 //! It wraps [`CortexaDBStore`] and hides planner/engine/index details behind
-//! five core operations: `open`, `remember`, `ask`, `connect`, `compact`.
+//! five core operations: `open`, `add`, `search`, `connect`, `compact`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ use crate::store::{CheckpointPolicy, CortexaDBStore, CortexaDBStoreError};
 // Public types
 // ---------------------------------------------------------------------------
 
-/// Returned by [`CortexaDB::ask`] — a scored memory hit.
+/// Returned by [`CortexaDB::search`] — a scored memory hit.
 #[derive(Debug, Clone)]
 pub struct Hit {
     pub id: u64,
@@ -31,7 +31,7 @@ pub struct Hit {
 pub struct Memory {
     pub id: u64,
     pub content: Vec<u8>,
-    pub namespace: String,
+    pub collection: String,
     pub embedding: Option<Vec<f32>>,
     pub metadata: HashMap<String, String>,
     pub created_at: u64,
@@ -138,7 +138,7 @@ pub enum CortexaDBError {
 pub type Result<T> = std::result::Result<T, CortexaDBError>;
 
 // ---------------------------------------------------------------------------
-// Embedder adapter (used internally for `ask`)
+// Embedder adapter (used internally for `search`)
 // ---------------------------------------------------------------------------
 
 struct StaticEmbedder {
@@ -174,8 +174,8 @@ impl QueryEmbedder for StaticEmbedder {
 ///     .with_sync_policy(cortexadb_core::engine::SyncPolicy::Async { interval_ms: 1000 })
 ///     .build()?;
 ///
-/// let id = db.remember(vec![1.0, 0.0, 0.0], None)?;
-/// let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None)?;
+/// let id = db.add(vec![1.0, 0.0, 0.0], None)?;
+/// let hits = db.search(vec![1.0, 0.0, 0.0], 5, None)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -187,7 +187,7 @@ pub struct CortexaDB {
 /// A record for batch insertion.
 #[derive(Debug, Clone)]
 pub struct BatchRecord {
-    pub namespace: String,
+    pub collection: String,
     pub content: Vec<u8>,
     pub embedding: Option<Vec<f32>>,
     pub metadata: Option<HashMap<String, String>>,
@@ -254,7 +254,7 @@ impl CortexaDB {
 
     /// Store a new memory with the given embedding and optional metadata.
     ///
-    /// The memory is placed in the "default" namespace.
+    /// The memory is placed in the "default" collection.
     ///
     /// # Examples
     ///
@@ -265,7 +265,7 @@ impl CortexaDB {
     /// # let db = CortexaDB::open("test", 3)?;
     /// let mut meta = HashMap::new();
     /// meta.insert("type".to_string(), "thought".to_string());
-    /// let id = db.remember(vec![0.1, 0.2, 0.3], Some(meta))?;
+    /// let id = db.add(vec![0.1, 0.2, 0.3], Some(meta))?;
     /// # Ok(())
     /// # }
     /// ```
@@ -273,18 +273,18 @@ impl CortexaDB {
     /// # Errors
     ///
     /// Returns [`CortexaDBError`] if the write-ahead log fails to append the entry.
-    pub fn remember(
+    pub fn add(
         &self,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
     ) -> Result<u64> {
-        self.remember_in_namespace("default", embedding, metadata)
+        self.add_in_collection("default", embedding, metadata)
     }
 
-    /// Store a new memory in a specific namespace.
-    pub fn remember_in_namespace(
+    /// Store a new memory in a specific collection.
+    pub fn add_in_collection(
         &self,
-        namespace: &str,
+        collection: &str,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
     ) -> Result<u64> {
@@ -292,7 +292,7 @@ impl CortexaDB {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let mut entry =
-            MemoryEntry::new(id, namespace.to_string(), Vec::new(), ts).with_embedding(embedding);
+            MemoryEntry::new(id, collection.to_string(), Vec::new(), ts).with_embedding(embedding);
         if let Some(meta) = metadata {
             entry.metadata = meta;
         }
@@ -301,10 +301,10 @@ impl CortexaDB {
         Ok(id.0)
     }
 
-    /// Store a memory with explicit content bytes optionally in a namespace.
-    pub fn remember_with_content(
+    /// Store a memory with explicit content bytes optionally in a collection.
+    pub fn add_with_content(
         &self,
-        namespace: &str,
+        collection: &str,
         content: Vec<u8>,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
@@ -313,7 +313,7 @@ impl CortexaDB {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let mut entry =
-            MemoryEntry::new(id, namespace.to_string(), content, ts).with_embedding(embedding);
+            MemoryEntry::new(id, collection.to_string(), content, ts).with_embedding(embedding);
         if let Some(meta) = metadata {
             entry.metadata = meta;
         }
@@ -323,14 +323,14 @@ impl CortexaDB {
     }
 
     /// Store a batch of memories efficiently.
-    pub fn remember_batch(&self, records: Vec<BatchRecord>) -> Result<Vec<u64>> {
+    pub fn add_batch(&self, records: Vec<BatchRecord>) -> Result<Vec<u64>> {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let mut entries = Vec::with_capacity(records.len());
         let mut ids = Vec::with_capacity(records.len());
 
         for rec in records {
             let id = MemoryId(self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-            let mut entry = MemoryEntry::new(id.clone(), rec.namespace, rec.content, ts);
+            let mut entry = MemoryEntry::new(id.clone(), rec.collection, rec.content, ts);
             if let Some(emb) = rec.embedding {
                 entry = entry.with_embedding(emb);
             }
@@ -353,7 +353,7 @@ impl CortexaDB {
     /// # Errors
     ///
     /// Returns [`CortexaDBError`] if the query execution fails.
-    pub fn ask(
+    pub fn search(
         &self,
         query_embedding: Vec<f32>,
         top_k: usize,
@@ -379,35 +379,35 @@ impl CortexaDB {
         Ok(neighbors.into_iter().map(|(target_id, relation)| (target_id.0, relation)).collect())
     }
 
-    /// Query the database scoped to a specific namespace.
+    /// Query the database scoped to a specific collection.
     ///
-    /// Over-fetches by 4× top_k globally, then filters by namespace and
+    /// Over-fetches by 4× top_k globally, then filters by collection and
     /// returns the top *top_k* results. This avoids a separate index per
-    /// namespace while keeping the filter inside Rust (no GIL round-trips).
-    pub fn ask_in_namespace(
+    /// collection while keeping the filter inside Rust (no GIL round-trips).
+    pub fn search_in_collection(
         &self,
-        namespace: &str,
+        collection: &str,
         query_embedding: Vec<f32>,
         top_k: usize,
         metadata_filter: Option<HashMap<String, String>>,
     ) -> Result<Vec<Hit>> {
         let embedder = StaticEmbedder { embedding: query_embedding };
         let mut options = QueryOptions::with_top_k(top_k.saturating_mul(4).max(top_k));
-        options.namespace = Some(namespace.to_string());
+        options.collection = Some(collection.to_string());
         options.metadata_filter = metadata_filter;
         let execution = self.inner.query("", options, &embedder)?;
 
         let sm = self.inner.state_machine();
         let memories = sm.all_memories();
 
-        // Build a lookup: MemoryId → namespace
-        let ns_map: std::collections::HashMap<u64, &str> =
-            memories.iter().map(|m| (m.id.0, m.namespace.as_str())).collect();
+        // Build a lookup: MemoryId → collection
+        let col_map: std::collections::HashMap<u64, &str> =
+            memories.iter().map(|m| (m.id.0, m.collection.as_str())).collect();
 
         let results: Vec<Hit> = execution
             .hits
             .into_iter()
-            .filter(|hit| ns_map.get(&hit.id.0).copied() == Some(namespace))
+            .filter(|hit| col_map.get(&hit.id.0).copied() == Some(collection))
             .take(top_k)
             .map(|hit| Hit { id: hit.id.0, score: hit.final_score })
             .collect();
@@ -426,7 +426,7 @@ impl CortexaDB {
         Ok(Memory {
             id: entry.id.0,
             content: entry.content.clone(),
-            namespace: entry.namespace.clone(),
+            collection: entry.collection.clone(),
             embedding: entry.embedding.clone(),
             metadata: entry.metadata.clone(),
             created_at: entry.created_at,
@@ -439,8 +439,8 @@ impl CortexaDB {
     /// # Errors
     ///
     /// Returns [`CortexaDBError`] if the deletion cannot be logged.
-    pub fn delete_memory(&self, id: u64) -> Result<()> {
-        self.inner.delete_memory(MemoryId(id))?;
+    pub fn delete(&self, id: u64) -> Result<()> {
+        self.inner.delete(MemoryId(id))?;
         Ok(())
     }
 
@@ -516,16 +516,16 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_open_remember_ask() {
+    fn test_open_add_search() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        let id1 = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        let id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         assert_ne!(id1, id2);
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+        let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
         assert_eq!(hits[0].id, id1);
     }
@@ -536,8 +536,8 @@ mod tests {
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        let id1 = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        let id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         db.connect(id1, id2, "related").unwrap();
 
         let stats = db.stats();
@@ -553,8 +553,8 @@ mod tests {
 
         {
             let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
-            db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-            db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+            db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+            db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         }
 
         // Reopen — should recover from WAL.
@@ -562,7 +562,7 @@ mod tests {
         let stats = db.stats();
         assert_eq!(stats.entries, 2);
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+        let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
     }
 
@@ -582,12 +582,12 @@ mod tests {
 
         {
             let db = CortexaDB::open_with_config(path.to_str().unwrap(), config.clone()).unwrap();
-            db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-            db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+            db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+            db.add(vec![0.0, 1.0, 0.0], None).unwrap();
             db.flush().unwrap(); // ensure WAL is synced before checkpoint truncates it
             db.checkpoint().unwrap();
             // Write more after checkpoint.
-            db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+            db.add(vec![0.0, 0.0, 1.0], None).unwrap();
         }
 
         let db = CortexaDB::open_with_config(path.to_str().unwrap(), config).unwrap();
@@ -601,21 +601,21 @@ mod tests {
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         db.compact().unwrap();
     }
 
     #[test]
-    fn test_remember_with_metadata() {
+    fn test_add_with_metadata() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
         let mut meta = HashMap::new();
         meta.insert("source".to_string(), "test".to_string());
-        let id = db.remember(vec![1.0, 0.0, 0.0], Some(meta)).unwrap();
+        let id = db.add(vec![1.0, 0.0, 0.0], Some(meta)).unwrap();
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 1, None).unwrap();
+        let hits = db.search(vec![1.0, 0.0, 0.0], 1, None).unwrap();
         assert_eq!(hits[0].id, id);
 
         let memory = db.get_memory(id).unwrap();
@@ -623,48 +623,48 @@ mod tests {
     }
 
     #[test]
-    fn test_namespace_support() {
+    fn test_collection_support() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id1 = db.remember_in_namespace("agent_b", vec![0.0, 1.0, 0.0], None).unwrap();
-        let _id2 = db.remember_in_namespace("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();
+        let id1 = db.add_in_collection("agent_b", vec![0.0, 1.0, 0.0], None).unwrap();
+        let _id2 = db.add_in_collection("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();
 
         let stats = db.stats();
         assert_eq!(stats.entries, 2);
 
         let m1 = db.get_memory(id1).unwrap();
-        assert_eq!(m1.namespace, "agent_b");
+        assert_eq!(m1.collection, "agent_b");
     }
 
     #[test]
-    fn test_delete_memory_removes_from_stats() {
+    fn test_delete_removes_from_stats() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        let id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         assert_eq!(db.stats().entries, 1);
 
-        db.delete_memory(id).unwrap();
+        db.delete(id).unwrap();
         assert_eq!(db.stats().entries, 0, "entry count should be 0 after delete");
     }
 
     #[test]
-    fn test_delete_memory_not_returned_in_ask() {
+    fn test_search_not_returned_in_search() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        let id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         // Keep a second entry so the index is non-empty after deletion.
-        // (ask() returns NoEmbeddings when the vector index is completely empty.)
-        let _id_keep = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        // (search() returns NoEmbeddings when the vector index is completely empty.)
+        let _id_keep = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
 
-        db.delete_memory(id).unwrap();
+        db.delete(id).unwrap();
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 10, None).unwrap();
+        let hits = db.search(vec![1.0, 0.0, 0.0], 10, None).unwrap();
         assert!(
             hits.iter().all(|h| h.id != id),
             "deleted memory must not appear in search results"
@@ -677,8 +677,8 @@ mod tests {
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        db.delete_memory(id).unwrap();
+        let id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.delete(id).unwrap();
 
         let result = db.get_memory(id);
         assert!(result.is_err(), "get_memory on a deleted ID must return an error");
@@ -690,9 +690,9 @@ mod tests {
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
-        let id3 = db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+        let id1 = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        let id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
+        let id3 = db.add(vec![0.0, 0.0, 1.0], None).unwrap();
 
         db.connect(id1, id2, "related").unwrap();
         db.connect(id1, id3, "follows").unwrap();
@@ -715,22 +715,22 @@ mod tests {
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        let id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         let neighbors = db.get_neighbors(id).unwrap();
         assert!(neighbors.is_empty(), "node with no edges should return empty neighbors");
     }
 
     #[test]
-    fn test_ask_in_namespace_only_returns_own_namespace() {
+    fn test_search_in_collection_only_returns_own_collection() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        // Same embedding direction — only namespace should differentiate results.
-        let id_a = db.remember_in_namespace("ns_a", vec![1.0, 0.0, 0.0], None).unwrap();
-        let _id_b = db.remember_in_namespace("ns_b", vec![1.0, 0.0, 0.0], None).unwrap();
+        // Same embedding direction — only collection should differentiate results.
+        let id_a = db.add_in_collection("ns_a", vec![1.0, 0.0, 0.0], None).unwrap();
+        let _id_b = db.add_in_collection("ns_b", vec![1.0, 0.0, 0.0], None).unwrap();
 
-        let hits = db.ask_in_namespace("ns_a", vec![1.0, 0.0, 0.0], 10, None).unwrap();
+        let hits = db.search_in_collection("ns_a", vec![1.0, 0.0, 0.0], 10, None).unwrap();
         assert!(!hits.is_empty(), "should find memories in ns_a");
         assert!(
             hits.iter().all(|h| h.id == id_a),
@@ -744,7 +744,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
-        db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         db.flush().expect("flush must not fail");
     }
 
@@ -753,16 +753,16 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
-        db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         db.compact().expect("compact must not fail");
     }
 
-    // ----- ask_in_namespace: sparse namespace over-fetch regression -----
+    // ----- ask_in_collection: sparse collection over-fetch regression -----
 
     #[test]
-    fn test_ask_in_namespace_finds_entry_in_sparse_namespace() {
-        // Regression: before the 4× fix, ask_in_namespace returned empty results when the
-        // target namespace had far fewer entries than top_k * candidate_multiplier entries globally.
+    fn test_search_in_collection_finds_entry_in_sparse_collection() {
+        // Regression: before the 4× fix, ask_in_collection returned empty results when the
+        // target collection had far fewer entries than top_k * candidate_multiplier entries globally.
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
@@ -770,14 +770,14 @@ mod tests {
         // Insert 10 entries in ns_majority to fill the global index.
         for i in 0..10u32 {
             let v = vec![i as f32 / 10.0, 1.0 - i as f32 / 10.0, 0.0];
-            db.remember_in_namespace("ns_majority", v, None).unwrap();
+            db.add_in_collection("ns_majority", v, None).unwrap();
         }
         // Insert 2 entries in ns_sparse.
-        let id_a = db.remember_in_namespace("ns_sparse", vec![1.0, 0.0, 0.0], None).unwrap();
-        let id_b = db.remember_in_namespace("ns_sparse", vec![0.9, 0.1, 0.0], None).unwrap();
+        let id_a = db.add_in_collection("ns_sparse", vec![1.0, 0.0, 0.0], None).unwrap();
+        let id_b = db.add_in_collection("ns_sparse", vec![0.9, 0.1, 0.0], None).unwrap();
 
         // Ask for top-2 in ns_sparse — both must be returned.
-        let hits = db.ask_in_namespace("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
+        let hits = db.search_in_collection("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
         let hit_ids: Vec<u64> = hits.iter().map(|h| h.id).collect();
         assert!(
             hit_ids.contains(&id_a),
@@ -794,13 +794,13 @@ mod tests {
     // ----- Intent anchors end-to-end -----
 
     #[test]
-    fn test_ask_without_intent_anchors_unchanged() {
+    fn test_search_without_intent_anchors_unchanged() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
-        db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        // Default QueryOptions has intent_anchors = None; must produce same results as ask().
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+        db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        // Default QueryOptions has intent_anchors = None; must produce same results as search().
+        let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
     }
 }
