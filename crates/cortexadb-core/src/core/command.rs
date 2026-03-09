@@ -8,7 +8,7 @@ pub enum Command {
     /// Insert or update a memory entry
     InsertMemory(MemoryEntry),
     /// Delete a memory entry by ID
-    DeleteMemory(MemoryId),
+    Delete(MemoryId),
     /// Add an edge between two memories with a relation type
     AddEdge { from: MemoryId, to: MemoryId, relation: String },
     /// Remove an edge between two memories
@@ -20,8 +20,8 @@ impl Command {
         Command::InsertMemory(entry)
     }
 
-    pub fn delete_memory(id: MemoryId) -> Self {
-        Command::DeleteMemory(id)
+    pub fn delete(id: MemoryId) -> Self {
+        Command::Delete(id)
     }
 
     pub fn add_edge(from: MemoryId, to: MemoryId, relation: String) -> Self {
@@ -49,9 +49,9 @@ mod tests {
 
     #[test]
     fn test_delete_command() {
-        let cmd = Command::delete_memory(MemoryId(1));
+        let cmd = Command::delete(MemoryId(1));
         match cmd {
-            Command::DeleteMemory(id) => assert_eq!(id, MemoryId(1)),
+            Command::Delete(id) => assert_eq!(id, MemoryId(1)),
             _ => panic!("Expected DeleteMemory"),
         }
     }

@@ -19,7 +19,7 @@ use crate::store::{CheckpointPolicy, CortexaDBStore, CortexaDBStoreError};
 // Public types
 // ---------------------------------------------------------------------------
 
-/// Returned by [`CortexaDB::ask`] — a scored memory hit.
+/// Returned by [`CortexaDB::search`] — a scored memory hit.
 #[derive(Debug, Clone)]
 pub struct Hit {
     pub id: u64,
@@ -138,7 +138,7 @@ pub enum CortexaDBError {
 pub type Result<T> = std::result::Result<T, CortexaDBError>;
 
 // ---------------------------------------------------------------------------
-// Embedder adapter (used internally for `ask`)
+// Embedder adapter (used internally for `search`)
 // ---------------------------------------------------------------------------
 
 struct StaticEmbedder {
@@ -440,7 +440,7 @@ impl CortexaDB {
     ///
     /// Returns [`CortexaDBError`] if the deletion cannot be logged.
     pub fn delete(&self, id: u64) -> Result<()> {
-        self.inner.delete_memory(MemoryId(id))?;
+        self.inner.delete(MemoryId(id))?;
         Ok(())
     }
 
@@ -652,14 +652,14 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_not_returned_in_ask() {
+    fn test_search_not_returned_in_search() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
         let id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         // Keep a second entry so the index is non-empty after deletion.
-        // (ask() returns NoEmbeddings when the vector index is completely empty.)
+        // (search() returns NoEmbeddings when the vector index is completely empty.)
         let _id_keep = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
 
         db.delete(id).unwrap();
@@ -721,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ask_in_collection_only_returns_own_collection() {
+    fn test_search_in_collection_only_returns_own_collection() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
@@ -760,7 +760,7 @@ mod tests {
     // ----- ask_in_collection: sparse collection over-fetch regression -----
 
     #[test]
-    fn test_ask_in_collection_finds_entry_in_sparse_collection() {
+    fn test_search_in_collection_finds_entry_in_sparse_collection() {
         // Regression: before the 4× fix, ask_in_collection returned empty results when the
         // target collection had far fewer entries than top_k * candidate_multiplier entries globally.
         let temp = TempDir::new().unwrap();

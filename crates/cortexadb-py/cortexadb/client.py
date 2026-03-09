@@ -196,7 +196,7 @@ class CortexaDB:
             report["op_counts"][op_type] = report["op_counts"].get(op_type, 0) + 1
             
             try:
-                if op_type in ("add", "remember"):
+                if op_type == "add":
                     new_id = db.add(
                         text=op.get("text"),
                         vector=op.get("embedding"),

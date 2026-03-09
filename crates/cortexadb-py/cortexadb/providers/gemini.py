@@ -14,7 +14,7 @@ Usage::
         embedder=GeminiEmbedder(api_key="AIza...", model="models/text-embedding-004"),
     )
     db.add("We chose Stripe for payments")
-    hits = db.ask("payment provider?")
+    hits = db.search("payment provider?")
 """
 
 from __future__ import annotations

@@ -14,7 +14,7 @@ Usage::
         embedder=OpenAIEmbedder(api_key="sk-...", model="text-embedding-3-small"),
     )
     db.add("We chose Stripe for payments")
-    hits = db.ask("payment provider?")
+    hits = db.search("payment provider?")
 """
 
 from __future__ import annotations

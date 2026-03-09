@@ -618,9 +618,9 @@ impl CortexaDBStore {
         Ok(last_cmd_id)
     }
 
-    pub fn delete_memory(&self, id: MemoryId) -> Result<CommandId> {
+    pub fn delete(&self, id: MemoryId) -> Result<CommandId> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
-        self.execute_write_transaction_locked(&mut writer, WriteOp::DeleteMemory(id))
+        self.execute_write_transaction_locked(&mut writer, WriteOp::Delete(id))
     }
 
     pub fn add_edge(&self, from: MemoryId, to: MemoryId, relation: String) -> Result<CommandId> {
@@ -883,11 +883,11 @@ impl CortexaDBStore {
                 }
                 id
             }
-            WriteOp::DeleteMemory(id) => {
+            WriteOp::Delete(id) => {
                 let cmd_id = if sync_now {
-                    writer.engine.execute_command(Command::DeleteMemory(id))?
+                    writer.engine.execute_command(Command::Delete(id))?
                 } else {
-                    writer.engine.execute_command_unsynced(Command::DeleteMemory(id))?
+                    writer.engine.execute_command_unsynced(Command::Delete(id))?
                 };
                 let _ = writer.indexes.vector_index_mut().remove(id);
                 cmd_id
@@ -1055,7 +1055,7 @@ impl Drop for CortexaDBStore {
 
 enum WriteOp {
     InsertMemory(MemoryEntry),
-    DeleteMemory(MemoryId),
+    Delete(MemoryId),
     AddEdge { from: MemoryId, to: MemoryId, relation: String },
     RemoveEdge { from: MemoryId, to: MemoryId },
 }
@@ -1119,7 +1119,7 @@ mod tests {
         store.insert_memory(entry).unwrap();
         assert_eq!(store.indexed_embeddings(), 1);
 
-        store.delete_memory(MemoryId(10)).unwrap();
+        store.delete(MemoryId(10)).unwrap();
         assert_eq!(store.indexed_embeddings(), 0);
     }
 
@@ -1410,7 +1410,7 @@ mod tests {
 
         // Remove 3 items (they become tombstones in HNSW)
         for i in 2..5 {
-            store.delete_memory(MemoryId(i)).unwrap();
+            store.delete(MemoryId(i)).unwrap();
         }
 
         assert_eq!(store.indexed_embeddings(), 2);

@@ -15,7 +15,7 @@ Usage::
         embedder=OllamaEmbedder(model="nomic-embed-text"),
     )
     db.add("We chose Stripe for payments")
-    hits = db.ask("payment provider?")
+    hits = db.search("payment provider?")
 """
 
 from __future__ import annotations

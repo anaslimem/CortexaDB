@@ -44,7 +44,7 @@ impl StateMachine {
     pub fn apply_command(&mut self, cmd: Command) -> Result<()> {
         match cmd {
             Command::InsertMemory(entry) => self.insert_memory(entry),
-            Command::DeleteMemory(id) => self.delete_memory(id),
+            Command::Delete(id) => self.delete(id),
             Command::AddEdge { from, to, relation } => self.add_edge(from, to, relation),
             Command::RemoveEdge { from, to } => self.remove_edge(from, to),
         }
@@ -83,7 +83,7 @@ impl StateMachine {
     }
 
     /// Delete a memory entry and its edges
-    pub fn delete_memory(&mut self, id: MemoryId) -> Result<()> {
+    pub fn delete(&mut self, id: MemoryId) -> Result<()> {
         if !self.memories.contains_key(&id) {
             return Err(StateMachineError::MemoryNotFound(id));
         }
@@ -238,13 +238,13 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_memory() {
+    fn test_delete() {
         let mut sm = StateMachine::new();
         let entry = create_test_entry(1, "default", 1000);
         sm.insert_memory(entry).unwrap();
         assert_eq!(sm.len(), 1);
 
-        sm.delete_memory(MemoryId(1)).unwrap();
+        sm.delete(MemoryId(1)).unwrap();
         assert_eq!(sm.len(), 0);
         assert!(sm.get_memory(MemoryId(1)).is_err());
     }
@@ -365,7 +365,7 @@ mod tests {
         sm.add_edge(MemoryId(1), MemoryId(2), "refers".to_string()).unwrap();
 
         // Delete memory 2
-        sm.delete_memory(MemoryId(2)).unwrap();
+        sm.delete(MemoryId(2)).unwrap();
 
         // Edge should be cleaned up
         let neighbors = sm.get_neighbors(MemoryId(1)).unwrap();

@@ -83,7 +83,7 @@ def run_benchmark(
             db = CortexaDB.open(db_path, dimension=len(embeddings[0]))
 
         for i, emb in enumerate(embeddings):
-            db.remember(f"memory_{i}", embedding=emb)
+            db.add(f"memory_{i}", embedding=emb)
 
         # Force checkpoint to flush
         db.checkpoint()
@@ -108,7 +108,7 @@ def run_benchmark(
         # === WARMUP ===
         print(f"Warming up with {warmup_queries} queries...")
         for i in range(warmup_queries):
-            _ = db._inner.ask_embedding(
+            _ = db._inner.search_embedding(
                 embedding=queries[i % len(queries)], top_k=top_k
             )
 
@@ -120,7 +120,7 @@ def run_benchmark(
             query = queries[i % len(queries)]
 
             start = time.perf_counter()
-            hits = db._inner.ask_embedding(embedding=query, top_k=top_k)
+            hits = db._inner.search_embedding(embedding=query, top_k=top_k)
             elapsed = (time.perf_counter() - start) * 1000  # ms
 
             latencies.append(elapsed)
@@ -151,7 +151,7 @@ def run_benchmark(
             exact_ids = exact_search(embeddings, query, top_k)
 
             # Get HNSW results
-            hits = db._inner.ask_embedding(embedding=query, top_k=top_k)
+            hits = db._inner.search_embedding(embedding=query, top_k=top_k)
             hnsw_ids = [hit.id for hit in hits]
 
             # Calculate recall

@@ -161,7 +161,7 @@ impl Engine {
                         repaired_segments = true;
                     }
                 }
-                Command::DeleteMemory(id) => {
+                Command::Delete(id) => {
                     // Delete may refer to a missing segment entry in crash scenarios.
                     let _ = segments.delete_entry(*id);
                 }
@@ -264,7 +264,7 @@ impl Engine {
                 // Write entry to segment storage
                 self._write_entry_to_segments(entry)?;
             }
-            Command::DeleteMemory(id) => {
+            Command::Delete(id) => {
                 // Mark as deleted in segments
                 self.segments.delete_entry(*id)?;
             }
@@ -374,9 +374,9 @@ impl Engine {
             }
 
             if sync_immediately {
-                self.execute_command(Command::DeleteMemory(id))?;
+                self.execute_command(Command::delete(id))?;
             } else {
-                self.execute_command_unsynced(Command::DeleteMemory(id))?;
+                self.execute_command_unsynced(Command::delete(id))?;
             }
             evicted_ids.push(id);
         }
@@ -658,7 +658,7 @@ mod tests {
             engine.execute_command(Command::InsertMemory(entry)).unwrap();
         }
         for id in [0_u64, 1, 2, 3] {
-            engine.execute_command(Command::DeleteMemory(MemoryId(id))).unwrap();
+            engine.execute_command(Command::delete(MemoryId(id))).unwrap();
         }
 
         let report = engine.compact_segments().unwrap();
@@ -885,7 +885,7 @@ mod tests {
             }
 
             // Delete one memory
-            engine.execute_command(Command::DeleteMemory(MemoryId(2))).unwrap();
+            engine.execute_command(Command::delete(MemoryId(2))).unwrap();
 
             assert_eq!(engine.get_state_machine().len(), 4); // 5 - 1
         }

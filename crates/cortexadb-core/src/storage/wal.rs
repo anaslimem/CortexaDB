@@ -484,7 +484,7 @@ mod tests {
             to: crate::core::memory_entry::MemoryId(2),
             relation: "refers_to".to_string(),
         };
-        let cmd3 = Command::DeleteMemory(crate::core::memory_entry::MemoryId(1));
+        let cmd3 = Command::delete(crate::core::memory_entry::MemoryId(1));
 
         wal.append(&cmd1).unwrap();
         wal.append(&cmd2).unwrap();
@@ -511,7 +511,7 @@ mod tests {
         }
 
         match &recovered[2].1 {
-            Command::DeleteMemory(id) => assert_eq!(*id, crate::core::memory_entry::MemoryId(1)),
+            Command::Delete(id) => assert_eq!(*id, crate::core::memory_entry::MemoryId(1)),
             _ => panic!("Wrong command type"),
         }
     }
