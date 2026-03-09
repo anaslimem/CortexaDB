@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let id = db.add(embedding.clone(), None)?;
 
     // Query
-    let hits = db.ask(embedding, 5, None)?;
+    let hits = db.search(embedding, 5, None)?;
     for hit in &hits {
         println!("ID: {}, Score: {:.3}", hit.id, hit.score);
     }

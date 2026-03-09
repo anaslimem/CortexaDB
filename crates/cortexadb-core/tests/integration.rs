@@ -1,6 +1,6 @@
 //! Integration tests for CortexaDB.
 //!
-//! These tests exercise the full stack: open → add → ask → checkpoint → recover.
+//! These tests exercise the full stack: open → add → search → checkpoint → recover.
 //! Unlike the unit tests in `src/`, these tests run against actual disk files (via tempdir).
 
 use cortexadb_core::{CortexaDB, CortexaDBConfig};
@@ -24,11 +24,11 @@ fn open_db_with_config(dir: &TempDir, config: CortexaDBConfig) -> CortexaDB {
 }
 
 // ---------------------------------------------------------------------------
-// Basic open → add → ask → recover
+// Basic open → add → search → recover
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_full_open_add_ask() {
+fn test_full_open_add_search() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("db");
     let db = open_db(&path);
@@ -36,11 +36,11 @@ fn test_full_open_add_ask() {
     let id1 = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
     let id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
 
-    let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
-    assert!(!hits.is_empty(), "ask should return results");
+    let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+    assert!(!hits.is_empty(), "search should return results");
     assert_eq!(hits[0].id, id1, "top hit should be id1 (exact match)");
 
-    let hits2 = db.ask(vec![0.0, 1.0, 0.0], 5, None).unwrap();
+    let hits2 = db.search(vec![0.0, 1.0, 0.0], 5, None).unwrap();
     assert_eq!(hits2[0].id, id2, "top hit for second query should be id2");
 }
 
@@ -83,7 +83,7 @@ fn test_recover_search_returns_correct_top_hit() {
     }
 
     let db = open_db(&path);
-    let hits = db.ask(vec![1.0, 0.0, 0.0], 1, None).unwrap();
+    let hits = db.search(vec![1.0, 0.0, 0.0], 1, None).unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].id, id_target, "top hit after recovery must be the matching entry");
 }
@@ -336,7 +336,7 @@ fn test_hnsw_recovery_sync() {
     assert!(db.get_memory(id_target).is_ok(), "uncheckpointed entry must survive");
 
     // Perform an HNSW search to ensure the vector index was properly synced during recovery
-    let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+    let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
     assert!(!hits.is_empty());
     assert_eq!(hits[0].id, id_target, "top hit should be the post-checkpoint entry");
 }

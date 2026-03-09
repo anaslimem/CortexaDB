@@ -10,7 +10,7 @@ automatic embedding.
 
     db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder(api_key="sk-..."))
     db.add("We chose Stripe for payments")   # embeds automatically
-    hits = db.ask("payment provider?")            # embeds query automatically
+    hits = db.search("payment provider?")            # embeds query automatically
 """
 
 from __future__ import annotations

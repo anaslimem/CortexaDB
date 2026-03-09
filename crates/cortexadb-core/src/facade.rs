@@ -2,7 +2,7 @@
 //!
 //! This is the recommended entry point for using CortexaDB as a library.
 //! It wraps [`CortexaDBStore`] and hides planner/engine/index details behind
-//! five core operations: `open`, `add`, `ask`, `connect`, `compact`.
+//! five core operations: `open`, `add`, `search`, `connect`, `compact`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -175,7 +175,7 @@ impl QueryEmbedder for StaticEmbedder {
 ///     .build()?;
 ///
 /// let id = db.add(vec![1.0, 0.0, 0.0], None)?;
-/// let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None)?;
+/// let hits = db.search(vec![1.0, 0.0, 0.0], 5, None)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -353,7 +353,7 @@ impl CortexaDB {
     /// # Errors
     ///
     /// Returns [`CortexaDBError`] if the query execution fails.
-    pub fn ask(
+    pub fn search(
         &self,
         query_embedding: Vec<f32>,
         top_k: usize,
@@ -384,7 +384,7 @@ impl CortexaDB {
     /// Over-fetches by 4× top_k globally, then filters by collection and
     /// returns the top *top_k* results. This avoids a separate index per
     /// collection while keeping the filter inside Rust (no GIL round-trips).
-    pub fn ask_in_collection(
+    pub fn search_in_collection(
         &self,
         collection: &str,
         query_embedding: Vec<f32>,
@@ -516,7 +516,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_open_add_ask() {
+    fn test_open_add_search() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
@@ -525,7 +525,7 @@ mod tests {
         let id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         assert_ne!(id1, id2);
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+        let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
         assert_eq!(hits[0].id, id1);
     }
@@ -562,7 +562,7 @@ mod tests {
         let stats = db.stats();
         assert_eq!(stats.entries, 2);
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+        let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
     }
 
@@ -615,7 +615,7 @@ mod tests {
         meta.insert("source".to_string(), "test".to_string());
         let id = db.add(vec![1.0, 0.0, 0.0], Some(meta)).unwrap();
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 1, None).unwrap();
+        let hits = db.search(vec![1.0, 0.0, 0.0], 1, None).unwrap();
         assert_eq!(hits[0].id, id);
 
         let memory = db.get_memory(id).unwrap();
@@ -664,7 +664,7 @@ mod tests {
 
         db.delete_memory(id).unwrap();
 
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 10, None).unwrap();
+        let hits = db.search(vec![1.0, 0.0, 0.0], 10, None).unwrap();
         assert!(
             hits.iter().all(|h| h.id != id),
             "deleted memory must not appear in search results"
@@ -730,7 +730,7 @@ mod tests {
         let id_a = db.add_in_collection("ns_a", vec![1.0, 0.0, 0.0], None).unwrap();
         let _id_b = db.add_in_collection("ns_b", vec![1.0, 0.0, 0.0], None).unwrap();
 
-        let hits = db.ask_in_collection("ns_a", vec![1.0, 0.0, 0.0], 10, None).unwrap();
+        let hits = db.search_in_collection("ns_a", vec![1.0, 0.0, 0.0], 10, None).unwrap();
         assert!(!hits.is_empty(), "should find memories in ns_a");
         assert!(
             hits.iter().all(|h| h.id == id_a),
@@ -777,7 +777,7 @@ mod tests {
         let id_b = db.add_in_collection("ns_sparse", vec![0.9, 0.1, 0.0], None).unwrap();
 
         // Ask for top-2 in ns_sparse — both must be returned.
-        let hits = db.ask_in_collection("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
+        let hits = db.search_in_collection("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
         let hit_ids: Vec<u64> = hits.iter().map(|h| h.id).collect();
         assert!(
             hit_ids.contains(&id_a),
@@ -794,13 +794,13 @@ mod tests {
     // ----- Intent anchors end-to-end -----
 
     #[test]
-    fn test_ask_without_intent_anchors_unchanged() {
+    fn test_search_without_intent_anchors_unchanged() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
         db.add(vec![1.0, 0.0, 0.0], None).unwrap();
-        // Default QueryOptions has intent_anchors = None; must produce same results as ask().
-        let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
+        // Default QueryOptions has intent_anchors = None; must produce same results as search().
+        let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
     }
 }

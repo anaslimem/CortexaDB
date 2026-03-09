@@ -120,7 +120,7 @@ researcher.add("Found 3 relevant papers on AI agents")
 writer.add("Draft: AI agents are transforming...")
 
 # Each agent queries only its own memories
-planner_context = planner.search("What tasks are pending?")
+planner_context = planner.search("What tsearchs are pending?")
 ```
 
 ### Shared Knowledge Base

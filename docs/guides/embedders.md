@@ -14,7 +14,7 @@ db.add("text", embedding=[0.1, 0.2, ...])  # must provide embedding
 # With embedder - automatic
 db = CortexaDB.open("db.mem", embedder=OpenAIEmbedder())
 db.add("text")  # auto-embedded
-db.ask("query")      # auto-embedded
+db.search("query")      # auto-embedded
 ```
 
 ---
@@ -118,7 +118,7 @@ class MyEmbedder(Embedder):
 When an embedder is configured:
 
 1. **`add(text)`** - Text is embedded via `embedder.embed(text)`, then stored with the embedding
-2. **`ask(query)`** - Query is embedded via `embedder.embed(query)`, then used for vector search
+2. **`search(query)`** - Query is embedded via `embedder.embed(query)`, then used for vector search
 3. **`ingest(text)`** - Each chunk is embedded individually after chunking
 4. **`load(file)`** - File is read, chunked, and each chunk is embedded
 

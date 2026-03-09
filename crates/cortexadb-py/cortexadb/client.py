@@ -258,14 +258,14 @@ class CortexaDB:
         vec = self._resolve_embedding(query, vector)
         
         if collections is None:
-            base_hits = self._inner.ask_embedding(vec, top_k=limit, filter=filter)
+            base_hits = self._inner.search_embedding(vec, top_k=limit, filter=filter)
         elif len(collections) == 1:
-            base_hits = self._inner.ask_in_collection(collections[0], vec, top_k=limit, filter=filter)
+            base_hits = self._inner.search_in_collection(collections[0], vec, top_k=limit, filter=filter)
         else:
             seen_ids = set()
             base_hits = []
             for ns in collections:
-                for hit in self._inner.ask_in_collection(ns, vec, top_k=limit, filter=filter):
+                for hit in self._inner.search_in_collection(ns, vec, top_k=limit, filter=filter):
                     if hit.id not in seen_ids:
                         seen_ids.add(hit.id)
                         base_hits.append(hit)
@@ -392,6 +392,5 @@ class CortexaDB:
         return False
 
     # Legacy Aliases
-    def ask(self, *a, **k): return self.search(*a, **k)
     def ingest_document(self, *a, **k): return self.ingest(*a, **k)
     def delete_memory(self, mid: int): self.delete(mid)

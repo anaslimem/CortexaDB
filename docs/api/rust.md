@@ -52,23 +52,23 @@ let id = db.add_with_content(
 )?;
 ```
 
-#### `ask(embedding, top_k, metadata_filter) -> Result<Vec<Hit>>`
+#### `search(embedding, top_k, metadata_filter) -> Result<Vec<Hit>>`
 
 Vector similarity search in the default collection.
 
 ```rust
-let hits = db.ask(vec![0.1; 128], 5, None)?;
+let hits = db.search(vec![0.1; 128], 5, None)?;
 for hit in &hits {
     println!("ID: {}, Score: {:.3}", hit.id, hit.score);
 }
 ```
 
-#### `ask_in_collection(collection, embedding, top_k, filter) -> Result<Vec<Hit>>`
+#### `search_in_collection(collection, embedding, top_k, filter) -> Result<Vec<Hit>>`
 
 Collection-scoped search.
 
 ```rust
-let hits = db.ask_in_collection("agent_a", vec![0.1; 128], 5, None)?;
+let hits = db.search_in_collection("agent_a", vec![0.1; 128], 5, None)?;
 ```
 
 #### `get_memory(id) -> Result<Memory>`

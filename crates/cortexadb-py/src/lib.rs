@@ -154,7 +154,7 @@ impl PyBatchRecord {
 // Hit — lightweight query result
 // ---------------------------------------------------------------------------
 
-/// A scored query hit. Returned by `CortexaDB.ask_embedding()`.
+/// A scored query hit. Returned by `CortexaDB.search_embedding()`.
 ///
 /// Attributes:
 ///     id (int): Memory identifier.
@@ -288,7 +288,7 @@ impl PyStats {
 /// Example:
 ///     >>> db = CortexaDB.open("/tmp/agent.mem", dimension=128)
 ///     >>> mid = db.add_embedding([0.1] * 128)
-///     >>> hits = db.ask_embedding([0.1] * 128, top_k=5)
+///     >>> hits = db.search_embedding([0.1] * 128, top_k=5)
 ///     >>> print(hits[0].score)
 #[pyclass(name = "CortexaDB")]
 struct PyCortexaDB {
@@ -468,7 +468,7 @@ impl PyCortexaDB {
         text_signature = "(self, embedding, *, top_k=5, filter=None)",
         signature = (embedding, *, top_k=5, filter=None)
     )]
-    fn ask_embedding(
+    fn search_embedding(
         &self,
         py: Python<'_>,
         embedding: Vec<f32>,
@@ -484,7 +484,7 @@ impl PyCortexaDB {
         }
 
         let results = py
-            .allow_threads(|| self.inner.ask(embedding, top_k, filter))
+            .allow_threads(|| self.inner.search(embedding, top_k, filter))
             .map_err(map_cortexadb_err)?;
         Ok(results.into_iter().map(|m| PyHit { id: m.id, score: m.score }).collect())
     }
@@ -505,7 +505,7 @@ impl PyCortexaDB {
         text_signature = "(self, collection, embedding, *, top_k=5, filter=None)",
         signature = (collection, embedding, *, top_k=5, filter=None)
     )]
-    fn ask_in_collection(
+    fn search_in_collection(
         &self,
         py: Python<'_>,
         collection: &str,
@@ -522,7 +522,7 @@ impl PyCortexaDB {
         }
 
         let results = py
-            .allow_threads(|| self.inner.ask_in_collection(collection, embedding, top_k, filter))
+            .allow_threads(|| self.inner.search_in_collection(collection, embedding, top_k, filter))
             .map_err(map_cortexadb_err)?;
 
         Ok(results.into_iter().map(|m| m.into()).collect::<Vec<PyHit>>())

@@ -92,7 +92,7 @@ mid = db.add("text", embedding=[0.1, 0.2, ...])
 
 ---
 
-### `.ask(query, embedding=None, top_k=5, use_graph=False, recency_bias=False)`
+### `.search(query, embedding=None, top_k=5, use_graph=False, recency_bias=False)`
 
 Performs a hybrid search across the database.
 
@@ -110,8 +110,8 @@ Performs a hybrid search across the database.
 
 **Example:**
 ```python
-hits = db.ask("What does the user prefer?")
-hits = db.ask("query", top_k=10, use_graph=True, recency_bias=True)
+hits = db.search("What does the user prefer?")
+hits = db.search("query", top_k=10, use_graph=True, recency_bias=True)
 
 for hit in hits:
     print(f"ID: {hit.id}, Score: {hit.score:.3f}")
@@ -368,7 +368,7 @@ Exports the current database state as a replay log.
 
 ### `Hit`
 
-Query result from `.ask()`.
+Query result from `.search()`.
 
 | Field | Type | Description |
 |-------|------|-------------|

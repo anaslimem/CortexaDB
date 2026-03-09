@@ -57,7 +57,7 @@ db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
 db.add("The user prefers dark mode.")
 db.add("User works at Stripe.")
 
-hits = db.ask("What does the user like?")
+hits = db.search("What does the user like?")
 for hit in hits:
     print(f"ID: {hit.id}, Score: {hit.score}")
 ```

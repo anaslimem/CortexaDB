@@ -38,7 +38,7 @@ mid3 = db.add("User's name is Alice.", metadata={"source": "onboarding"})
 
 ```python
 # Semantic search
-hits = db.ask("What does the user like?")
+hits = db.search("What does the user like?")
 for hit in hits:
     print(f"ID: {hit.id}, Score: {hit.score:.3f}")
 
@@ -70,7 +70,7 @@ db.ingest("Long article text here...", strategy="markdown")
 ```python
 agent_a = db.collection("agent_a")
 agent_a.add("Agent A's private memory")
-hits = agent_a.ask("query only agent A's memories")
+hits = agent_a.search("query only agent A's memories")
 ```
 
 ---
@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let id = db.add(embedding.clone(), None)?;
 
     // Query
-    let hits = db.ask(embedding, 5, None)?;
+    let hits = db.search(embedding, 5, None)?;
     for hit in &hits {
         println!("ID: {}, Score: {:.3}", hit.id, hit.score);
     }

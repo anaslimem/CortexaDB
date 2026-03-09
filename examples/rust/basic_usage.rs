@@ -169,7 +169,7 @@ Content under heading 3.
     // -----------------------------------------------------------
     println!("\n[6] Querying memories...");
     let query = "Where does the user live?";
-    let hits = db.ask(embed_text(query, dimension), 3, None)?;
+    let hits = db.search(embed_text(query, dimension), 3, None)?;
     for hit in hits {
         let mem = db.get_memory(hit.id)?;
         let content = String::from_utf8_lossy(&mem.content);
@@ -188,7 +188,7 @@ Content under heading 3.
         None,
     )?;
     println!("   Stored in collection 'travel_agent': ID {}", col_id);
-    let col_hits = db.ask_in_collection(
+    let col_hits = db.search_in_collection(
         "travel_agent",
         embed_text("Tokyo travel plans", dimension),
         5,
