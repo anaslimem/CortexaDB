@@ -80,12 +80,12 @@ let mem = db.get_memory(42)?;
 println!("{:?}", mem.metadata);
 ```
 
-#### `delete_memory(id) -> Result<()>`
+#### `delete(id) -> Result<()>`
 
 Deletes a memory and updates all indexes.
 
 ```rust
-db.delete_memory(42)?;
+db.delete(42)?;
 ```
 
 ---

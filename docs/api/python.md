@@ -147,7 +147,7 @@ print(mem.embedding)   # [0.1, 0.2, ...] or None
 
 ---
 
-### `.delete_memory(mid)`
+### `.delete(mid)`
 
 Permanently deletes a memory and updates all indexes.
 
@@ -161,7 +161,7 @@ Permanently deletes a memory and updates all indexes.
 
 **Example:**
 ```python
-db.delete_memory(42)
+db.delete(42)
 ```
 
 ---
@@ -257,7 +257,7 @@ db.load("paper.pdf", strategy="recursive", chunk_size=1024)
 
 ---
 
-### `.ingest_document(text, chunk_size=512, overlap=50, metadata=None, collection=None)`
+### `.ingest(text, chunk_size=512, overlap=50, metadata=None, collection=None)`
 
 Legacy method for chunking and storing text. Uses fixed chunking.
 

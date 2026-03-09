@@ -439,7 +439,7 @@ impl CortexaDB {
     /// # Errors
     ///
     /// Returns [`CortexaDBError`] if the deletion cannot be logged.
-    pub fn delete_memory(&self, id: u64) -> Result<()> {
+    pub fn delete(&self, id: u64) -> Result<()> {
         self.inner.delete_memory(MemoryId(id))?;
         Ok(())
     }
@@ -639,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_memory_removes_from_stats() {
+    fn test_delete_removes_from_stats() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
@@ -647,12 +647,12 @@ mod tests {
         let id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         assert_eq!(db.stats().entries, 1);
 
-        db.delete_memory(id).unwrap();
+        db.delete(id).unwrap();
         assert_eq!(db.stats().entries, 0, "entry count should be 0 after delete");
     }
 
     #[test]
-    fn test_delete_memory_not_returned_in_ask() {
+    fn test_delete_not_returned_in_ask() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
@@ -662,7 +662,7 @@ mod tests {
         // (ask() returns NoEmbeddings when the vector index is completely empty.)
         let _id_keep = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
 
-        db.delete_memory(id).unwrap();
+        db.delete(id).unwrap();
 
         let hits = db.search(vec![1.0, 0.0, 0.0], 10, None).unwrap();
         assert!(
@@ -678,7 +678,7 @@ mod tests {
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
         let id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
-        db.delete_memory(id).unwrap();
+        db.delete(id).unwrap();
 
         let result = db.get_memory(id);
         assert!(result.is_err(), "get_memory on a deleted ID must return an error");

@@ -19,7 +19,7 @@ db = CortexaDB.open("agent.mem", dimension=128, record="session.log")
 mid1 = db.add("User likes dark mode", embedding=[...])
 mid2 = db.add("User works at Stripe", embedding=[...])
 db.connect(mid1, mid2, "relates_to")
-db.delete_memory(mid1)
+db.delete(mid1)
 db.compact()
 db.checkpoint()
 ```

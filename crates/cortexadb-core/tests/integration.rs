@@ -153,7 +153,7 @@ fn test_delete_persists_across_recovery() {
         let db = open_db(&path);
         deleted_id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         kept_id = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
-        db.delete_memory(deleted_id).unwrap();
+        db.delete(deleted_id).unwrap();
         assert_eq!(db.stats().entries, 1);
     }
 
@@ -174,7 +174,7 @@ fn test_delete_then_checkpoint_recovery() {
         let db = open_db(&path);
         deleted_id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         db.add(vec![0.0, 1.0, 0.0], None).unwrap();
-        db.delete_memory(deleted_id).unwrap();
+        db.delete(deleted_id).unwrap();
         db.flush().unwrap(); // ensure WAL is synced before checkpoint
         db.checkpoint().unwrap();
     }
@@ -321,7 +321,7 @@ fn test_hnsw_recovery_sync() {
         id_target = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
 
         // Delete an item that WAS saved in the HNSW on disk, AFTER the checkpoint
-        db.delete_memory(id_deleted).unwrap();
+        db.delete(id_deleted).unwrap();
 
         // The process crashes/drops here. HNSW index on disk is STALE.
     }

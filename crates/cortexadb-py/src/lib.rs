@@ -561,8 +561,8 @@ impl PyCortexaDB {
     /// Raises:
     ///     CortexaDBError: If the memory ID does not exist or deletion fails.
     #[pyo3(text_signature = "(self, mid)")]
-    fn delete_memory(&self, py: Python<'_>, mid: u64) -> PyResult<()> {
-        py.allow_threads(|| self.inner.delete_memory(mid)).map_err(map_cortexadb_err)
+    fn delete(&self, py: Python<'_>, mid: u64) -> PyResult<()> {
+        py.allow_threads(|| self.inner.delete(mid)).map_err(map_cortexadb_err)
     }
 
     /// Create an edge between two memories.

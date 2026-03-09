@@ -126,9 +126,7 @@ class Collection:
         self._db.delete(mid)
 
     # Legacy Aliases
-    def ask(self, *a, **k): return self.search(*a, **k)
-    def ingest_document(self, *a, **k): return self.ingest(*a, **k)
-    def delete_memory(self, mid: int): self.delete(mid)
+    # All removed.
 
     def __repr__(self) -> str:
         return f"Collection(name={self.name!r}, mode={'readonly' if self._readonly else 'readwrite'})"
@@ -359,7 +357,7 @@ class CortexaDB:
     def ingest(self, text: str, **kwargs) -> t.List[int]:
         """Ingest text with 100x speedup via batching."""
         if not self._embedder:
-            raise CortexaDBConfigError("ingest_document requires an embedder.")
+            raise CortexaDBConfigError("ingest requires an embedder.")
         chunks = chunk(text, **kwargs)
         if not chunks: return []
         
@@ -379,7 +377,7 @@ class CortexaDB:
         return self._embedder.embed(text)
 
     def get(self, mid: int) -> Memory: return self._inner.get(mid)
-    def delete(self, mid: int): self._inner.delete_memory(mid)
+    def delete(self, mid: int): self._inner.delete(mid)
     def compact(self): self._inner.compact()
     def checkpoint(self): self._inner.checkpoint()
     def stats(self): return self._inner.stats()
@@ -392,5 +390,4 @@ class CortexaDB:
         return False
 
     # Legacy Aliases
-    def ingest_document(self, *a, **k): return self.ingest(*a, **k)
-    def delete_memory(self, mid: int): self.delete(mid)
+    # All removed.

@@ -140,7 +140,7 @@ def test_add_without_embedder_requires_embedding():
     with pytest.raises(CortexaDBError, match="No embedder"):
         db.add("No embedding provided")
 
-def test_ingest_document():
+def test_ingest():
     emb = HashEmbedder(dimension=32)
     db = CortexaDB.open(DB_PATH, embedder=emb)
     long_text = ("The quick brown fox jumps over the lazy dog. " * 30).strip()
@@ -149,9 +149,9 @@ def test_ingest_document():
     assert len(set(ids)) == len(ids)   # all IDs unique
     assert db.stats().entries == len(ids)
 
-def test_ingest_document_requires_embedder():
+def test_ingest_requires_embedder():
     db = CortexaDB.open(DB_PATH, dimension=16)
-    with pytest.raises(CortexaDBError, match="ingest_document"):
+    with pytest.raises(CortexaDBError, match="ingest"):
         db.ingest("some text")
 
 def test_collection_auto_embed():
