@@ -209,8 +209,6 @@ struct PyMemory {
     #[pyo3(get)]
     collection: String,
     #[pyo3(get)]
-    namespace: String,
-    #[pyo3(get)]
     created_at: u64,
     #[pyo3(get)]
     importance: f32,
@@ -403,7 +401,7 @@ impl PyCortexaDB {
         let id = py
             .allow_threads(|| {
                 if content.is_empty() {
-                    self.inner.remember_in_namespace(&collection, embedding, metadata)
+                    self.inner.remember_in_collection(&collection, embedding, metadata)
                 } else {
                     self.inner.remember_with_content(
                         &collection,
@@ -441,7 +439,7 @@ impl PyCortexaDB {
         let facade_records: Vec<facade::BatchRecord> = records
             .into_iter()
             .map(|r| facade::BatchRecord {
-                namespace: r.collection,
+                collection: r.collection,
                 content: r.content,
                 embedding: r.embedding,
                 metadata: r.metadata,
@@ -524,7 +522,7 @@ impl PyCortexaDB {
         }
 
         let results = py
-            .allow_threads(|| self.inner.ask_in_namespace(collection, embedding, top_k, filter))
+            .allow_threads(|| self.inner.ask_in_collection(collection, embedding, top_k, filter))
             .map_err(map_cortexadb_err)?;
 
         Ok(results.into_iter().map(|m| m.into()).collect::<Vec<PyHit>>())
@@ -546,8 +544,7 @@ impl PyCortexaDB {
 
         Ok(PyMemory {
             id: entry.id,
-            collection: entry.namespace.clone(),
-            namespace: entry.namespace.clone(),
+            collection: entry.collection.clone(),
             created_at: entry.created_at,
             importance: entry.importance,
             content: entry.content.clone(),

@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     store.add_edge(MemoryId(1), MemoryId(2), "relates_to".to_string())?;
 
     let mut options = QueryOptions::with_top_k(5);
-    options.namespace = Some("agent1".to_string());
+    options.collection = Some("agent1".to_string());
 
     let out = store.query("rust", options, &DemoEmbedder)?;
 

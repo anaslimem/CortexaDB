@@ -31,7 +31,7 @@ pub struct Hit {
 pub struct Memory {
     pub id: u64,
     pub content: Vec<u8>,
-    pub namespace: String,
+    pub collection: String,
     pub embedding: Option<Vec<f32>>,
     pub metadata: HashMap<String, String>,
     pub created_at: u64,
@@ -187,7 +187,7 @@ pub struct CortexaDB {
 /// A record for batch insertion.
 #[derive(Debug, Clone)]
 pub struct BatchRecord {
-    pub namespace: String,
+    pub collection: String,
     pub content: Vec<u8>,
     pub embedding: Option<Vec<f32>>,
     pub metadata: Option<HashMap<String, String>>,
@@ -254,7 +254,7 @@ impl CortexaDB {
 
     /// Store a new memory with the given embedding and optional metadata.
     ///
-    /// The memory is placed in the "default" namespace.
+    /// The memory is placed in the "default" collection.
     ///
     /// # Examples
     ///
@@ -278,13 +278,13 @@ impl CortexaDB {
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
     ) -> Result<u64> {
-        self.remember_in_namespace("default", embedding, metadata)
+        self.remember_in_collection("default", embedding, metadata)
     }
 
-    /// Store a new memory in a specific namespace.
-    pub fn remember_in_namespace(
+    /// Store a new memory in a specific collection.
+    pub fn remember_in_collection(
         &self,
-        namespace: &str,
+        collection: &str,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
     ) -> Result<u64> {
@@ -292,7 +292,7 @@ impl CortexaDB {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let mut entry =
-            MemoryEntry::new(id, namespace.to_string(), Vec::new(), ts).with_embedding(embedding);
+            MemoryEntry::new(id, collection.to_string(), Vec::new(), ts).with_embedding(embedding);
         if let Some(meta) = metadata {
             entry.metadata = meta;
         }
@@ -301,10 +301,10 @@ impl CortexaDB {
         Ok(id.0)
     }
 
-    /// Store a memory with explicit content bytes optionally in a namespace.
+    /// Store a memory with explicit content bytes optionally in a collection.
     pub fn remember_with_content(
         &self,
-        namespace: &str,
+        collection: &str,
         content: Vec<u8>,
         embedding: Vec<f32>,
         metadata: Option<HashMap<String, String>>,
@@ -313,7 +313,7 @@ impl CortexaDB {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let mut entry =
-            MemoryEntry::new(id, namespace.to_string(), content, ts).with_embedding(embedding);
+            MemoryEntry::new(id, collection.to_string(), content, ts).with_embedding(embedding);
         if let Some(meta) = metadata {
             entry.metadata = meta;
         }
@@ -330,7 +330,7 @@ impl CortexaDB {
 
         for rec in records {
             let id = MemoryId(self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-            let mut entry = MemoryEntry::new(id.clone(), rec.namespace, rec.content, ts);
+            let mut entry = MemoryEntry::new(id.clone(), rec.collection, rec.content, ts);
             if let Some(emb) = rec.embedding {
                 entry = entry.with_embedding(emb);
             }
@@ -379,35 +379,35 @@ impl CortexaDB {
         Ok(neighbors.into_iter().map(|(target_id, relation)| (target_id.0, relation)).collect())
     }
 
-    /// Query the database scoped to a specific namespace.
+    /// Query the database scoped to a specific collection.
     ///
-    /// Over-fetches by 4× top_k globally, then filters by namespace and
+    /// Over-fetches by 4× top_k globally, then filters by collection and
     /// returns the top *top_k* results. This avoids a separate index per
-    /// namespace while keeping the filter inside Rust (no GIL round-trips).
-    pub fn ask_in_namespace(
+    /// collection while keeping the filter inside Rust (no GIL round-trips).
+    pub fn ask_in_collection(
         &self,
-        namespace: &str,
+        collection: &str,
         query_embedding: Vec<f32>,
         top_k: usize,
         metadata_filter: Option<HashMap<String, String>>,
     ) -> Result<Vec<Hit>> {
         let embedder = StaticEmbedder { embedding: query_embedding };
         let mut options = QueryOptions::with_top_k(top_k.saturating_mul(4).max(top_k));
-        options.namespace = Some(namespace.to_string());
+        options.collection = Some(collection.to_string());
         options.metadata_filter = metadata_filter;
         let execution = self.inner.query("", options, &embedder)?;
 
         let sm = self.inner.state_machine();
         let memories = sm.all_memories();
 
-        // Build a lookup: MemoryId → namespace
-        let ns_map: std::collections::HashMap<u64, &str> =
-            memories.iter().map(|m| (m.id.0, m.namespace.as_str())).collect();
+        // Build a lookup: MemoryId → collection
+        let col_map: std::collections::HashMap<u64, &str> =
+            memories.iter().map(|m| (m.id.0, m.collection.as_str())).collect();
 
         let results: Vec<Hit> = execution
             .hits
             .into_iter()
-            .filter(|hit| ns_map.get(&hit.id.0).copied() == Some(namespace))
+            .filter(|hit| col_map.get(&hit.id.0).copied() == Some(collection))
             .take(top_k)
             .map(|hit| Hit { id: hit.id.0, score: hit.final_score })
             .collect();
@@ -426,7 +426,7 @@ impl CortexaDB {
         Ok(Memory {
             id: entry.id.0,
             content: entry.content.clone(),
-            namespace: entry.namespace.clone(),
+            collection: entry.collection.clone(),
             embedding: entry.embedding.clone(),
             metadata: entry.metadata.clone(),
             created_at: entry.created_at,
@@ -623,19 +623,19 @@ mod tests {
     }
 
     #[test]
-    fn test_namespace_support() {
+    fn test_collection_support() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        let id1 = db.remember_in_namespace("agent_b", vec![0.0, 1.0, 0.0], None).unwrap();
-        let _id2 = db.remember_in_namespace("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();
+        let id1 = db.remember_in_collection("agent_b", vec![0.0, 1.0, 0.0], None).unwrap();
+        let _id2 = db.remember_in_collection("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();
 
         let stats = db.stats();
         assert_eq!(stats.entries, 2);
 
         let m1 = db.get_memory(id1).unwrap();
-        assert_eq!(m1.namespace, "agent_b");
+        assert_eq!(m1.collection, "agent_b");
     }
 
     #[test]
@@ -721,16 +721,16 @@ mod tests {
     }
 
     #[test]
-    fn test_ask_in_namespace_only_returns_own_namespace() {
+    fn test_ask_in_collection_only_returns_own_collection() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
-        // Same embedding direction — only namespace should differentiate results.
-        let id_a = db.remember_in_namespace("ns_a", vec![1.0, 0.0, 0.0], None).unwrap();
-        let _id_b = db.remember_in_namespace("ns_b", vec![1.0, 0.0, 0.0], None).unwrap();
+        // Same embedding direction — only collection should differentiate results.
+        let id_a = db.remember_in_collection("ns_a", vec![1.0, 0.0, 0.0], None).unwrap();
+        let _id_b = db.remember_in_collection("ns_b", vec![1.0, 0.0, 0.0], None).unwrap();
 
-        let hits = db.ask_in_namespace("ns_a", vec![1.0, 0.0, 0.0], 10, None).unwrap();
+        let hits = db.ask_in_collection("ns_a", vec![1.0, 0.0, 0.0], 10, None).unwrap();
         assert!(!hits.is_empty(), "should find memories in ns_a");
         assert!(
             hits.iter().all(|h| h.id == id_a),
@@ -757,12 +757,12 @@ mod tests {
         db.compact().expect("compact must not fail");
     }
 
-    // ----- ask_in_namespace: sparse namespace over-fetch regression -----
+    // ----- ask_in_collection: sparse collection over-fetch regression -----
 
     #[test]
-    fn test_ask_in_namespace_finds_entry_in_sparse_namespace() {
-        // Regression: before the 4× fix, ask_in_namespace returned empty results when the
-        // target namespace had far fewer entries than top_k * candidate_multiplier entries globally.
+    fn test_ask_in_collection_finds_entry_in_sparse_collection() {
+        // Regression: before the 4× fix, ask_in_collection returned empty results when the
+        // target collection had far fewer entries than top_k * candidate_multiplier entries globally.
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
@@ -770,14 +770,14 @@ mod tests {
         // Insert 10 entries in ns_majority to fill the global index.
         for i in 0..10u32 {
             let v = vec![i as f32 / 10.0, 1.0 - i as f32 / 10.0, 0.0];
-            db.remember_in_namespace("ns_majority", v, None).unwrap();
+            db.remember_in_collection("ns_majority", v, None).unwrap();
         }
         // Insert 2 entries in ns_sparse.
-        let id_a = db.remember_in_namespace("ns_sparse", vec![1.0, 0.0, 0.0], None).unwrap();
-        let id_b = db.remember_in_namespace("ns_sparse", vec![0.9, 0.1, 0.0], None).unwrap();
+        let id_a = db.remember_in_collection("ns_sparse", vec![1.0, 0.0, 0.0], None).unwrap();
+        let id_b = db.remember_in_collection("ns_sparse", vec![0.9, 0.1, 0.0], None).unwrap();
 
         // Ask for top-2 in ns_sparse — both must be returned.
-        let hits = db.ask_in_namespace("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
+        let hits = db.ask_in_collection("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
         let hit_ids: Vec<u64> = hits.iter().map(|h| h.id).collect();
         assert!(
             hit_ids.contains(&id_a),

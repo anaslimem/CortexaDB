@@ -15,9 +15,8 @@ Install dependencies:
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
-import typing as t
 
 
 def load_file(path: str) -> str:

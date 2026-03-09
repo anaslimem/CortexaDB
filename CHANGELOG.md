@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python bindings via PyO3 and maturain.
 - Vector semantic search and Graph relationship support.
 - Temporal query boosting.
-- Multi-agent namespaces.
+- Multi-agent collections.
 
 ### Fixed
 - Python 3.14 build compatibility in CI.

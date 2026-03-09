@@ -595,8 +595,8 @@ impl CortexaDBStore {
             // Update vector index
             match effective.embedding {
                 Some(embedding) => {
-                    writer.indexes.vector_index_mut().index_in_namespace(
-                        &effective.namespace,
+                    writer.indexes.vector_index_mut().index_in_collection(
+                        &effective.collection,
                         effective.id,
                         embedding,
                     )?;
@@ -872,8 +872,8 @@ impl CortexaDBStore {
                     writer.engine.execute_command_unsynced(Command::InsertMemory(entry.clone()))?
                 };
                 match entry.embedding {
-                    Some(embedding) => writer.indexes.vector_index_mut().index_in_namespace(
-                        &entry.namespace,
+                    Some(embedding) => writer.indexes.vector_index_mut().index_in_collection(
+                        &entry.collection,
                         entry.id,
                         embedding,
                     )?,
@@ -965,8 +965,8 @@ impl CortexaDBStore {
         for entry in state_machine.all_memories() {
             if let Some(embedding) = entry.embedding.clone() {
                 if !existing_ids.contains(&entry.id) {
-                    indexes.vector_index_mut().index_in_namespace(
-                        &entry.namespace,
+                    indexes.vector_index_mut().index_in_collection(
+                        &entry.collection,
                         entry.id,
                         embedding,
                     )?;
@@ -1102,7 +1102,7 @@ mod tests {
         store.insert_memory(b).unwrap();
 
         let mut options = QueryOptions::with_top_k(2);
-        options.namespace = Some("agent1".to_string());
+        options.collection = Some("agent1".to_string());
         let out = store.query("hello", options, &TestEmbedder).unwrap();
         assert_eq!(out.hits.len(), 2);
     }
@@ -1141,7 +1141,7 @@ mod tests {
         assert_eq!(recovered.indexed_embeddings(), 1);
 
         let mut options = QueryOptions::with_top_k(1);
-        options.namespace = Some("agent1".to_string());
+        options.collection = Some("agent1".to_string());
         let out = recovered.query("hello", options, &TestEmbedder).unwrap();
         assert_eq!(out.hits.len(), 1);
         assert_eq!(out.hits[0].id, MemoryId(77));
@@ -1246,7 +1246,7 @@ mod tests {
 
         let snapshot = store.snapshot();
         let mut options = QueryOptions::with_top_k(10);
-        options.namespace = Some("agent1".to_string());
+        options.collection = Some("agent1".to_string());
         let plan = QueryPlanner::plan(options, snapshot.indexes().vector.len());
 
         let snapshot_for_query = Arc::clone(&snapshot);

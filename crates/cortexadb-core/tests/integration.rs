@@ -209,11 +209,11 @@ fn test_graph_edges_persist_across_recovery() {
 }
 
 // ---------------------------------------------------------------------------
-// Namespace isolation
+// Collection isolation
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_namespace_isolation_persists() {
+fn test_collection_isolation_persists() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("db");
 
@@ -221,13 +221,13 @@ fn test_namespace_isolation_persists() {
     let id_b: u64;
     {
         let db = open_db(&path);
-        id_a = db.remember_in_namespace("agent_a", vec![1.0, 0.0, 0.0], None).unwrap();
-        id_b = db.remember_in_namespace("agent_b", vec![1.0, 0.0, 0.0], None).unwrap();
+        id_a = db.remember_in_collection("agent_a", vec![1.0, 0.0, 0.0], None).unwrap();
+        id_b = db.remember_in_collection("agent_b", vec![1.0, 0.0, 0.0], None).unwrap();
     }
 
     let db = open_db(&path);
-    assert_eq!(db.get_memory(id_a).unwrap().namespace, "agent_a");
-    assert_eq!(db.get_memory(id_b).unwrap().namespace, "agent_b");
+    assert_eq!(db.get_memory(id_a).unwrap().collection, "agent_a");
+    assert_eq!(db.get_memory(id_b).unwrap().collection, "agent_b");
 }
 
 // ---------------------------------------------------------------------------

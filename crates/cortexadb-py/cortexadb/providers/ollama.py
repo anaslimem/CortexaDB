@@ -20,7 +20,7 @@ Usage::
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from ..embedder import Embedder
 

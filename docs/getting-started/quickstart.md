@@ -68,7 +68,7 @@ db.ingest("Long article text here...", strategy="markdown")
 ### 7. Use Namespaces
 
 ```python
-agent_a = db.namespace("agent_a")
+agent_a = db.collection("agent_a")
 agent_a.remember("Agent A's private memory")
 hits = agent_a.ask("query only agent A's memories")
 ```

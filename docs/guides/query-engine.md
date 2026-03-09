@@ -58,7 +58,7 @@ The query planner selects the optimal execution path based on the options provid
 
 ### Exact Mode (Default)
 
-Brute-force cosine similarity scan over all embeddings in the target namespace.
+Brute-force cosine similarity scan over all embeddings in the target collection.
 
 - **Complexity**: O(n)
 - **Recall**: 100%
@@ -82,7 +82,7 @@ To improve result quality with filtering, the vector search fetches more candida
 candidate_k = top_k * candidate_multiplier
 ```
 
-The default multiplier is 4 for namespace-scoped queries (to account for filtering overhead).
+The default multiplier is 4 for collection-scoped queries (to account for filtering overhead).
 
 ---
 
@@ -100,7 +100,7 @@ When `use_graph=True`, the query engine expands results using BFS traversal:
 hits = db.ask("query", use_graph=True)
 ```
 
-Graph expansion only follows edges within the same namespace.
+Graph expansion only follows edges within the same collection.
 
 ### Hop Depth
 
@@ -156,16 +156,16 @@ Metadata filtering is applied after vector search but before final scoring.
 
 ---
 
-## Namespace Scoping
+## Collection Scoping
 
-Queries can be scoped to a specific namespace:
+Queries can be scoped to a specific collection:
 
 ```python
-ns = db.namespace("agent_a")
-hits = ns.ask("query")  # Only searches agent_a's memories
+col = db.collection("agent_a")
+hits = col.query("query").execute()
 ```
 
-When querying within a namespace, the engine over-fetches candidates globally (4x `top_k`), filters to the target namespace, then returns the final `top_k`.
+When querying within a collection, the engine over-fetches candidates globally (4x `top_k`), filters to the target collection, then returns the final `top_k`.
 
 ---
 
@@ -205,5 +205,5 @@ hits = db.ask("query", top_k=10, use_graph=True, recency_bias=True)
 ## Next Steps
 
 - [Indexing](./indexing.md) - Configure exact vs HNSW search
-- [Namespaces](./namespaces.md) - Multi-agent memory isolation
+- [Collections](./collections.md) - Multi-agent memory isolation
 - [Python API](../api/python.md) - Full API reference

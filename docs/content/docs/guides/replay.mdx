@@ -43,8 +43,8 @@ The log file is NDJSON with a header line followed by operation lines:
 
 **Operations (lines 2+):**
 ```json
-{"op": "remember", "id": 1, "text": "User likes dark mode", "embedding": [...], "namespace": "default", "metadata": null}
-{"op": "remember", "id": 2, "text": "User works at Stripe", "embedding": [...], "namespace": "default", "metadata": null}
+{"op": "remember", "id": 1, "text": "User likes dark mode", "embedding": [...], "collection": "default", "metadata": null}
+{"op": "remember", "id": 2, "text": "User works at Stripe", "embedding": [...], "collection": "default", "metadata": null}
 {"op": "connect", "from_id": 1, "to_id": 2, "relation": "relates_to"}
 {"op": "delete", "id": 1}
 {"op": "compact"}

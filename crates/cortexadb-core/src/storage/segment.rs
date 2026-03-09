@@ -467,7 +467,7 @@ mod tests {
 
         let read_entry = storage.read_entry(MemoryId(1)).unwrap();
         assert_eq!(read_entry.id, MemoryId(1));
-        assert_eq!(read_entry.namespace, "test");
+        assert_eq!(read_entry.collection, "test");
     }
 
     #[test]

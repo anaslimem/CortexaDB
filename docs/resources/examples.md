@@ -50,10 +50,10 @@ hits = db.ask("Who works at Acme?", use_graph=True)
 ```python
 db = CortexaDB.open("agents.mem", embedder=embedder)
 
-# Each agent has isolated memory
-planner = db.namespace("planner")
-researcher = db.namespace("researcher")
-writer = db.namespace("writer")
+# Each agent has its own collection
+planner = db.collection("planner")
+researcher = db.collection("researcher")
+writer = db.collection("writer")
 
 # Agents store memories independently
 planner.remember("Task: Write a blog post about vector databases")
@@ -64,11 +64,12 @@ writer.remember("Draft intro: Vector databases are transforming AI...")
 # Each agent queries only its own memories
 research = researcher.ask("What did I find about indexing?")
 
-# Shared knowledge base (readonly for agents)
-shared = db.namespace("shared")
-shared.remember("Company style guide: Use active voice")
+# Admin writes to shared collection
+shared = db.collection("shared")
+shared.add("Company policy: All code must be reviewed")
 
-agent_view = db.namespace("shared", readonly=True)
+# Agents read from shared collection (read-only)
+agent_view = db.collection("shared", readonly=True)
 guidelines = agent_view.ask("What is the writing style?")
 ```
 

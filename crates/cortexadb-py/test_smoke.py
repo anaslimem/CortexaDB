@@ -47,19 +47,19 @@ def test_cortexadb_basic_flow():
     db.checkpoint()
 
 
-def test_cortexadb_namespaces():
+def test_cortexadb_collections():
     db = CortexaDB.open(DB_PATH, dimension=3)
     
-    agent_a = db.namespace("agent_a")
-    agent_b = db.namespace("agent_b")
+    col_a = db.collection("agent_a")
+    col_b = db.collection("agent_b")
 
-    id_a = agent_a.remember("I am Agent A", embedding=[1.0, 0.0, 0.0])
-    agent_b.remember("I am Agent B", embedding=[0.0, 1.0, 0.0])
+    id_a = col_a.remember("I am Agent A", embedding=[1.0, 0.0, 0.0])
+    col_b.remember("I am Agent B", embedding=[0.0, 1.0, 0.0])
 
     assert db.get(id_a).collection == "agent_a"
     
-    # Test ask filters by namespace using the wrapper
-    hits_a = agent_a.search("Agent A", embedding=[1.0, 0.0, 0.0])
+    # Test search filters by collection using the wrapper
+    hits_a = col_a.search("Agent A", embedding=[1.0, 0.0, 0.0])
     assert len(hits_a) == 1
     assert hits_a[0].id == id_a
 
@@ -154,40 +154,40 @@ def test_ingest_document_requires_embedder():
     with pytest.raises(CortexaDBError, match="ingest_document"):
         db.ingest("some text")
 
-def test_namespace_auto_embed():
+def test_collection_auto_embed():
     emb = HashEmbedder(dimension=32)
     db = CortexaDB.open(DB_PATH, embedder=emb)
-    ns = db.namespace("agent_a")
-    mid = ns.remember("I am agent A")
+    col = db.collection("agent_a")
+    mid = col.remember("I am agent A")
     assert db.get(mid).collection == "agent_a"
-    hits = ns.search("agent A")
+    hits = col.search("agent A")
     assert any(h.id == mid for h in hits)
 
 # Namespace Model
-def test_namespace_isolation():
-    """Memories in namespace A should not appear in namespace B results."""
+def test_collection_isolation():
+    """Memories in collection A should not appear in collection B results."""
     emb = HashEmbedder(dimension=32)
     db = CortexaDB.open(DB_PATH, embedder=emb)
 
-    agent_a = db.namespace("agent_a")
-    agent_b = db.namespace("agent_b")
+    col_a = db.collection("agent_a")
+    col_b = db.collection("agent_b")
 
-    mid_a = agent_a.remember("I am agent A, secret info")
-    mid_b = agent_b.remember("I am agent B, different info")
+    mid_a = col_a.remember("I am agent A, secret info")
+    mid_b = col_b.remember("I am agent B, different info")
 
-    hits_a = agent_a.search("agent A", top_k=10)
-    hits_b = agent_b.search("agent B", top_k=10)
+    hits_a = col_a.search("agent A", top_k=10)
+    hits_b = col_b.search("agent B", top_k=10)
 
     a_ids = {h.id for h in hits_a}
     b_ids = {h.id for h in hits_b}
 
-    assert mid_a in a_ids,  "Agent A memory not found in agent_a namespace"
-    assert mid_b not in a_ids, "Agent B memory leaked into agent_a namespace"
-    assert mid_b in b_ids,  "Agent B memory not found in agent_b namespace"
-    assert mid_a not in b_ids, "Agent A memory leaked into agent_b namespace"
+    assert mid_a in a_ids,  "Agent A memory not found in agent_a collection"
+    assert mid_b not in a_ids, "Agent B memory leaked into agent_a collection"
+    assert mid_b in b_ids,  "Agent B memory not found in agent_b collection"
+    assert mid_a not in b_ids, "Agent A memory leaked into agent_b collection"
 
 
-def test_namespaced_ask_param():
+def test_collection_search_param():
     """db.search(query, collections=[...]) should scope results correctly."""
     emb = HashEmbedder(dimension=32)
     db = CortexaDB.open(DB_PATH, embedder=emb)
@@ -196,7 +196,7 @@ def test_namespaced_ask_param():
     mid_b = db.remember("Agent B private", collection="agent_b")
     mid_s = db.remember("Shared knowledge", collection="shared")
 
-    # Single namespace via collections= param
+    # Single collection via collections= param
     hits = db.search("knowledge", collections=["shared"])
     ids = {h.id for h in hits}
     assert mid_s in ids
@@ -204,7 +204,7 @@ def test_namespaced_ask_param():
     assert mid_b not in ids
 
 
-def test_cross_namespace_fan_out():
+def test_cross_collection_fan_out():
     """collections=[a, b] should return merged re-ranked results from both."""
     emb = HashEmbedder(dimension=32)
     db = CortexaDB.open(DB_PATH, embedder=emb)
@@ -221,7 +221,7 @@ def test_cross_namespace_fan_out():
     assert mid_s in ids
 
 
-def test_global_ask_returns_all_namespaces():
+def test_global_search_returns_all_collections():
     """db.search(query) with no collections= should search globally."""
     emb = HashEmbedder(dimension=32)
     db = CortexaDB.open(DB_PATH, embedder=emb)
@@ -237,16 +237,16 @@ def test_global_ask_returns_all_namespaces():
     assert mid_s in ids
 
 
-def test_readonly_namespace():
-    """A readonly namespace should allow search() but reject remember()."""
+def test_readonly_collection():
+    """A readonly collection should allow search() but reject remember()."""
     emb = HashEmbedder(dimension=32)
     db = CortexaDB.open(DB_PATH, embedder=emb)
 
     # Write to shared normally.
-    mid = db.namespace("shared").remember("Public knowledge")
+    mid = db.collection("shared").remember("Public knowledge")
 
     # Read from a readonly view.
-    ro = db.namespace("shared", readonly=True)
+    ro = db.collection("shared", readonly=True)
     hits = ro.search("Public knowledge")
     assert any(h.id == mid for h in hits)
 
@@ -259,7 +259,6 @@ def test_readonly_namespace():
 
 # Deterministic Replay
 import json
-import tempfile
 from cortexadb import ReplayReader
 
 LOG_PATH  = "/tmp/cortexadb_replay_test.log"
@@ -329,8 +328,8 @@ def test_replay_connect_id_mapping(cleanup_replay):
     assert len(db2) == 2
 
 
-def test_replay_namespace_preserved(cleanup_replay):
-    """Replay should preserve original namespaces."""
+def test_replay_collection_preserved(cleanup_replay):
+    """Replay should preserve original collections."""
     with CortexaDB.open(DB_PATH, dimension=3, record=LOG_PATH) as db:
         db.remember("In A", embedding=[1.0, 0.0, 0.0], collection="agent_a")
         db.remember("In B", embedding=[0.0, 1.0, 0.0], collection="agent_b")
@@ -471,7 +470,7 @@ def test_hybrid_use_graph():
     assert hits_graph[1].score >= hits_normal[0].score * 0.89
 
 
-def test_hybrid_use_graph_respects_namespaces(monkeypatch):
+def test_hybrid_use_graph_respects_collections(monkeypatch):
     import cortexadb
 
     db = cortexadb.CortexaDB.open(DB_PATH, dimension=2, sync="strict")
@@ -479,7 +478,7 @@ def test_hybrid_use_graph_respects_namespaces(monkeypatch):
     id_b = db.remember("Node B", embedding=[0.0, 1.0], collection="agent_b")
 
     def fake_get_neighbors(_mid):
-        # Simulate an unexpected backend neighbor response across namespaces.
+        # Simulate an unexpected backend neighbor response across collections.
         return [(id_b, "forced")]
 
     monkeypatch.setattr(type(db._inner), "get_neighbors", lambda self, mid: fake_get_neighbors(mid))

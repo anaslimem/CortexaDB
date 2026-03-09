@@ -18,7 +18,7 @@ Think of it as **SQLite, but with semantic and relational intelligence for your 
 - [Query Engine](./guides/query-engine.md) - Hybrid search with vector, graph, and temporal scoring
 - [Indexing](./guides/indexing.md) - Exact search vs HNSW approximate nearest neighbor
 - [Chunking](./guides/chunking.md) - Document ingestion and chunking strategies
-- [Namespaces](./guides/namespaces.md) - Multi-agent memory isolation
+- [Collections](./guides/collections.md) - Multi-agent memory isolation
 - [Embedders](./guides/embedders.md) - Embedding providers (OpenAI, Gemini, Ollama, Hash)
 - [Replay & Recording](./guides/replay.md) - Deterministic session recording and replay
 - [Configuration](./guides/configuration.md) - All configuration options explained
