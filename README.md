@@ -1,13 +1,20 @@
-<p align="center">
+<div align="center">
   <img src="https://raw.githubusercontent.com/anaslimem/CortexaDB/main/logo.png" alt="CortexaDB Logo" width="200" />
+</div>
+
+<h1 align="center">CortexaDB</h1>
+<p align="center">
+  <small>SQLite for AI Agents</small>
 </p>
 
-# CortexaDB: SQLite for AI Agents
 
-[![License: MIT/Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Status: Beta](https://img.shields.io/badge/Status-Beta-brightgreen.svg)](#current-status)
-[![Version](https://img.shields.io/badge/Version-0.1.8-blue.svg)](https://github.com/anaslimem/CortexaDB/releases)
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads)](https://pepy.tech/projects/cortexadb)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg" alt="License" /></a>
+  <a href="#current-status"><img src="https://img.shields.io/badge/Status-Beta-brightgreen.svg" alt="Status" /></a>
+  <a href="https://github.com/anaslimem/CortexaDB/releases"><img src="https://img.shields.io/badge/Version-0.1.8-blue.svg" alt="Version" /></a>
+  <a href="https://pepy.tech/projects/cortexadb"><img src="https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads" alt="Downloads" /></a>
+</p>
+
 
 **CortexaDB** is a lightweight, high-performance embedded database built in Rust, specifically designed to serve as the long-term memory for AI agents. It provides a single-file, zero-dependency storage solution that combines the simplicity of SQLite with the semantic power of vector search, graph relationships, and temporal indexing.
 
