@@ -13,7 +13,7 @@ Usage::
         "agent.mem",
         embedder=OpenAIEmbedder(api_key="sk-...", model="text-embedding-3-small"),
     )
-    db.remember("We chose Stripe for payments")
+    db.add("We chose Stripe for payments")
     hits = db.ask("payment provider?")
 """
 

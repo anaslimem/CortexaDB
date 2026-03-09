@@ -148,8 +148,8 @@ Content under heading 3.
     ];
 
     // Bulk insert with 100x speedup
-    let last_id = db.remember_batch(records)?;
-    println!("   Batch finished. Last inserted ID: {}", last_id);
+    let last_id = db.add_batch(records)?;
+    println!("   Batch finished. Last inserted ID: {}", last_id.last().unwrap());
     
     // For manual IDs in the example, we'll use 1, 2, 3 assuming clean start
     let id1 = 1; let id2 = 2; let id3 = 3;
@@ -181,7 +181,7 @@ Content under heading 3.
     // -----------------------------------------------------------
     println!("\n[7] Collections...");
     let travel_text = "Flight to Tokyo booked for June.";
-    let col_id = db.remember_with_content(
+    let col_id = db.add_with_content(
         "travel_agent",
         travel_text.as_bytes().to_vec(),
         embed_text(travel_text, dimension),

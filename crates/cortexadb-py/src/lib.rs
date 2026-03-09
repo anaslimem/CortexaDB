@@ -287,7 +287,7 @@ impl PyStats {
 ///
 /// Example:
 ///     >>> db = CortexaDB.open("/tmp/agent.mem", dimension=128)
-///     >>> mid = db.remember_embedding([0.1] * 128)
+///     >>> mid = db.add_embedding([0.1] * 128)
 ///     >>> hits = db.ask_embedding([0.1] * 128, top_k=5)
 ///     >>> print(hits[0].score)
 #[pyclass(name = "CortexaDB")]
@@ -382,7 +382,7 @@ impl PyCortexaDB {
         text_signature = "(self, embedding, *, metadata=None, collection='default', content='')",
         signature = (embedding, *, metadata=None, collection="default".to_string(), content="".to_string())
     )]
-    fn remember_embedding(
+    fn add_embedding(
         &self,
         py: Python<'_>,
         embedding: Vec<f32>,
@@ -401,9 +401,9 @@ impl PyCortexaDB {
         let id = py
             .allow_threads(|| {
                 if content.is_empty() {
-                    self.inner.remember_in_collection(&collection, embedding, metadata)
+                    self.inner.add_in_collection(&collection, embedding, metadata)
                 } else {
-                    self.inner.remember_with_content(
+                    self.inner.add_with_content(
                         &collection,
                         content.into_bytes(),
                         embedding,
@@ -423,7 +423,7 @@ impl PyCortexaDB {
     /// Returns:
     ///     int: The ID of the last command executed (for flushing/waiting).
     #[pyo3(text_signature = "(self, records)")]
-    fn remember_batch(&self, py: Python<'_>, records: Vec<PyBatchRecord>) -> PyResult<Vec<u64>> {
+    fn add_batch(&self, py: Python<'_>, records: Vec<PyBatchRecord>) -> PyResult<Vec<u64>> {
         for rec in &records {
             if let Some(emb) = &rec.embedding {
                 if emb.len() != self.dimension {
@@ -447,7 +447,7 @@ impl PyCortexaDB {
             .collect();
 
         let ids = py
-            .allow_threads(|| self.inner.remember_batch(facade_records))
+            .allow_threads(|| self.inner.add_batch(facade_records))
             .map_err(|e| CortexaDBError::new_err(e.to_string()))?;
 
         Ok(ids)

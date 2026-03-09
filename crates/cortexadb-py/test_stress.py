@@ -20,7 +20,7 @@ def test_replay_safety(clean_db_path):
     with CortexaDB.open(clean_db_path, dimension=2, sync="strict") as db:
         start_time = time.time()
         for i in range(5000):
-            db.remember(f"Entry {i}", embedding=[0.5, 0.5])
+            db.add(f"Entry {i}", embedding=[0.5, 0.5])
 
         print(f"Inserted 5,000 memories in {time.time() - start_time:.2f}s")
         assert len(db) == 5000
@@ -36,7 +36,7 @@ def test_compaction_integrity(clean_db_path):
 
     with CortexaDB.open(clean_db_path, dimension=2, sync="strict") as db:
         for _ in range(100):
-            db.remember("Stress entry", embedding=[0.1, 0.9])
+            db.add("Stress entry", embedding=[0.1, 0.9])
 
         assert len(db) == 100
 
@@ -58,7 +58,7 @@ def test_concurrent_compaction(clean_db_path):
         # but compact_segments also filters by deletion ratio.
         # Let's insert enough to have some churn.
         for i in range(1000):
-            db.remember(f"Entry {i}", embedding=[0.5, 0.5])
+            db.add(f"Entry {i}", embedding=[0.5, 0.5])
 
         assert len(db) == 1000
 

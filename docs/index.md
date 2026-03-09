@@ -54,8 +54,8 @@ from cortexadb.providers.openai import OpenAIEmbedder
 
 db = CortexaDB.open("agent.mem", embedder=OpenAIEmbedder())
 
-db.remember("The user prefers dark mode.")
-db.remember("User works at Stripe.")
+db.add("The user prefers dark mode.")
+db.add("User works at Stripe.")
 
 hits = db.ask("What does the user like?")
 for hit in hits:

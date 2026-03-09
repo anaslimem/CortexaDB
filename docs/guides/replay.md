@@ -4,7 +4,7 @@ CortexaDB can record every operation to a log file and replay it to recreate an 
 
 ## Overview
 
-Recording captures all write operations (remember, connect, delete, compact, checkpoint) as NDJSON (newline-delimited JSON). Replay reads the log and re-applies each operation to build a new database.
+Recording captures all write operations (add, connect, delete, compact, checkpoint) as NDJSON (newline-delimited JSON). Replay reads the log and re-applies each operation to build a new database.
 
 ---
 
@@ -16,8 +16,8 @@ Enable recording by passing a `record` path when opening the database:
 db = CortexaDB.open("agent.mem", dimension=128, record="session.log")
 
 # All operations are now logged
-mid1 = db.remember("User likes dark mode", embedding=[...])
-mid2 = db.remember("User works at Stripe", embedding=[...])
+mid1 = db.add("User likes dark mode", embedding=[...])
+mid2 = db.add("User works at Stripe", embedding=[...])
 db.connect(mid1, mid2, "relates_to")
 db.delete_memory(mid1)
 db.compact()
@@ -40,8 +40,8 @@ The log file is NDJSON with a header line followed by operation lines:
 
 **Operations (lines 2+):**
 ```json
-{"op": "remember", "id": 1, "text": "User likes dark mode", "embedding": [...], "collection": "default", "metadata": null}
-{"op": "remember", "id": 2, "text": "User works at Stripe", "embedding": [...], "collection": "default", "metadata": null}
+{"op": "add", "id": 1, "text": "User likes dark mode", "embedding": [...], "collection": "default", "metadata": null}
+{"op": "add", "id": 2, "text": "User works at Stripe", "embedding": [...], "collection": "default", "metadata": null}
 {"op": "connect", "from_id": 1, "to_id": 2, "relation": "relates_to"}
 {"op": "delete", "id": 1}
 {"op": "compact"}
@@ -91,7 +91,7 @@ print(report["total_ops"])   # Total operations in the log
 print(report["applied"])     # Successfully applied
 print(report["skipped"])     # Skipped (malformed but non-fatal)
 print(report["failed"])      # Failed (execution error, non-fatal)
-print(report["op_counts"])   # Per-type counts: {"remember": 5, "connect": 2, ...}
+print(report["op_counts"])   # Per-type counts: {"add": 5, "connect": 2, ...}
 print(report["failures"])    # List of up to 50 failure details
 ```
 

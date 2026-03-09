@@ -14,7 +14,7 @@ Usage::
         "agent.mem",
         embedder=OllamaEmbedder(model="nomic-embed-text"),
     )
-    db.remember("We chose Stripe for payments")
+    db.add("We chose Stripe for payments")
     hits = db.ask("payment provider?")
 """
 

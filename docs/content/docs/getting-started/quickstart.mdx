@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Store a memory with an embedding
     let embedding = vec![0.1; 128];
-    let id = db.remember(embedding.clone(), None)?;
+    let id = db.add(embedding.clone(), None)?;
 
     // Query
     let hits = db.ask(embedding, 5, None)?;
@@ -106,7 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Connect memories
-    let id2 = db.remember(vec![0.2; 128], None)?;
+    let id2 = db.add(vec![0.2; 128], None)?;
     db.connect(id, id2, "related_to")?;
 
     // Checkpoint for fast recovery

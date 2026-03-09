@@ -13,7 +13,7 @@ Usage::
         "agent.mem",
         embedder=GeminiEmbedder(api_key="AIza...", model="models/text-embedding-004"),
     )
-    db.remember("We chose Stripe for payments")
+    db.add("We chose Stripe for payments")
     hits = db.ask("payment provider?")
 """
 

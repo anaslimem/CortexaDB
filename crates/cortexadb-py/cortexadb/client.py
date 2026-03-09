@@ -126,7 +126,6 @@ class Collection:
         self._db.delete(mid)
 
     # Legacy Aliases
-    def remember(self, *a, **k): return self.add(*a, **k)
     def ask(self, *a, **k): return self.search(*a, **k)
     def ingest_document(self, *a, **k): return self.ingest(*a, **k)
     def delete_memory(self, mid: int): self.delete(mid)
@@ -199,7 +198,7 @@ class CortexaDB:
             report["op_counts"][op_type] = report["op_counts"].get(op_type, 0) + 1
             
             try:
-                if op_type == "remember":
+                if op_type in ("add", "remember"):
                     new_id = db.add(
                         text=op.get("text"),
                         vector=op.get("embedding"),
@@ -240,9 +239,9 @@ class CortexaDB:
         vector = vector or kwargs.get("vector") or kwargs.get("embedding")
         vec = self._resolve_embedding(text, vector)
         content = text or ""
-        mid = self._inner.remember_embedding(vec, metadata=metadata, collection=collection, content=content)
+        mid = self._inner.add_embedding(vec, metadata=metadata, collection=collection, content=content)
         if self._recorder:
-            self._recorder.record_remember(id=mid, text=content, embedding=vec, collection=collection, metadata=metadata)
+            self._recorder.record_add(id=mid, text=content, embedding=vec, collection=collection, metadata=metadata)
         return mid
 
     def search(
@@ -323,7 +322,7 @@ class CortexaDB:
             try:
                 mem = self.get(i)
                 if mem.embedding:
-                    writer.record_remember(
+                    writer.record_add(
                         id=mem.id,
                         text=bytes(mem.content).decode("utf-8") if mem.content else "",
                         embedding=mem.embedding,
@@ -355,7 +354,7 @@ class CortexaDB:
                 metadata=r.get("metadata")
             ) for r in records
         ]
-        return self._inner.remember_batch(facade_records)
+        return self._inner.add_batch(facade_records)
 
     def ingest(self, text: str, **kwargs) -> t.List[int]:
         """Ingest text with 100x speedup via batching."""
@@ -393,7 +392,6 @@ class CortexaDB:
         return False
 
     # Legacy Aliases
-    def remember(self, *a, **k): return self.add(*a, **k)
     def ask(self, *a, **k): return self.search(*a, **k)
     def ingest_document(self, *a, **k): return self.ingest(*a, **k)
     def delete_memory(self, mid: int): self.delete(mid)

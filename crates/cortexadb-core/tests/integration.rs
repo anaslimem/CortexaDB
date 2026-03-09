@@ -1,6 +1,6 @@
 //! Integration tests for CortexaDB.
 //!
-//! These tests exercise the full stack: open → remember → ask → checkpoint → recover.
+//! These tests exercise the full stack: open → add → ask → checkpoint → recover.
 //! Unlike the unit tests in `src/`, these tests run against actual disk files (via tempdir).
 
 use cortexadb_core::{CortexaDB, CortexaDBConfig};
@@ -24,17 +24,17 @@ fn open_db_with_config(dir: &TempDir, config: CortexaDBConfig) -> CortexaDB {
 }
 
 // ---------------------------------------------------------------------------
-// Basic open → remember → ask → recover
+// Basic open → add → ask → recover
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_full_open_remember_ask() {
+fn test_full_open_add_ask() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("db");
     let db = open_db(&path);
 
-    let id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-    let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+    let id1 = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+    let id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
 
     let hits = db.ask(vec![1.0, 0.0, 0.0], 5, None).unwrap();
     assert!(!hits.is_empty(), "ask should return results");
@@ -52,9 +52,9 @@ fn test_recover_after_drop_restores_entries() {
     let expected_ids: Vec<u64>;
     {
         let db = open_db(&path);
-        let id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        let id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
-        let id3 = db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+        let id1 = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        let id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
+        let id3 = db.add(vec![0.0, 0.0, 1.0], None).unwrap();
         expected_ids = vec![id1, id2, id3];
         // db dropped here (simulates process exit without explicit flush)
     }
@@ -77,9 +77,9 @@ fn test_recover_search_returns_correct_top_hit() {
     let id_target: u64;
     {
         let db = open_db(&path);
-        db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
-        id_target = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+        db.add(vec![0.0, 1.0, 0.0], None).unwrap();
+        id_target = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.add(vec![0.0, 0.0, 1.0], None).unwrap();
     }
 
     let db = open_db(&path);
@@ -101,12 +101,12 @@ fn test_checkpoint_recovery_preserves_all_entries() {
     let mut all_ids: Vec<u64> = Vec::new();
     {
         let db = open_db(&path);
-        all_ids.push(db.remember(vec![1.0, 0.0, 0.0], None).unwrap());
-        all_ids.push(db.remember(vec![0.0, 1.0, 0.0], None).unwrap());
+        all_ids.push(db.add(vec![1.0, 0.0, 0.0], None).unwrap());
+        all_ids.push(db.add(vec![0.0, 1.0, 0.0], None).unwrap());
         db.flush().unwrap(); // ensure WAL is synced before checkpoint
         db.checkpoint().unwrap();
         // Write one more entry AFTER the checkpoint.
-        all_ids.push(db.remember(vec![0.0, 0.0, 1.0], None).unwrap());
+        all_ids.push(db.add(vec![0.0, 0.0, 1.0], None).unwrap());
     }
 
     let db = open_db(&path);
@@ -125,13 +125,13 @@ fn test_double_checkpoint_recovery() {
 
     {
         let db = open_db(&path);
-        db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         db.flush().unwrap();
         db.checkpoint().unwrap();
-        db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         db.flush().unwrap();
         db.checkpoint().unwrap(); // second checkpoint
-        db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+        db.add(vec![0.0, 0.0, 1.0], None).unwrap();
     }
 
     let db = open_db(&path);
@@ -151,8 +151,8 @@ fn test_delete_persists_across_recovery() {
     let kept_id: u64;
     {
         let db = open_db(&path);
-        deleted_id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        kept_id = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        deleted_id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        kept_id = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         db.delete_memory(deleted_id).unwrap();
         assert_eq!(db.stats().entries, 1);
     }
@@ -172,8 +172,8 @@ fn test_delete_then_checkpoint_recovery() {
     let deleted_id: u64;
     {
         let db = open_db(&path);
-        deleted_id = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        deleted_id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         db.delete_memory(deleted_id).unwrap();
         db.flush().unwrap(); // ensure WAL is synced before checkpoint
         db.checkpoint().unwrap();
@@ -196,8 +196,8 @@ fn test_graph_edges_persist_across_recovery() {
     let (id1, id2): (u64, u64);
     {
         let db = open_db(&path);
-        id1 = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-        id2 = db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
+        id1 = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+        id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         db.connect(id1, id2, "relates_to").unwrap();
     }
 
@@ -221,8 +221,8 @@ fn test_collection_isolation_persists() {
     let id_b: u64;
     {
         let db = open_db(&path);
-        id_a = db.remember_in_collection("agent_a", vec![1.0, 0.0, 0.0], None).unwrap();
-        id_b = db.remember_in_collection("agent_b", vec![1.0, 0.0, 0.0], None).unwrap();
+        id_a = db.add_in_collection("agent_a", vec![1.0, 0.0, 0.0], None).unwrap();
+        id_b = db.add_in_collection("agent_b", vec![1.0, 0.0, 0.0], None).unwrap();
     }
 
     let db = open_db(&path);
@@ -245,7 +245,7 @@ fn test_metadata_persists_across_recovery() {
         let mut meta = std::collections::HashMap::new();
         meta.insert("source".to_string(), "unit_test".to_string());
         meta.insert("priority".to_string(), "high".to_string());
-        id = db.remember(vec![1.0, 0.0, 0.0], Some(meta)).unwrap();
+        id = db.add(vec![1.0, 0.0, 0.0], Some(meta)).unwrap();
     }
 
     let db = open_db(&path);
@@ -274,9 +274,9 @@ fn test_capacity_eviction_keeps_max_entries() {
     };
     let db = open_db_with_config(&dir, config);
 
-    db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
-    db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
-    db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+    db.add(vec![1.0, 0.0, 0.0], None).unwrap();
+    db.add(vec![0.0, 1.0, 0.0], None).unwrap();
+    db.add(vec![0.0, 0.0, 1.0], None).unwrap();
 
     // After inserting 3 entries with max_entries=2, one should have been evicted.
     assert_eq!(db.stats().entries, 2, "max_entries=2 must evict oldest entry");
@@ -311,14 +311,14 @@ fn test_hnsw_recovery_sync() {
     let id_deleted: u64;
     {
         let db = open_db_with_config(&dir, config.clone());
-        db.remember(vec![0.0, 1.0, 0.0], None).unwrap();
-        id_deleted = db.remember(vec![0.0, 0.0, 1.0], None).unwrap();
+        db.add(vec![0.0, 1.0, 0.0], None).unwrap();
+        id_deleted = db.add(vec![0.0, 0.0, 1.0], None).unwrap();
 
         // Checkpoint saves the HNSW index to disk right now (with these 2 items).
         db.checkpoint().unwrap();
 
         // Insert a new item AFTER the checkpoint but BEFORE the crash
-        id_target = db.remember(vec![1.0, 0.0, 0.0], None).unwrap();
+        id_target = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
 
         // Delete an item that WAS saved in the HNSW on disk, AFTER the checkpoint
         db.delete_memory(id_deleted).unwrap();

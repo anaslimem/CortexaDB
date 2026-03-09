@@ -27,29 +27,29 @@ let db = CortexaDBBuilder::new("/path/to/db", 128)
 
 ### Memory Operations
 
-#### `remember(embedding, metadata) -> Result<u64>`
+#### `add(embedding, metadata) -> Result<u64>`
 
 Stores a memory in the default collection.
 
 ```rust
-let id = db.remember(vec![0.1; 128], None)?;
-let id = db.remember(vec![0.1; 128], Some(metadata_map))?;
+let id = db.add(vec![0.1; 128], None)?;
+let id = db.add(vec![0.1; 128], Some(metadata_map))?;
 ```
 
-#### `remember_in_collection(collection, embedding, metadata) -> Result<u64>`
+#### `add_in_collection(collection, embedding, metadata) -> Result<u64>`
 
 Stores a memory in a specific collection.
 
 ```rust
-let id = db.remember_in_collection("agent_a", vec![0.1; 128], None)?;
+let id = db.add_in_collection("agent_a", vec![0.1; 128], None)?;
 ```
 
-#### `remember_with_content(collection, content, embedding, metadata) -> Result<u64>`
+#### `add_with_content(collection, content, embedding, metadata) -> Result<u64>`
 
 Stores a memory with raw content bytes.
 
 ```rust
-let id = db.remember_with_content(
+let id = db.add_with_content(
     "default",
     b"Hello world".to_vec(),
     vec![0.1; 128],

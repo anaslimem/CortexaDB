@@ -22,7 +22,7 @@ fn bench_ingestion(c: &mut Criterion) {
 
     c.bench_function("ingest_single_memory", |b| {
         b.iter(|| {
-            db.remember(embedding.clone(), None).unwrap();
+            db.add(embedding.clone(), None).unwrap();
         })
     });
 }

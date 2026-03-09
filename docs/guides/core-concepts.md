@@ -24,7 +24,7 @@ The database is built around three pillars:
                          │
 ┌────────────────────────▼─────────────────────────┐
 │               CortexaDB Facade                    │
-│        High-level API (remember, ask, etc.)       │
+│        High-level API (add, ask, etc.)       │
 └────────────────────────┬─────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────┐
@@ -62,7 +62,7 @@ The database is built around three pillars:
 
 ### Facade
 
-The `CortexaDB` facade is the primary entry point. It provides the high-level API (`remember`, `ask`, `connect`, etc.) and delegates to the store for durability and concurrency.
+The `CortexaDB` facade is the primary entry point. It provides the high-level API (`add`, `ask`, `connect`, etc.) and delegates to the store for durability and concurrency.
 
 ### Store
 

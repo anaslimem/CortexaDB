@@ -69,7 +69,7 @@ report = db.last_replay_report
 
 ## Memory Operations
 
-### `.remember(text, embedding=None, metadata=None)`
+### `.add(text, embedding=None, metadata=None)`
 
 Stores a new memory entry. If an embedder is configured and no embedding is provided, the text is auto-embedded.
 
@@ -85,9 +85,9 @@ Stores a new memory entry. If an embedder is configured and no embedding is prov
 
 **Example:**
 ```python
-mid = db.remember("User prefers dark mode")
-mid = db.remember("text", metadata={"source": "onboarding"})
-mid = db.remember("text", embedding=[0.1, 0.2, ...])
+mid = db.add("User prefers dark mode")
+mid = db.add("text", metadata={"source": "onboarding"})
+mid = db.add("text", embedding=[0.1, 0.2, ...])
 ```
 
 ---
