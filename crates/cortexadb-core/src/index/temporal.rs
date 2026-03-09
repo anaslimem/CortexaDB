@@ -201,11 +201,11 @@ mod tests {
         let mut sm = StateMachine::new();
 
         // Create memories with different timestamps
-        sm.insert_memory(create_entry(0, 1000)).unwrap();
-        sm.insert_memory(create_entry(1, 2000)).unwrap();
-        sm.insert_memory(create_entry(2, 3000)).unwrap();
-        sm.insert_memory(create_entry(3, 4000)).unwrap();
-        sm.insert_memory(create_entry(4, 5000)).unwrap();
+        sm.add(create_entry(0, 1000)).unwrap();
+        sm.add(create_entry(1, 2000)).unwrap();
+        sm.add(create_entry(2, 3000)).unwrap();
+        sm.add(create_entry(3, 4000)).unwrap();
+        sm.add(create_entry(4, 5000)).unwrap();
 
         sm
     }
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn test_get_latest_timestamp_zero_is_valid() {
         let mut sm = StateMachine::new();
-        sm.insert_memory(create_entry(1, 0)).unwrap();
+        sm.add(create_entry(1, 0)).unwrap();
         assert_eq!(TemporalIndex::get_latest_timestamp(&sm), Some(0));
     }
 

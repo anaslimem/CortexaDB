@@ -150,7 +150,7 @@ impl Engine {
         let mut last_id = checkpoint_last_applied.unwrap_or(CommandId(0));
         for (_cmd_id, cmd) in commands {
             match &cmd {
-                Command::InsertMemory(entry) => {
+                Command::Add(entry) => {
                     // Ensure segment view converges to WAL command stream.
                     let needs_rewrite = match segments.read_entry(entry.id) {
                         Ok(existing) => existing != *entry,
@@ -165,7 +165,7 @@ impl Engine {
                     // Delete may refer to a missing segment entry in crash scenarios.
                     let _ = segments.delete_entry(*id);
                 }
-                Command::AddEdge { .. } | Command::RemoveEdge { .. } => {}
+                Command::Connect { .. } | Command::Disconnect { .. } => {}
             }
             state_machine.apply_command(cmd)?;
             last_id = CommandId(last_id.0 + 1);
@@ -260,7 +260,7 @@ impl Engine {
 
         // 2. Handle data persistence based on command type
         match &cmd {
-            Command::InsertMemory(entry) => {
+            Command::Add(entry) => {
                 // Write entry to segment storage
                 self._write_entry_to_segments(entry)?;
             }
@@ -269,7 +269,7 @@ impl Engine {
                 self.segments.delete_entry(*id)?;
             }
             _ => {
-                // AddEdge and RemoveEdge don't need segment writes
+                // Connect and Disconnect don't need segment writes
                 // They're stored in StateMachine's graph
             }
         }
@@ -506,7 +506,7 @@ mod tests {
 
         let entry = MemoryEntry::new(MemoryId(1), "test".to_string(), b"content".to_vec(), 1000);
 
-        let cmd = Command::InsertMemory(entry);
+        let cmd = Command::Add(entry);
         let cmd_id = engine.execute_command(cmd).unwrap();
 
         assert_eq!(cmd_id, CommandId(0));
@@ -532,7 +532,7 @@ mod tests {
                 .with_importance(0.2),
         ];
         for entry in entries {
-            engine.execute_command(Command::InsertMemory(entry)).unwrap();
+            engine.execute_command(Command::Add(entry)).unwrap();
         }
         let wal_before = engine.wal_len();
 
@@ -556,13 +556,13 @@ mod tests {
         let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
         engine
-            .execute_command(Command::InsertMemory(
+            .execute_command(Command::Add(
                 MemoryEntry::new(MemoryId(1), "ns".to_string(), vec![1; 40], 1000)
                     .with_importance(0.1),
             ))
             .unwrap();
         engine
-            .execute_command(Command::InsertMemory(
+            .execute_command(Command::Add(
                 MemoryEntry::new(MemoryId(2), "ns".to_string(), vec![2; 40], 2000)
                     .with_importance(0.9),
             ))
@@ -594,7 +594,7 @@ mod tests {
                     1000 + i as u64,
                 )
                 .with_importance(i as f32);
-                engine.execute_command(Command::InsertMemory(entry)).unwrap();
+                engine.execute_command(Command::Add(entry)).unwrap();
             }
 
             let report = engine.enforce_capacity(CapacityPolicy::new(Some(1), None)).unwrap();
@@ -617,7 +617,7 @@ mod tests {
         let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
 
         engine
-            .execute_command(Command::InsertMemory(MemoryEntry::new(
+            .execute_command(Command::Add(MemoryEntry::new(
                 MemoryId(1),
                 "ns".to_string(),
                 b"a".to_vec(),
@@ -627,12 +627,7 @@ mod tests {
 
         let (_cmd_id, report) = engine
             .execute_command_with_capacity(
-                Command::InsertMemory(MemoryEntry::new(
-                    MemoryId(2),
-                    "ns".to_string(),
-                    b"b".to_vec(),
-                    2000,
-                )),
+                Command::Add(MemoryEntry::new(MemoryId(2), "ns".to_string(), b"b".to_vec(), 2000)),
                 CapacityPolicy::new(Some(1), None),
             )
             .unwrap();
@@ -655,7 +650,7 @@ mod tests {
                 format!("content_{}", i).into_bytes(),
                 1000 + i as u64,
             );
-            engine.execute_command(Command::InsertMemory(entry)).unwrap();
+            engine.execute_command(Command::Add(entry)).unwrap();
         }
         for id in [0_u64, 1, 2, 3] {
             engine.execute_command(Command::delete(MemoryId(id))).unwrap();
@@ -685,7 +680,7 @@ mod tests {
                 format!("content_{}", i).into_bytes(),
                 1000 + i as u64,
             );
-            let cmd = Command::InsertMemory(entry);
+            let cmd = Command::Add(entry);
             engine.execute_command(cmd).unwrap();
         }
 
@@ -694,7 +689,7 @@ mod tests {
 
         // Add some edges
         for i in 0..9 {
-            let cmd = Command::AddEdge {
+            let cmd = Command::Connect {
                 from: MemoryId(i as u64),
                 to: MemoryId((i + 1) as u64),
                 relation: "follows".to_string(),
@@ -717,7 +712,7 @@ mod tests {
         {
             let mut engine = Engine::new(&wal_path, &seg_dir).unwrap();
             let entry = MemoryEntry::new(MemoryId(1), "ns".to_string(), b"a".to_vec(), 1000);
-            engine.execute_command(Command::InsertMemory(entry)).unwrap();
+            engine.execute_command(Command::Add(entry)).unwrap();
         }
 
         // Simulate: checkpoint says last_applied=10, but WAL only has 1 entry.
@@ -748,7 +743,7 @@ mod tests {
                     format!("memory_{}", i).into_bytes(),
                     2000 + i as u64,
                 );
-                let cmd = Command::InsertMemory(entry);
+                let cmd = Command::Add(entry);
                 engine.execute_command(cmd).unwrap();
             }
 
@@ -785,12 +780,12 @@ mod tests {
                     b"data".to_vec(),
                     1000 + i as u64,
                 );
-                engine.execute_command(Command::InsertMemory(entry)).unwrap();
+                engine.execute_command(Command::Add(entry)).unwrap();
             }
 
             // Add edges in specific order
             engine
-                .execute_command(Command::AddEdge {
+                .execute_command(Command::Connect {
                     from: MemoryId(0),
                     to: MemoryId(1),
                     relation: "points_to".to_string(),
@@ -798,7 +793,7 @@ mod tests {
                 .unwrap();
 
             engine
-                .execute_command(Command::AddEdge {
+                .execute_command(Command::Connect {
                     from: MemoryId(1),
                     to: MemoryId(2),
                     relation: "points_to".to_string(),
@@ -835,7 +830,7 @@ mod tests {
                     format!("content_{}", i).into_bytes(),
                     3000 + i as u64,
                 );
-                let cmd = Command::InsertMemory(entry);
+                let cmd = Command::Add(entry);
                 engine.execute_command(cmd).unwrap();
             }
 
@@ -870,13 +865,13 @@ mod tests {
             for i in 0..5 {
                 let entry =
                     MemoryEntry::new(MemoryId(i as u64), "ns".to_string(), b"data".to_vec(), 1000);
-                engine.execute_command(Command::InsertMemory(entry)).unwrap();
+                engine.execute_command(Command::Add(entry)).unwrap();
             }
 
             // Add edges
             for i in 0..4 {
                 engine
-                    .execute_command(Command::AddEdge {
+                    .execute_command(Command::Connect {
                         from: MemoryId(i as u64),
                         to: MemoryId((i + 1) as u64),
                         relation: "next".to_string(),

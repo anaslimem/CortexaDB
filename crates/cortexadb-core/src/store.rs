@@ -540,7 +540,7 @@ impl CortexaDBStore {
         })
     }
 
-    pub fn insert_memory(&self, entry: MemoryEntry) -> Result<CommandId> {
+    pub fn add(&self, entry: MemoryEntry) -> Result<CommandId> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
 
         let mut effective = entry;
@@ -556,10 +556,10 @@ impl CortexaDBStore {
             }
         }
 
-        self.execute_write_transaction_locked(&mut writer, WriteOp::InsertMemory(effective))
+        self.execute_write_transaction_locked(&mut writer, WriteOp::Add(effective))
     }
 
-    pub fn insert_memories_batch(&self, entries: Vec<MemoryEntry>) -> Result<CommandId> {
+    pub fn add_batch(&self, entries: Vec<MemoryEntry>) -> Result<CommandId> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
         let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
         let mut last_cmd_id = CommandId(0);
@@ -590,7 +590,7 @@ impl CortexaDBStore {
 
             // Execute unsynced for the whole batch
             last_cmd_id =
-                writer.engine.execute_command_unsynced(Command::InsertMemory(effective.clone()))?;
+                writer.engine.execute_command_unsynced(Command::Add(effective.clone()))?;
 
             // Update vector index
             match effective.embedding {
@@ -623,14 +623,14 @@ impl CortexaDBStore {
         self.execute_write_transaction_locked(&mut writer, WriteOp::Delete(id))
     }
 
-    pub fn add_edge(&self, from: MemoryId, to: MemoryId, relation: String) -> Result<CommandId> {
+    pub fn connect(&self, from: MemoryId, to: MemoryId, relation: String) -> Result<CommandId> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
-        self.execute_write_transaction_locked(&mut writer, WriteOp::AddEdge { from, to, relation })
+        self.execute_write_transaction_locked(&mut writer, WriteOp::Connect { from, to, relation })
     }
 
-    pub fn remove_edge(&self, from: MemoryId, to: MemoryId) -> Result<CommandId> {
+    pub fn disconnect(&self, from: MemoryId, to: MemoryId) -> Result<CommandId> {
         let mut writer = self.writer.lock().expect("writer lock poisoned");
-        self.execute_write_transaction_locked(&mut writer, WriteOp::RemoveEdge { from, to })
+        self.execute_write_transaction_locked(&mut writer, WriteOp::Disconnect { from, to })
     }
 
     /// Rebuild in-memory vector index from current state machine entries.
@@ -856,7 +856,7 @@ impl CortexaDBStore {
     ) -> Result<CommandId> {
         let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
         let cmd_id = match op {
-            WriteOp::InsertMemory(entry) => {
+            WriteOp::Add(entry) => {
                 if let Some(embedding) = entry.embedding.as_ref() {
                     if embedding.len() != writer.indexes.vector.dimension() {
                         return Err(crate::index::vector::VectorError::DimensionMismatch {
@@ -867,9 +867,9 @@ impl CortexaDBStore {
                     }
                 }
                 let id = if sync_now {
-                    writer.engine.execute_command(Command::InsertMemory(entry.clone()))?
+                    writer.engine.execute_command(Command::Add(entry.clone()))?
                 } else {
-                    writer.engine.execute_command_unsynced(Command::InsertMemory(entry.clone()))?
+                    writer.engine.execute_command_unsynced(Command::Add(entry.clone()))?
                 };
                 match entry.embedding {
                     Some(embedding) => writer.indexes.vector_index_mut().index_in_collection(
@@ -892,22 +892,22 @@ impl CortexaDBStore {
                 let _ = writer.indexes.vector_index_mut().remove(id);
                 cmd_id
             }
-            WriteOp::AddEdge { from, to, relation } => {
+            WriteOp::Connect { from, to, relation } => {
                 if sync_now {
-                    writer.engine.execute_command(Command::AddEdge { from, to, relation })?
+                    writer.engine.execute_command(Command::Connect { from, to, relation })?
                 } else {
-                    writer.engine.execute_command_unsynced(Command::AddEdge {
+                    writer.engine.execute_command_unsynced(Command::Connect {
                         from,
                         to,
                         relation,
                     })?
                 }
             }
-            WriteOp::RemoveEdge { from, to } => {
+            WriteOp::Disconnect { from, to } => {
                 if sync_now {
-                    writer.engine.execute_command(Command::RemoveEdge { from, to })?
+                    writer.engine.execute_command(Command::Disconnect { from, to })?
                 } else {
-                    writer.engine.execute_command_unsynced(Command::RemoveEdge { from, to })?
+                    writer.engine.execute_command_unsynced(Command::Disconnect { from, to })?
                 }
             }
         };
@@ -1054,10 +1054,10 @@ impl Drop for CortexaDBStore {
 }
 
 enum WriteOp {
-    InsertMemory(MemoryEntry),
+    Add(MemoryEntry),
     Delete(MemoryId),
-    AddEdge { from: MemoryId, to: MemoryId, relation: String },
-    RemoveEdge { from: MemoryId, to: MemoryId },
+    Connect { from: MemoryId, to: MemoryId, relation: String },
+    Disconnect { from: MemoryId, to: MemoryId },
 }
 
 #[cfg(test)]
@@ -1098,8 +1098,8 @@ mod tests {
         let b = MemoryEntry::new(MemoryId(2), "agent1".to_string(), b"b".to_vec(), 2000)
             .with_embedding(vec![0.9, 0.1, 0.0])
             .with_importance(0.2);
-        store.insert_memory(a).unwrap();
-        store.insert_memory(b).unwrap();
+        store.add(a).unwrap();
+        store.add(b).unwrap();
 
         let mut options = QueryOptions::with_top_k(2);
         options.collection = Some("agent1".to_string());
@@ -1116,7 +1116,7 @@ mod tests {
 
         let entry = MemoryEntry::new(MemoryId(10), "agent1".to_string(), b"x".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0]);
-        store.insert_memory(entry).unwrap();
+        store.add(entry).unwrap();
         assert_eq!(store.indexed_embeddings(), 1);
 
         store.delete(MemoryId(10)).unwrap();
@@ -1133,7 +1133,7 @@ mod tests {
             let store = CortexaDBStore::new(&wal, &seg, 3).unwrap();
             let entry = MemoryEntry::new(MemoryId(77), "agent1".to_string(), b"z".to_vec(), 1000)
                 .with_embedding(vec![1.0, 0.0, 0.0]);
-            store.insert_memory(entry).unwrap();
+            store.add(entry).unwrap();
             assert_eq!(store.indexed_embeddings(), 1);
         }
 
@@ -1156,11 +1156,11 @@ mod tests {
 
         let original = MemoryEntry::new(MemoryId(90), "agent1".to_string(), b"old".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0]);
-        store.insert_memory(original).unwrap();
+        store.add(original).unwrap();
 
         let changed_content =
             MemoryEntry::new(MemoryId(90), "agent1".to_string(), b"new".to_vec(), 1001);
-        let err = store.insert_memory(changed_content).unwrap_err();
+        let err = store.add(changed_content).unwrap_err();
         assert!(matches!(err, CortexaDBStoreError::MissingEmbeddingOnContentChange(MemoryId(90))));
     }
 
@@ -1174,11 +1174,11 @@ mod tests {
         let original = MemoryEntry::new(MemoryId(91), "agent1".to_string(), b"same".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0])
             .with_importance(0.2);
-        store.insert_memory(original).unwrap();
+        store.add(original).unwrap();
 
         let updated = MemoryEntry::new(MemoryId(91), "agent1".to_string(), b"same".to_vec(), 1001)
             .with_importance(0.9);
-        store.insert_memory(updated).unwrap();
+        store.add(updated).unwrap();
 
         assert_eq!(store.indexed_embeddings(), 1);
     }
@@ -1192,11 +1192,11 @@ mod tests {
 
         let original = MemoryEntry::new(MemoryId(92), "agent1".to_string(), b"old".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0]);
-        store.insert_memory(original).unwrap();
+        store.add(original).unwrap();
 
         let changed = MemoryEntry::new(MemoryId(92), "agent1".to_string(), b"new".to_vec(), 1001)
             .with_embedding(vec![0.0, 1.0, 0.0]);
-        store.insert_memory(changed).unwrap();
+        store.add(changed).unwrap();
 
         assert_eq!(store.indexed_embeddings(), 1);
     }
@@ -1210,16 +1210,11 @@ mod tests {
 
         let original = MemoryEntry::new(MemoryId(99), "agent1".to_string(), b"old".to_vec(), 1000)
             .with_embedding(vec![1.0, 0.0, 0.0]);
-        store.insert_memory(original).unwrap();
+        store.add(original).unwrap();
 
         let before = store.snapshot();
         let err = store
-            .insert_memory(MemoryEntry::new(
-                MemoryId(99),
-                "agent1".to_string(),
-                b"new".to_vec(),
-                1001,
-            ))
+            .add(MemoryEntry::new(MemoryId(99), "agent1".to_string(), b"new".to_vec(), 1001))
             .unwrap_err();
         assert!(matches!(err, CortexaDBStoreError::MissingEmbeddingOnContentChange(MemoryId(99))));
 
@@ -1238,7 +1233,7 @@ mod tests {
         let store = Arc::new(CortexaDBStore::new(&wal, &seg, 3).unwrap());
 
         store
-            .insert_memory(
+            .add(
                 MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"one".to_vec(), 1000)
                     .with_embedding(vec![1.0, 0.0, 0.0]),
             )
@@ -1264,7 +1259,7 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         for id in 2..=11 {
             store
-                .insert_memory(
+                .add(
                     MemoryEntry::new(
                         MemoryId(id),
                         "agent1".to_string(),
@@ -1299,13 +1294,13 @@ mod tests {
         .unwrap();
 
         store
-            .insert_memory(
+            .add(
                 MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"one".to_vec(), 1000)
                     .with_embedding(vec![1.0, 0.0, 0.0]),
             )
             .unwrap();
         store
-            .insert_memory(
+            .add(
                 MemoryEntry::new(MemoryId(2), "agent1".to_string(), b"two".to_vec(), 1001)
                     .with_embedding(vec![1.0, 0.0, 0.0]),
             )
@@ -1327,7 +1322,7 @@ mod tests {
                 .unwrap();
 
         store
-            .insert_memory(
+            .add(
                 MemoryEntry::new(MemoryId(10), "agent1".to_string(), b"ten".to_vec(), 1010)
                     .with_embedding(vec![1.0, 0.0, 0.0]),
             )
@@ -1358,7 +1353,7 @@ mod tests {
             .unwrap();
 
             store
-                .insert_memory(
+                .add(
                     MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"a".to_vec(), 1000)
                         .with_embedding(vec![1.0, 0.0, 0.0]),
                 )
@@ -1403,7 +1398,7 @@ mod tests {
             let entry =
                 MemoryEntry::new(MemoryId(i), "agent_x".to_string(), b"data".to_vec(), 1000)
                     .with_embedding(vec![1.0, 0.0, 0.0]);
-            store.insert_memory(entry).unwrap();
+            store.add(entry).unwrap();
         }
 
         assert_eq!(store.indexed_embeddings(), 5);

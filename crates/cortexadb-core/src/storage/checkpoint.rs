@@ -106,7 +106,7 @@ mod tests {
 
         let mut state = StateMachine::new();
         state
-            .insert_memory(MemoryEntry::new(MemoryId(1), "ns".to_string(), b"hello".to_vec(), 1000))
+            .add(MemoryEntry::new(MemoryId(1), "ns".to_string(), b"hello".to_vec(), 1000))
             .unwrap();
 
         save_checkpoint(&path, &state, 42).unwrap();

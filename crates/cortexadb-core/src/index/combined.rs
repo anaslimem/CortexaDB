@@ -338,15 +338,15 @@ mod tests {
                 .index(MemoryId(i as u64), entry.embedding.clone().unwrap())
                 .unwrap();
 
-            sm.insert_memory(entry).unwrap();
+            sm.add(entry).unwrap();
         }
 
         // Create edges: 0→1, 0→2, 1→3, 2→3, 3→4
-        sm.add_edge(MemoryId(0), MemoryId(1), "points".to_string()).unwrap();
-        sm.add_edge(MemoryId(0), MemoryId(2), "refers".to_string()).unwrap();
-        sm.add_edge(MemoryId(1), MemoryId(3), "links".to_string()).unwrap();
-        sm.add_edge(MemoryId(2), MemoryId(3), "connects".to_string()).unwrap();
-        sm.add_edge(MemoryId(3), MemoryId(4), "leads".to_string()).unwrap();
+        sm.connect(MemoryId(0), MemoryId(1), "points".to_string()).unwrap();
+        sm.connect(MemoryId(0), MemoryId(2), "refers".to_string()).unwrap();
+        sm.connect(MemoryId(1), MemoryId(3), "links".to_string()).unwrap();
+        sm.connect(MemoryId(2), MemoryId(3), "connects".to_string()).unwrap();
+        sm.connect(MemoryId(3), MemoryId(4), "leads".to_string()).unwrap();
 
         (sm, layer)
     }
@@ -420,18 +420,18 @@ mod tests {
         let in_range = MemoryEntry::new(MemoryId(1), "test".to_string(), b"a".to_vec(), 1000)
             .with_embedding(vec![0.5, 0.5]);
         layer.vector_index_mut().index(MemoryId(1), in_range.embedding.clone().unwrap()).unwrap();
-        sm.insert_memory(in_range).unwrap();
+        sm.add(in_range).unwrap();
 
         // Out-of-range but highly similar vectors
         let out_1 = MemoryEntry::new(MemoryId(2), "test".to_string(), b"b".to_vec(), 9000)
             .with_embedding(vec![1.0, 0.0]);
         layer.vector_index_mut().index(MemoryId(2), out_1.embedding.clone().unwrap()).unwrap();
-        sm.insert_memory(out_1).unwrap();
+        sm.add(out_1).unwrap();
 
         let out_2 = MemoryEntry::new(MemoryId(3), "test".to_string(), b"c".to_vec(), 9000)
             .with_embedding(vec![0.99, 0.01]);
         layer.vector_index_mut().index(MemoryId(3), out_2.embedding.clone().unwrap()).unwrap();
-        sm.insert_memory(out_2).unwrap();
+        sm.add(out_2).unwrap();
 
         let results = layer.search_similar_in_range(&sm, &[1.0, 0.0], 1000, 1000, 1).unwrap();
 
@@ -456,14 +456,14 @@ mod tests {
         for entry in [&origin, &close_old, &mid, &far_new] {
             layer.vector_index_mut().index(entry.id, entry.embedding.clone().unwrap()).unwrap();
         }
-        sm.insert_memory(origin).unwrap();
-        sm.insert_memory(close_old).unwrap();
-        sm.insert_memory(mid).unwrap();
-        sm.insert_memory(far_new).unwrap();
+        sm.add(origin).unwrap();
+        sm.add(close_old).unwrap();
+        sm.add(mid).unwrap();
+        sm.add(far_new).unwrap();
 
-        sm.add_edge(MemoryId(0), MemoryId(1), "to".to_string()).unwrap();
-        sm.add_edge(MemoryId(0), MemoryId(3), "to".to_string()).unwrap();
-        sm.add_edge(MemoryId(3), MemoryId(2), "to".to_string()).unwrap();
+        sm.connect(MemoryId(0), MemoryId(1), "to".to_string()).unwrap();
+        sm.connect(MemoryId(0), MemoryId(3), "to".to_string()).unwrap();
+        sm.connect(MemoryId(3), MemoryId(2), "to".to_string()).unwrap();
 
         let results = layer
             .search_weighted_in_range_connected_to(
