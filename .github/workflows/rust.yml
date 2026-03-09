@@ -3,8 +3,24 @@ name: Rust
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - '**/*.rs'
+      - '**/*.py'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '**/Cargo.toml'
+      - 'crates/cortexadb-py/pyproject.toml'
+      - '.github/workflows/rust.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - '**/*.rs'
+      - '**/*.py'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '**/Cargo.toml'
+      - 'crates/cortexadb-py/pyproject.toml'
+      - '.github/workflows/rust.yml'
 
 env:
   CARGO_TERM_COLOR: always
