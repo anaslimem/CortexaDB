@@ -89,7 +89,7 @@ export default function HomePage() {
               <div className="p-3 rounded-xl bg-yellow-500/10 text-yellow-600 dark:text-yellow-500">
                 <Star className="w-6 h-6 fill-current" />
               </div>
-              <div className="text-3xl font-bold tracking-tight">24</div>
+              <div className="text-3xl font-bold tracking-tight">27</div>
               <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">GitHub Stars</div>
             </div>
             <div className="flex flex-col items-center text-center space-y-2">
