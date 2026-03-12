@@ -283,15 +283,15 @@ mod tests {
 
         // Create memories
         for i in 0..5 {
-            sm.insert_memory(create_entry(i)).unwrap();
+            sm.add(create_entry(i)).unwrap();
         }
 
         // Create edges: 0→1, 0→2, 1→3, 2→3, 3→4
-        sm.add_edge(MemoryId(0), MemoryId(1), "points".to_string()).unwrap();
-        sm.add_edge(MemoryId(0), MemoryId(2), "refers".to_string()).unwrap();
-        sm.add_edge(MemoryId(1), MemoryId(3), "links".to_string()).unwrap();
-        sm.add_edge(MemoryId(2), MemoryId(3), "connects".to_string()).unwrap();
-        sm.add_edge(MemoryId(3), MemoryId(4), "leads".to_string()).unwrap();
+        sm.connect(MemoryId(0), MemoryId(1), "points".to_string()).unwrap();
+        sm.connect(MemoryId(0), MemoryId(2), "refers".to_string()).unwrap();
+        sm.connect(MemoryId(1), MemoryId(3), "links".to_string()).unwrap();
+        sm.connect(MemoryId(2), MemoryId(3), "connects".to_string()).unwrap();
+        sm.connect(MemoryId(3), MemoryId(4), "leads".to_string()).unwrap();
 
         sm
     }
@@ -374,8 +374,8 @@ mod tests {
     #[test]
     fn test_find_path_unreachable() {
         let mut sm = StateMachine::new();
-        sm.insert_memory(create_entry(0)).unwrap();
-        sm.insert_memory(create_entry(1)).unwrap();
+        sm.add(create_entry(0)).unwrap();
+        sm.add(create_entry(1)).unwrap();
         // No edge between them
 
         let path = GraphIndex::find_path(&sm, MemoryId(0), MemoryId(1)).unwrap();
@@ -436,10 +436,10 @@ mod tests {
     #[test]
     fn test_dfs_does_not_revisit_start_in_cycle() {
         let mut sm = StateMachine::new();
-        sm.insert_memory(create_entry(0)).unwrap();
-        sm.insert_memory(create_entry(1)).unwrap();
-        sm.add_edge(MemoryId(0), MemoryId(1), "to".to_string()).unwrap();
-        sm.add_edge(MemoryId(1), MemoryId(0), "back".to_string()).unwrap();
+        sm.add(create_entry(0)).unwrap();
+        sm.add(create_entry(1)).unwrap();
+        sm.connect(MemoryId(0), MemoryId(1), "to".to_string()).unwrap();
+        sm.connect(MemoryId(1), MemoryId(0), "back".to_string()).unwrap();
 
         let paths = GraphIndex::dfs(&sm, MemoryId(0), 3).unwrap();
         assert!(paths.iter().all(|path| path.iter().filter(|&&id| id == MemoryId(0)).count() == 1));
@@ -448,16 +448,13 @@ mod tests {
     #[test]
     fn test_bfs_in_collection_filters_neighbors() {
         let mut sm = StateMachine::new();
-        sm.insert_memory(MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"a".to_vec(), 1000))
-            .unwrap();
-        sm.insert_memory(MemoryEntry::new(MemoryId(2), "agent1".to_string(), b"b".to_vec(), 1001))
-            .unwrap();
-        sm.insert_memory(MemoryEntry::new(MemoryId(3), "agent2".to_string(), b"c".to_vec(), 1002))
-            .unwrap();
+        sm.add(MemoryEntry::new(MemoryId(1), "agent1".to_string(), b"a".to_vec(), 1000)).unwrap();
+        sm.add(MemoryEntry::new(MemoryId(2), "agent1".to_string(), b"b".to_vec(), 1001)).unwrap();
+        sm.add(MemoryEntry::new(MemoryId(3), "agent2".to_string(), b"c".to_vec(), 1002)).unwrap();
 
-        sm.add_edge(MemoryId(1), MemoryId(2), "ok".to_string()).unwrap();
+        sm.connect(MemoryId(1), MemoryId(2), "ok".to_string()).unwrap();
         // Cross collection should be rejected by state machine, so no leakage via edges.
-        assert!(sm.add_edge(MemoryId(2), MemoryId(3), "bad".to_string()).is_err());
+        assert!(sm.connect(MemoryId(2), MemoryId(3), "bad".to_string()).is_err());
 
         let scoped = GraphIndex::bfs_in_collection(&sm, MemoryId(1), 3, "agent1").unwrap();
         assert!(scoped.contains_key(&MemoryId(1)));

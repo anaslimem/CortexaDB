@@ -297,7 +297,7 @@ impl CortexaDB {
             entry.metadata = meta;
         }
 
-        self.inner.insert_memory(entry)?;
+        self.inner.add(entry)?;
         Ok(id.0)
     }
 
@@ -318,7 +318,7 @@ impl CortexaDB {
             entry.metadata = meta;
         }
 
-        self.inner.insert_memory(entry)?;
+        self.inner.add(entry)?;
         Ok(id.0)
     }
 
@@ -341,7 +341,7 @@ impl CortexaDB {
             entries.push(entry);
         }
 
-        self.inner.insert_memories_batch(entries)?;
+        self.inner.add_batch(entries)?;
         Ok(ids)
     }
 
@@ -453,7 +453,7 @@ impl CortexaDB {
     /// Returns [`CortexaDBError`] if either memory ID does not exist or the
     /// write-ahead log fails.
     pub fn connect(&self, from: u64, to: u64, relation: &str) -> Result<()> {
-        self.inner.add_edge(MemoryId(from), MemoryId(to), relation.to_string())?;
+        self.inner.connect(MemoryId(from), MemoryId(to), relation.to_string())?;
         Ok(())
     }
 

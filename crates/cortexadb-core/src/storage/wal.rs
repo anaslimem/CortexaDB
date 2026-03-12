@@ -319,7 +319,7 @@ mod tests {
                 format!("content_{}", i).into_bytes(),
                 1000 + i as u64,
             );
-            let cmd = Command::InsertMemory(entry);
+            let cmd = Command::Add(entry);
             let id = wal.append(&cmd).unwrap();
             cmd_ids.push(id);
         }
@@ -350,7 +350,7 @@ mod tests {
                 b"data".to_vec(),
                 1000,
             );
-            wal.append(&Command::InsertMemory(entry)).unwrap();
+            wal.append(&Command::Add(entry)).unwrap();
         }
         wal.fsync().unwrap();
 
@@ -374,7 +374,7 @@ mod tests {
             b"content".to_vec(),
             1000,
         );
-        wal.append(&Command::InsertMemory(entry)).unwrap();
+        wal.append(&Command::Add(entry)).unwrap();
         wal.fsync().unwrap();
         drop(wal);
 
@@ -406,7 +406,7 @@ mod tests {
                     b"data".to_vec(),
                     1000,
                 );
-                wal.append(&Command::InsertMemory(entry)).unwrap();
+                wal.append(&Command::Add(entry)).unwrap();
             }
             wal.fsync().unwrap();
         }
@@ -423,7 +423,7 @@ mod tests {
                     b"data".to_vec(),
                     1000,
                 );
-                wal.append(&Command::InsertMemory(entry)).unwrap();
+                wal.append(&Command::Add(entry)).unwrap();
             }
             wal.fsync().unwrap();
         }
@@ -446,7 +446,7 @@ mod tests {
                 format!("data_{i}").into_bytes(),
                 1000 + i as u64,
             );
-            wal.append(&Command::InsertMemory(entry)).unwrap();
+            wal.append(&Command::Add(entry)).unwrap();
         }
         wal.fsync().unwrap();
         drop(wal);
@@ -478,8 +478,8 @@ mod tests {
         )
         .with_importance(0.9);
 
-        let cmd1 = Command::InsertMemory(entry);
-        let cmd2 = Command::AddEdge {
+        let cmd1 = Command::Add(entry);
+        let cmd2 = Command::Connect {
             from: crate::core::memory_entry::MemoryId(1),
             to: crate::core::memory_entry::MemoryId(2),
             relation: "refers_to".to_string(),
@@ -497,12 +497,12 @@ mod tests {
 
         // Verify each command roundtripped correctly
         match &recovered[0].1 {
-            Command::InsertMemory(e) => assert_eq!(e.id, crate::core::memory_entry::MemoryId(1)),
+            Command::Add(e) => assert_eq!(e.id, crate::core::memory_entry::MemoryId(1)),
             _ => panic!("Wrong command type"),
         }
 
         match &recovered[1].1 {
-            Command::AddEdge { from, to, relation } => {
+            Command::Connect { from, to, relation } => {
                 assert_eq!(*from, crate::core::memory_entry::MemoryId(1));
                 assert_eq!(*to, crate::core::memory_entry::MemoryId(2));
                 assert_eq!(relation, "refers_to");

@@ -373,11 +373,11 @@ mod tests {
                 .index_in_collection(&entry.collection, entry.id, entry.embedding.clone().unwrap())
                 .unwrap();
         }
-        sm.insert_memory(a).unwrap();
-        sm.insert_memory(b).unwrap();
-        sm.insert_memory(c).unwrap();
+        sm.add(a).unwrap();
+        sm.add(b).unwrap();
+        sm.add(c).unwrap();
 
-        sm.add_edge(MemoryId(1), MemoryId(2), "linked".to_string()).unwrap();
+        sm.connect(MemoryId(1), MemoryId(2), "linked".to_string()).unwrap();
 
         (sm, layer, embedder)
     }

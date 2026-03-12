@@ -378,9 +378,9 @@ mod tests {
         for entry in [&a, &b] {
             layer.vector_index_mut().index(entry.id, entry.embedding.clone().unwrap()).unwrap();
         }
-        sm.insert_memory(a).unwrap();
-        sm.insert_memory(b).unwrap();
-        sm.add_edge(MemoryId(1), MemoryId(2), "next".to_string()).unwrap();
+        sm.add(a).unwrap();
+        sm.add(b).unwrap();
+        sm.connect(MemoryId(1), MemoryId(2), "next".to_string()).unwrap();
 
         (sm, layer, TestEmbedder)
     }
