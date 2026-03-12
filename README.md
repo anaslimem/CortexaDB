@@ -13,8 +13,11 @@
   <a href="#current-status"><img src="https://img.shields.io/badge/Status-Beta-brightgreen.svg" alt="Status" /></a>
   <a href="https://github.com/anaslimem/CortexaDB/releases"><img src="https://img.shields.io/badge/Version-0.1.8-blue.svg" alt="Version" /></a>
   <a href="https://pepy.tech/projects/cortexadb"><img src="https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads" alt="Downloads" /></a>
+  <a href="https://cortexa-db.vercel.app"><img src="https://img.shields.io/badge/Docs-cortexa--db.vercel.app-purple.svg" alt="Documentation" /></a>
 </p>
 
+
+📖 **[Read the full documentation](https://cortexa-db.vercel.app)**
 
 **CortexaDB** is a lightweight, high-performance embedded database built in Rust, specifically designed to serve as the long-term memory for AI agents. It provides a single-file, zero-dependency storage solution that combines the simplicity of SQLite with the semantic power of vector search, graph relationships, and temporal indexing.
 
