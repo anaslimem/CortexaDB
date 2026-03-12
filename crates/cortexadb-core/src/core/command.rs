@@ -38,7 +38,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_insert_command() {
+    fn test_add_command() {
         let entry = MemoryEntry::new(MemoryId(1), "test".to_string(), b"data".to_vec(), 1000);
         let cmd = Command::add(entry.clone());
         match cmd {
