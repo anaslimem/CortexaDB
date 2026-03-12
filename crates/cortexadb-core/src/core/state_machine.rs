@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_and_disconnects() {
+    fn test_connect_and_disconnect() {
         let mut sm = StateMachine::new();
         sm.add(create_test_entry(1, "default", 1000)).unwrap();
         sm.add(create_test_entry(2, "default", 1000)).unwrap();
