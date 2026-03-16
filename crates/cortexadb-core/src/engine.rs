@@ -27,6 +27,8 @@ pub enum EngineError {
     CheckpointWalGap { checkpoint_last_applied: u64, wal_highest: Option<u64> },
     #[error("Engine not recovered properly")]
     NotRecovered,
+    #[error("Lock was poisoned during {0}")]
+    LockPoisoned(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

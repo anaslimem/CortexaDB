@@ -53,8 +53,11 @@ fn intent_anchor_cache() -> &'static Mutex<HashMap<usize, IntentAnchors>> {
 
 pub(crate) fn clear_intent_anchor_cache() {
     let cache = intent_anchor_cache();
-    let mut guard = cache.lock().expect("intent anchor cache lock poisoned");
-    guard.clear();
+    if let Ok(mut guard) = cache.lock() {
+        guard.clear();
+    } else {
+        log::warn!("intent anchor cache lock poisoned, unable to clear");
+    }
 }
 
 fn load_or_build_intent_anchors(
@@ -62,11 +65,12 @@ fn load_or_build_intent_anchors(
     dim: usize,
 ) -> std::result::Result<IntentAnchors, String> {
     let cache = intent_anchor_cache();
-    {
-        let guard = cache.lock().expect("intent anchor cache lock poisoned");
+    if let Ok(guard) = cache.lock() {
         if let Some(found) = guard.get(&dim) {
             return Ok(found.clone());
         }
+    } else {
+        log::warn!("intent anchor cache lock poisoned, rebuilding anchor from scratch");
     }
 
     let policy = get_intent_policy();
@@ -77,8 +81,9 @@ fn load_or_build_intent_anchors(
         return Err("intent anchor embedding dimension mismatch".to_string());
     }
     let anchors = IntentAnchors { semantic, recency, graph };
-    let mut guard = cache.lock().expect("intent anchor cache lock poisoned");
-    guard.insert(dim, anchors.clone());
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(dim, anchors.clone());
+    }
     Ok(anchors)
 }
 

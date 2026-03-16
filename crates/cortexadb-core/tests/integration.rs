@@ -61,8 +61,8 @@ fn test_recover_after_drop_restores_entries() {
 
     // Reopen: should recover from WAL
     let db = open_db(&path);
-    assert_eq!(db.stats().entries, 3, "all entries must survive reopen");
-    assert_eq!(db.stats().indexed_embeddings, 3);
+    assert_eq!(db.stats().unwrap().entries, 3, "all entries must survive reopen");
+    assert_eq!(db.stats().unwrap().indexed_embeddings, 3);
 
     for id in &expected_ids {
         db.get_memory(*id).unwrap_or_else(|_| panic!("memory {} must survive recovery", id));
@@ -110,7 +110,7 @@ fn test_checkpoint_recovery_preserves_all_entries() {
     }
 
     let db = open_db(&path);
-    assert_eq!(db.stats().entries, 3, "all 3 entries must survive checkpoint+recovery");
+    assert_eq!(db.stats().unwrap().entries, 3, "all 3 entries must survive checkpoint+recovery");
     for id in &all_ids {
         db.get_memory(*id)
             .unwrap_or_else(|_| panic!("memory {} missing after checkpoint recovery", id));
@@ -135,7 +135,7 @@ fn test_double_checkpoint_recovery() {
     }
 
     let db = open_db(&path);
-    assert_eq!(db.stats().entries, 3, "all entries must survive double checkpoint");
+    assert_eq!(db.stats().unwrap().entries, 3, "all entries must survive double checkpoint");
 }
 
 // ---------------------------------------------------------------------------
@@ -154,11 +154,11 @@ fn test_delete_persists_across_recovery() {
         deleted_id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
         kept_id = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         db.delete(deleted_id).unwrap();
-        assert_eq!(db.stats().entries, 1);
+        assert_eq!(db.stats().unwrap().entries, 1);
     }
 
     let db = open_db(&path);
-    assert_eq!(db.stats().entries, 1, "deletion must persist across recovery");
+    assert_eq!(db.stats().unwrap().entries, 1, "deletion must persist across recovery");
     assert!(db.get_memory(deleted_id).is_err(), "deleted entry must not be recoverable");
     assert!(db.get_memory(kept_id).is_ok(), "non-deleted entry must survive");
 }
@@ -180,7 +180,7 @@ fn test_delete_then_checkpoint_recovery() {
     }
 
     let db = open_db(&path);
-    assert_eq!(db.stats().entries, 1);
+    assert_eq!(db.stats().unwrap().entries, 1);
     assert!(db.get_memory(deleted_id).is_err(), "deleted entry must not survive checkpoint");
 }
 
@@ -279,7 +279,7 @@ fn test_capacity_eviction_keeps_max_entries() {
     db.add(vec![0.0, 0.0, 1.0], None).unwrap();
 
     // After inserting 3 entries with max_entries=2, one should have been evicted.
-    assert_eq!(db.stats().entries, 2, "max_entries=2 must evict oldest entry");
+    assert_eq!(db.stats().unwrap().entries, 2, "max_entries=2 must evict oldest entry");
 }
 
 // ---------------------------------------------------------------------------
