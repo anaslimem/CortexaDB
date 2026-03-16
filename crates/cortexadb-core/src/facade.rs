@@ -330,7 +330,7 @@ impl CortexaDB {
 
         for rec in records {
             let id = MemoryId(self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-            let mut entry = MemoryEntry::new(id.clone(), rec.collection, rec.content, ts);
+            let mut entry = MemoryEntry::new(id, rec.collection, rec.content, ts);
             if let Some(emb) = rec.embedding {
                 entry = entry.with_embedding(emb);
             }
