@@ -4,16 +4,22 @@
 //! It wraps [`CortexaDBStore`] and hides planner/engine/index details behind
 //! five core operations: `open`, `add`, `search`, `connect`, `compact`.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use crate::core::memory_entry::{MemoryEntry, MemoryId};
-use crate::core::state_machine::StateMachineError;
-use crate::engine::{CapacityPolicy, SyncPolicy};
-use crate::index::IndexMode;
-use crate::query::hybrid::{QueryEmbedder, QueryOptions};
-use crate::store::{CheckpointPolicy, CortexaDBStore, CortexaDBStoreError};
+use crate::{
+    core::{
+        memory_entry::{MemoryEntry, MemoryId},
+        state_machine::StateMachineError,
+    },
+    engine::{CapacityPolicy, SyncPolicy},
+    index::IndexMode,
+    query::hybrid::{QueryEmbedder, QueryOptions},
+    store::{CheckpointPolicy, CortexaDBStore, CortexaDBStoreError},
+};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -512,8 +518,9 @@ impl CortexaDB {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn test_open_add_search() {

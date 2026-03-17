@@ -4,16 +4,18 @@
 
 use std::collections::HashMap;
 
-use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
-use std::path::{Path, PathBuf};
-
-use cortexadb_core::chunker;
-use cortexadb_core::engine::{CapacityPolicy, SyncPolicy};
-use cortexadb_core::facade;
-use cortexadb_core::store::CheckpointPolicy;
+use cortexadb_core::{
+    chunker,
+    engine::{CapacityPolicy, SyncPolicy},
+    facade,
+    store::CheckpointPolicy,
+};
+use pyo3::{
+    create_exception,
+    exceptions::{PyException, PyRuntimeError, PyValueError},
+    prelude::*,
+    types::PyDict,
+};
 
 // ---------------------------------------------------------------------------
 // Custom exception

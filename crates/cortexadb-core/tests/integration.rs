@@ -260,9 +260,11 @@ fn test_metadata_persists_across_recovery() {
 
 #[test]
 fn test_capacity_eviction_keeps_max_entries() {
-    use cortexadb_core::engine::{CapacityPolicy, SyncPolicy};
-    use cortexadb_core::index::IndexMode;
-    use cortexadb_core::store::CheckpointPolicy;
+    use cortexadb_core::{
+        engine::{CapacityPolicy, SyncPolicy},
+        index::IndexMode,
+        store::CheckpointPolicy,
+    };
 
     let dir = TempDir::new().unwrap();
     let config = CortexaDBConfig {
@@ -288,10 +290,14 @@ fn test_capacity_eviction_keeps_max_entries() {
 
 #[test]
 fn test_hnsw_recovery_sync() {
-    use cortexadb_core::engine::SyncPolicy;
-    use cortexadb_core::index::hnsw::{HnswConfig, MetricKind};
-    use cortexadb_core::index::IndexMode;
-    use cortexadb_core::store::CheckpointPolicy;
+    use cortexadb_core::{
+        engine::SyncPolicy,
+        index::{
+            hnsw::{HnswConfig, MetricKind},
+            IndexMode,
+        },
+        store::CheckpointPolicy,
+    };
 
     let dir = TempDir::new().unwrap();
     let config = CortexaDBConfig {

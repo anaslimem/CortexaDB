@@ -1,27 +1,34 @@
-use arc_swap::ArcSwap;
-use std::collections::HashSet;
-use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashSet,
+    path::Path,
+    sync::{Arc, Condvar, Mutex},
+    thread::JoinHandle,
+    time::{Duration, Instant},
+};
 
+use arc_swap::ArcSwap;
 use thiserror::Error;
 
-use crate::core::command::Command;
-use crate::core::memory_entry::{MemoryEntry, MemoryId};
-use crate::core::state_machine::StateMachine;
-use crate::engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy};
-use crate::index::vector::VectorBackendMode;
-use crate::index::IndexLayer;
-use crate::query::{
-    IntentAnchors, QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan,
-    QueryPlanner, StageTrace,
+use crate::{
+    core::{
+        command::Command,
+        memory_entry::{MemoryEntry, MemoryId},
+        state_machine::StateMachine,
+    },
+    engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy},
+    index::{vector::VectorBackendMode, IndexLayer},
+    query::{
+        IntentAnchors, QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan,
+        QueryPlanner, StageTrace,
+    },
+    storage::{
+        checkpoint::{
+            checkpoint_path_from_wal, load_checkpoint, save_checkpoint, LoadedCheckpoint,
+        },
+        compaction::CompactionReport,
+        wal::{CommandId, WriteAheadLog},
+    },
 };
-use crate::storage::checkpoint::{
-    checkpoint_path_from_wal, load_checkpoint, save_checkpoint, LoadedCheckpoint,
-};
-use crate::storage::compaction::CompactionReport;
-use crate::storage::wal::{CommandId, WriteAheadLog};
 
 #[derive(Error, Debug)]
 pub enum CortexaDBStoreError {
@@ -1103,11 +1110,11 @@ enum WriteOp {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
+    use std::{sync::Arc, thread, time::Duration};
+
     use tempfile::TempDir;
+
+    use super::*;
 
     struct TestEmbedder;
     impl QueryEmbedder for TestEmbedder {

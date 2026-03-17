@@ -1,14 +1,18 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Mutex, OnceLock},
+    time::Instant,
+};
 
-use crate::core::memory_entry::MemoryId;
-use crate::core::state_machine::StateMachine;
-use crate::index::combined::IndexLayer;
-use crate::index::graph::GraphIndex;
-use crate::query::hybrid::{HybridQueryError, QueryEmbedder, QueryHit};
-use crate::query::intent::get_intent_policy;
-use crate::query::planner::{ExecutionPath, QueryPlan, QueryPlanner};
+use crate::{
+    core::{memory_entry::MemoryId, state_machine::StateMachine},
+    index::{combined::IndexLayer, graph::GraphIndex},
+    query::{
+        hybrid::{HybridQueryError, QueryEmbedder, QueryHit},
+        intent::get_intent_policy,
+        planner::{ExecutionPath, QueryPlan, QueryPlanner},
+    },
+};
 
 pub type Result<T> = std::result::Result<T, HybridQueryError>;
 
@@ -359,9 +363,13 @@ fn build_ranked_hits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::memory_entry::{MemoryEntry, MemoryId};
-    use crate::query::hybrid::{GraphExpansionOptions, QueryOptions};
-    use crate::query::planner::{ExecutionPath, QueryPlanner};
+    use crate::{
+        core::memory_entry::{MemoryEntry, MemoryId},
+        query::{
+            hybrid::{GraphExpansionOptions, QueryOptions},
+            planner::{ExecutionPath, QueryPlanner},
+        },
+    };
 
     struct TestEmbedder;
     impl QueryEmbedder for TestEmbedder {

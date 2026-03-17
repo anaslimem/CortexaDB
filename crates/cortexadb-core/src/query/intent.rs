@@ -1,7 +1,5 @@
 use std::sync::{OnceLock, RwLock};
 
-use crate::query::executor;
-
 #[derive(Debug, Clone)]
 pub struct IntentPolicy {
     pub semantic_anchor_text: String,

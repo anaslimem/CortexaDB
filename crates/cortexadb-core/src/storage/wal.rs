@@ -1,11 +1,16 @@
+use std::{
+    fs::{File, OpenOptions},
+    io::{BufReader, BufWriter, Read, Write},
+    path::{Path, PathBuf},
+};
+
 use crc::Crc;
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::core::command::Command;
-use crate::storage::serialization::{deserialize_versioned, serialize_versioned};
+use crate::{
+    core::command::Command,
+    storage::serialization::{deserialize_versioned, serialize_versioned},
+};
 
 #[derive(Error, Debug)]
 pub enum WalError {
@@ -298,10 +303,12 @@ impl WriteAheadLog {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Seek, SeekFrom};
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::core::memory_entry::MemoryEntry;
-    use std::io::{Seek, SeekFrom};
-    use tempfile::TempDir;
 
     #[test]
     fn test_wal_append_and_read() {

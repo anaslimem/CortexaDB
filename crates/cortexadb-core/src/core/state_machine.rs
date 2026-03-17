@@ -1,9 +1,12 @@
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::command::Command;
-use super::memory_entry::{MemoryEntry, MemoryId};
+use super::{
+    command::Command,
+    memory_entry::{MemoryEntry, MemoryId},
+};
 
 #[derive(Error, Debug)]
 pub enum StateMachineError {

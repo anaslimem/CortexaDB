@@ -1,12 +1,17 @@
+use std::{
+    collections::HashMap,
+    fs::{File, OpenOptions},
+    io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+};
+
 use crc::Crc;
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::core::memory_entry::{MemoryEntry, MemoryId};
-use crate::storage::serialization::{deserialize_versioned, serialize_versioned};
+use crate::{
+    core::memory_entry::{MemoryEntry, MemoryId},
+    storage::serialization::{deserialize_versioned, serialize_versioned},
+};
 
 #[derive(Error, Debug)]
 pub enum SegmentError {
@@ -442,8 +447,9 @@ impl SegmentStorage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
+
+    use super::*;
 
     fn create_test_entry(id: u64) -> MemoryEntry {
         MemoryEntry::new(

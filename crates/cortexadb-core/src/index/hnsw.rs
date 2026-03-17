@@ -1,5 +1,8 @@
-use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::{
+    path::Path,
+    sync::{Arc, RwLock},
+};
+
 use thiserror::Error;
 
 use crate::core::memory_entry::MemoryId;
