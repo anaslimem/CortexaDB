@@ -4,15 +4,18 @@
 
 use std::collections::HashMap;
 
-use pyo3::create_exception;
-use pyo3::exceptions::PyException;
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
-
-use cortexadb_core::chunker;
-use cortexadb_core::engine::{CapacityPolicy, SyncPolicy};
-use cortexadb_core::facade;
-use cortexadb_core::store::CheckpointPolicy;
+use cortexadb_core::{
+    chunker,
+    engine::{CapacityPolicy, SyncPolicy},
+    facade,
+    store::CheckpointPolicy,
+};
+use pyo3::{
+    create_exception,
+    exceptions::{PyException, PyRuntimeError, PyValueError},
+    prelude::*,
+    types::PyDict,
+};
 
 // ---------------------------------------------------------------------------
 // Custom exception
@@ -355,10 +358,10 @@ impl PyCortexaDB {
         let db = facade::CortexaDB::open_with_config(path, config).map_err(map_cortexadb_err)?;
 
         // Validate dimension matches existing data.
-        let stats = db.stats();
+        let stats = db.stats().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         if stats.entries > 0 && stats.vector_dimension != dimension {
-            return Err(CortexaDBConfigError::new_err(format!(
-                "dimension mismatch: database has dimension={}, but open() was called with dimension={}",
+            return Err(PyValueError::new_err(format!(
+                "Database initialized with dimension {} but opened with dimension {}",
                 stats.vector_dimension, dimension,
             )));
         }
@@ -625,27 +628,27 @@ impl PyCortexaDB {
     /// Returns:
     ///     Stats: Current database statistics.
     #[pyo3(text_signature = "(self)")]
-    fn stats(&self) -> PyStats {
-        let s = self.inner.stats();
-        PyStats {
+    fn stats(&self) -> PyResult<PyStats> {
+        let s = self.inner.stats().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyStats {
             entries: s.entries,
             indexed_embeddings: s.indexed_embeddings,
             wal_length: s.wal_length,
             vector_dimension: s.vector_dimension,
             storage_version: s.storage_version,
-        }
+        })
     }
 
-    fn __repr__(&self) -> String {
-        let s = self.inner.stats();
-        format!(
-            "CortexaDB(entries={}, dimension={}, indexed={})",
+    fn __repr__(&self) -> PyResult<String> {
+        let s = self.inner.stats().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        Ok(format!(
+            "CortexaDB(entries={}, dim={}, indexed={})",
             s.entries, self.dimension, s.indexed_embeddings,
-        )
+        ))
     }
 
     fn __len__(&self) -> usize {
-        self.inner.stats().entries
+        self.inner.stats().map(|s| s.entries).unwrap_or(0)
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {

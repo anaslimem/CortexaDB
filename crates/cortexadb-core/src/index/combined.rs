@@ -1,12 +1,16 @@
 use std::collections::{HashMap, HashSet};
+
 use thiserror::Error;
 
-use crate::core::memory_entry::MemoryId;
-use crate::core::state_machine::StateMachine;
-use crate::index::graph::GraphIndex;
-use crate::index::hnsw::{HnswBackend, HnswConfig};
-use crate::index::temporal::TemporalIndex;
-use crate::index::vector::{VectorBackendMode, VectorIndex};
+use crate::{
+    core::{memory_entry::MemoryId, state_machine::StateMachine},
+    index::{
+        graph::GraphIndex,
+        hnsw::{HnswBackend, HnswConfig},
+        temporal::TemporalIndex,
+        vector::{VectorBackendMode, VectorIndex},
+    },
+};
 
 #[derive(Error, Debug)]
 pub enum CombinedError {

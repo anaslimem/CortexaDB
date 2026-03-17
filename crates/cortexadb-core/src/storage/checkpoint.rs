@@ -1,6 +1,8 @@
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::{
+    fs::OpenOptions,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -95,9 +97,10 @@ pub fn load_checkpoint<P: AsRef<Path>>(path: P) -> Result<Option<LoadedCheckpoin
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::core::memory_entry::{MemoryEntry, MemoryId};
-    use tempfile::TempDir;
 
     #[test]
     fn test_checkpoint_roundtrip() {

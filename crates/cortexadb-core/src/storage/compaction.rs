@@ -1,5 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use thiserror::Error;
 
@@ -78,9 +80,10 @@ pub fn temp_compaction_paths(base: &Path, suffix: &str) -> (PathBuf, PathBuf) {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::core::memory_entry::{MemoryEntry, MemoryId};
-    use tempfile::TempDir;
 
     #[test]
     fn test_compact_segment_dir_noop_when_not_compactable() {

@@ -4,16 +4,22 @@
 //! It wraps [`CortexaDBStore`] and hides planner/engine/index details behind
 //! five core operations: `open`, `add`, `search`, `connect`, `compact`.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use crate::core::memory_entry::{MemoryEntry, MemoryId};
-use crate::core::state_machine::StateMachineError;
-use crate::engine::{CapacityPolicy, SyncPolicy};
-use crate::index::IndexMode;
-use crate::query::hybrid::{QueryEmbedder, QueryOptions};
-use crate::store::{CheckpointPolicy, CortexaDBStore, CortexaDBStoreError};
+use crate::{
+    core::{
+        memory_entry::{MemoryEntry, MemoryId},
+        state_machine::StateMachineError,
+    },
+    engine::{CapacityPolicy, SyncPolicy},
+    index::IndexMode,
+    query::hybrid::{QueryEmbedder, QueryOptions},
+    store::{CheckpointPolicy, CortexaDBStore, CortexaDBStoreError},
+};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -490,14 +496,14 @@ impl CortexaDB {
     }
 
     /// Get database statistics.
-    pub fn stats(&self) -> Stats {
-        Stats {
+    pub fn stats(&self) -> Result<Stats> {
+        Ok(Stats {
             entries: self.inner.state_machine().len(),
             indexed_embeddings: self.inner.indexed_embeddings(),
-            wal_length: self.inner.wal_len(),
+            wal_length: self.inner.wal_len()?,
             vector_dimension: self.inner.vector_dimension(),
             storage_version: 1,
-        }
+        })
     }
 
     /// Access the underlying `CortexaDBStore` for advanced operations.
@@ -512,8 +518,9 @@ impl CortexaDB {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn test_open_add_search() {
@@ -540,7 +547,7 @@ mod tests {
         let id2 = db.add(vec![0.0, 1.0, 0.0], None).unwrap();
         db.connect(id1, id2, "related").unwrap();
 
-        let stats = db.stats();
+        let stats = db.stats().unwrap();
         assert_eq!(stats.entries, 2);
         assert_eq!(stats.indexed_embeddings, 2);
         assert_eq!(stats.vector_dimension, 3);
@@ -560,7 +567,7 @@ mod tests {
         // Reopen — should recover from WAL.
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
         let stats = db.stats();
-        assert_eq!(stats.entries, 2);
+        assert_eq!(stats.unwrap().entries, 2);
 
         let hits = db.search(vec![1.0, 0.0, 0.0], 5, None).unwrap();
         assert!(!hits.is_empty());
@@ -591,7 +598,7 @@ mod tests {
         }
 
         let db = CortexaDB::open_with_config(path.to_str().unwrap(), config).unwrap();
-        let stats = db.stats();
+        let stats = db.stats().unwrap();
         assert_eq!(stats.entries, 3);
     }
 
@@ -632,7 +639,7 @@ mod tests {
         let _id2 = db.add_in_collection("agent_c", vec![0.0, 0.0, 1.0], None).unwrap();
 
         let stats = db.stats();
-        assert_eq!(stats.entries, 2);
+        assert_eq!(stats.unwrap().entries, 2);
 
         let m1 = db.get_memory(id1).unwrap();
         assert_eq!(m1.collection, "agent_b");
@@ -645,10 +652,10 @@ mod tests {
         let db = CortexaDB::open(path.to_str().unwrap(), 3).unwrap();
 
         let id = db.add(vec![1.0, 0.0, 0.0], None).unwrap();
-        assert_eq!(db.stats().entries, 1);
+        assert_eq!(db.stats().unwrap().entries, 1);
 
         db.delete(id).unwrap();
-        assert_eq!(db.stats().entries, 0, "entry count should be 0 after delete");
+        assert_eq!(db.stats().unwrap().entries, 0, "entry count should be 0 after delete");
     }
 
     #[test]

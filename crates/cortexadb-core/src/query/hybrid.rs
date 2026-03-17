@@ -2,10 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
-use crate::core::memory_entry::MemoryId;
-use crate::core::state_machine::StateMachine;
-use crate::index::combined::IndexLayer;
-use crate::index::graph::GraphIndex;
+use crate::{
+    core::{memory_entry::MemoryId, state_machine::StateMachine},
+    index::{combined::IndexLayer, graph::GraphIndex},
+};
 
 #[derive(Error, Debug)]
 pub enum HybridQueryError {

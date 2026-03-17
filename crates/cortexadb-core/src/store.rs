@@ -1,27 +1,34 @@
-use arc_swap::ArcSwap;
-use std::collections::HashSet;
-use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashSet,
+    path::Path,
+    sync::{Arc, Condvar, Mutex},
+    thread::JoinHandle,
+    time::{Duration, Instant},
+};
 
+use arc_swap::ArcSwap;
 use thiserror::Error;
 
-use crate::core::command::Command;
-use crate::core::memory_entry::{MemoryEntry, MemoryId};
-use crate::core::state_machine::StateMachine;
-use crate::engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy};
-use crate::index::vector::VectorBackendMode;
-use crate::index::IndexLayer;
-use crate::query::{
-    IntentAnchors, QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan,
-    QueryPlanner, StageTrace,
+use crate::{
+    core::{
+        command::Command,
+        memory_entry::{MemoryEntry, MemoryId},
+        state_machine::StateMachine,
+    },
+    engine::{CapacityPolicy, Engine, EvictionReport, SyncPolicy},
+    index::{vector::VectorBackendMode, IndexLayer},
+    query::{
+        IntentAnchors, QueryEmbedder, QueryExecution, QueryExecutor, QueryOptions, QueryPlan,
+        QueryPlanner, StageTrace,
+    },
+    storage::{
+        checkpoint::{
+            checkpoint_path_from_wal, load_checkpoint, save_checkpoint, LoadedCheckpoint,
+        },
+        compaction::CompactionReport,
+        wal::{CommandId, WriteAheadLog},
+    },
 };
-use crate::storage::checkpoint::{
-    checkpoint_path_from_wal, load_checkpoint, save_checkpoint, LoadedCheckpoint,
-};
-use crate::storage::compaction::CompactionReport;
-use crate::storage::wal::{CommandId, WriteAheadLog};
 
 #[derive(Error, Debug)]
 pub enum CortexaDBStoreError {
@@ -39,6 +46,8 @@ pub enum CortexaDBStoreError {
     InvariantViolation(String),
     #[error("Embedding required when content changes for memory id {0:?}")]
     MissingEmbeddingOnContentChange(MemoryId),
+    #[error("Lock was poisoned during {0}")]
+    LockPoisoned(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, CortexaDBStoreError>;
@@ -108,6 +117,12 @@ pub struct CortexaDBStore {
     checkpoint_control: Arc<(Mutex<CheckpointRuntime>, Condvar)>,
     checkpoint_thread: Option<JoinHandle<()>>,
     capacity_policy: CapacityPolicy,
+}
+
+fn writer_lock<'a>(
+    writer: &'a std::sync::Mutex<WriteState>,
+) -> Result<std::sync::MutexGuard<'a, WriteState>> {
+    writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))
 }
 
 impl CortexaDBStore {
@@ -335,7 +350,8 @@ impl CortexaDBStore {
     }
 
     pub fn flush(&self) -> Result<()> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         writer.engine.flush()?;
         self.clear_pending_sync_state();
         Ok(())
@@ -343,7 +359,8 @@ impl CortexaDBStore {
 
     pub fn checkpoint_now(&self) -> Result<()> {
         let snapshot = self.snapshot();
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         let last_applied_id = writer.engine.last_applied_id().0;
         save_checkpoint(&self.checkpoint_path, snapshot.state_machine(), last_applied_id)?;
 
@@ -425,7 +442,13 @@ impl CortexaDBStore {
                 drop(runtime);
 
                 if should_flush {
-                    let mut write_state = writer.lock().expect("writer lock poisoned");
+                    let mut write_state = match writer.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            log::error!("cortexadb sync manager flush error (lock poisoned): {e}");
+                            continue;
+                        }
+                    };
                     if let Err(err) = write_state.engine.flush_buffers() {
                         log::error!("cortexadb sync manager flush_buffers error: {err}");
                         continue;
@@ -509,8 +532,13 @@ impl CortexaDBStore {
                 drop(runtime);
 
                 let read_snapshot = snapshot.load_full();
-                let last_applied_id =
-                    writer.lock().expect("writer lock poisoned").engine.last_applied_id().0;
+                let last_applied_id = match writer.lock() {
+                    Ok(guard) => guard.engine.last_applied_id().0,
+                    Err(e) => {
+                        log::error!("cortexadb checkpoint error (lock poisoned): {e}");
+                        continue;
+                    }
+                };
 
                 if let Err(err) = save_checkpoint(
                     &checkpoint_path,
@@ -520,20 +548,31 @@ impl CortexaDBStore {
                     log::error!("cortexadb checkpoint write error: {err}");
                 } else {
                     // Truncate WAL prefix after successful checkpoint.
-                    let wal_path = writer
-                        .lock()
-                        .expect("writer lock poisoned")
-                        .engine
-                        .wal_path()
-                        .to_path_buf();
+                    let write_guard = match writer.lock() {
+                        Ok(g) => g,
+                        Err(e) => {
+                            log::error!("cortexadb checkpoint error while getting WAL path (lock poisoned): {e}");
+                            continue;
+                        }
+                    };
+                    let wal_path = write_guard.engine.wal_path().to_path_buf();
+                    // Drop lock early just in case writing to disk is slow
+                    drop(write_guard);
                     if let Err(err) =
                         WriteAheadLog::truncate_prefix(&wal_path, CommandId(last_applied_id))
                     {
                         log::error!("cortexadb WAL truncation error: {err}");
-                    } else if let Err(err) =
-                        writer.lock().expect("writer lock poisoned").engine.reopen_wal()
-                    {
-                        log::error!("cortexadb WAL reopen error: {err}");
+                    } else {
+                        let mut write_guard = match writer.lock() {
+                            Ok(g) => g,
+                            Err(e) => {
+                                log::error!("cortexadb checkpoint error while reopening WAL (lock poisoned): {e}");
+                                continue;
+                            }
+                        };
+                        if let Err(err) = write_guard.engine.reopen_wal() {
+                            log::error!("cortexadb WAL reopen error: {err}");
+                        }
                     }
                 }
             }
@@ -541,7 +580,8 @@ impl CortexaDBStore {
     }
 
     pub fn add(&self, entry: MemoryEntry) -> Result<CommandId> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
 
         let mut effective = entry;
         if let Ok(prev) = writer.engine.get_state_machine().get_memory(effective.id) {
@@ -560,7 +600,8 @@ impl CortexaDBStore {
     }
 
     pub fn add_batch(&self, entries: Vec<MemoryEntry>) -> Result<CommandId> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
         let mut last_cmd_id = CommandId(0);
 
@@ -619,23 +660,27 @@ impl CortexaDBStore {
     }
 
     pub fn delete(&self, id: MemoryId) -> Result<CommandId> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         self.execute_write_transaction_locked(&mut writer, WriteOp::Delete(id))
     }
 
     pub fn connect(&self, from: MemoryId, to: MemoryId, relation: String) -> Result<CommandId> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         self.execute_write_transaction_locked(&mut writer, WriteOp::Connect { from, to, relation })
     }
 
     pub fn disconnect(&self, from: MemoryId, to: MemoryId) -> Result<CommandId> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         self.execute_write_transaction_locked(&mut writer, WriteOp::Disconnect { from, to })
     }
 
     /// Rebuild in-memory vector index from current state machine entries.
     pub fn rebuild_vector_index(&self) -> Result<usize> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         writer.indexes = Self::build_vector_index(
             writer.engine.get_state_machine(),
             writer.indexes.vector.dimension(),
@@ -652,10 +697,11 @@ impl CortexaDBStore {
         Ok(indexed)
     }
 
-    pub fn set_vector_backend_mode(&self, mode: VectorBackendMode) {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+    pub fn set_vector_backend_mode(&self, mode: VectorBackendMode) -> Result<()> {
+        let mut writer = writer_lock(&self.writer)?;
         writer.indexes.set_vector_backend_mode(mode);
         self.publish_snapshot_from_write_state(&writer);
+        Ok(())
     }
 
     pub fn query(
@@ -750,7 +796,8 @@ impl CortexaDBStore {
     }
 
     pub fn enforce_capacity(&self, policy: CapacityPolicy) -> Result<EvictionReport> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         let sync_now = matches!(self.sync_policy, SyncPolicy::Strict);
         let report = Self::enforce_capacity_locked(&mut writer, policy, sync_now)?;
 
@@ -786,7 +833,8 @@ impl CortexaDBStore {
     }
 
     pub fn compact_segments(&self) -> Result<CompactionReport> {
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer =
+            self.writer.lock().map_err(|_| CortexaDBStoreError::LockPoisoned("writer lock"))?;
         let report = writer.engine.compact_segments()?;
         writer.indexes.vector_index_mut().compact()?;
         self.publish_snapshot_from_write_state(&writer);
@@ -805,8 +853,8 @@ impl CortexaDBStore {
         self.snapshot().indexes().vector.len()
     }
 
-    pub fn wal_len(&self) -> u64 {
-        self.writer.lock().expect("writer lock poisoned").engine.wal_len()
+    pub fn wal_len(&self) -> Result<u64> {
+        Ok(writer_lock(&self.writer)?.engine.wal_len())
     }
 
     fn mark_pending_write(&self, ops: usize) {
@@ -1062,11 +1110,11 @@ enum WriteOp {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
+    use std::{sync::Arc, thread, time::Duration};
+
     use tempfile::TempDir;
+
+    use super::*;
 
     struct TestEmbedder;
     impl QueryEmbedder for TestEmbedder {

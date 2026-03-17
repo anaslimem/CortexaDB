@@ -1,9 +1,8 @@
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{hash_map::Entry, HashMap, VecDeque};
+
 use thiserror::Error;
 
-use crate::core::memory_entry::MemoryId;
-use crate::core::state_machine::StateMachine;
+use crate::core::{memory_entry::MemoryId, state_machine::StateMachine};
 
 #[derive(Error, Debug)]
 pub enum GraphError {

@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 use super::memory_entry::MemoryEntry;
 use crate::core::memory_entry::MemoryId;
-use serde::{Deserialize, Serialize};
 
 /// State-mutating commands for the state machine
 #[derive(Debug, Clone, Serialize, Deserialize)]

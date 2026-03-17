@@ -1,11 +1,18 @@
 use std::path::Path;
+
 use thiserror::Error;
 
-use crate::core::command::Command;
-use crate::core::memory_entry::{MemoryEntry, MemoryId};
-use crate::core::state_machine::StateMachine;
-use crate::storage::segment::SegmentStorage;
-use crate::storage::wal::{CommandId, WriteAheadLog};
+use crate::{
+    core::{
+        command::Command,
+        memory_entry::{MemoryEntry, MemoryId},
+        state_machine::StateMachine,
+    },
+    storage::{
+        segment::SegmentStorage,
+        wal::{CommandId, WriteAheadLog},
+    },
+};
 
 #[derive(Error, Debug)]
 pub enum EngineError {
@@ -27,6 +34,8 @@ pub enum EngineError {
     CheckpointWalGap { checkpoint_last_applied: u64, wal_highest: Option<u64> },
     #[error("Engine not recovered properly")]
     NotRecovered,
+    #[error("Lock was poisoned during {0}")]
+    LockPoisoned(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -481,9 +490,10 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::core::memory_entry::{MemoryEntry, MemoryId};
-    use tempfile::TempDir;
 
     #[test]
     fn test_engine_creation() {

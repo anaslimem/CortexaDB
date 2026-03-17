@@ -1,7 +1,5 @@
 use std::sync::{OnceLock, RwLock};
 
-use crate::query::executor;
-
 #[derive(Debug, Clone)]
 pub struct IntentPolicy {
     pub semantic_anchor_text: String,
@@ -33,12 +31,19 @@ fn policy_cell() -> &'static RwLock<IntentPolicy> {
 }
 
 pub fn set_intent_policy(policy: IntentPolicy) {
-    let mut guard = policy_cell().write().expect("intent policy write lock poisoned");
-    *guard = policy;
-    drop(guard);
-    executor::clear_intent_anchor_cache();
+    if let Ok(mut guard) = policy_cell().write() {
+        *guard = policy;
+        crate::query::executor::clear_intent_anchor_cache();
+    } else {
+        log::warn!("intent policy write lock poisoned");
+    }
 }
 
 pub fn get_intent_policy() -> IntentPolicy {
-    policy_cell().read().expect("intent policy read lock poisoned").clone()
+    if let Ok(guard) = policy_cell().read() {
+        guard.clone()
+    } else {
+        log::warn!("intent policy read lock poisoned, falling back to default");
+        IntentPolicy::default()
+    }
 }

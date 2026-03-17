@@ -1,14 +1,18 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Mutex, OnceLock},
+    time::Instant,
+};
 
-use crate::core::memory_entry::MemoryId;
-use crate::core::state_machine::StateMachine;
-use crate::index::combined::IndexLayer;
-use crate::index::graph::GraphIndex;
-use crate::query::hybrid::{HybridQueryError, QueryEmbedder, QueryHit};
-use crate::query::intent::get_intent_policy;
-use crate::query::planner::{ExecutionPath, QueryPlan, QueryPlanner};
+use crate::{
+    core::{memory_entry::MemoryId, state_machine::StateMachine},
+    index::{combined::IndexLayer, graph::GraphIndex},
+    query::{
+        hybrid::{HybridQueryError, QueryEmbedder, QueryHit},
+        intent::get_intent_policy,
+        planner::{ExecutionPath, QueryPlan, QueryPlanner},
+    },
+};
 
 pub type Result<T> = std::result::Result<T, HybridQueryError>;
 
@@ -53,8 +57,11 @@ fn intent_anchor_cache() -> &'static Mutex<HashMap<usize, IntentAnchors>> {
 
 pub(crate) fn clear_intent_anchor_cache() {
     let cache = intent_anchor_cache();
-    let mut guard = cache.lock().expect("intent anchor cache lock poisoned");
-    guard.clear();
+    if let Ok(mut guard) = cache.lock() {
+        guard.clear();
+    } else {
+        log::warn!("intent anchor cache lock poisoned, unable to clear");
+    }
 }
 
 fn load_or_build_intent_anchors(
@@ -62,11 +69,12 @@ fn load_or_build_intent_anchors(
     dim: usize,
 ) -> std::result::Result<IntentAnchors, String> {
     let cache = intent_anchor_cache();
-    {
-        let guard = cache.lock().expect("intent anchor cache lock poisoned");
+    if let Ok(guard) = cache.lock() {
         if let Some(found) = guard.get(&dim) {
             return Ok(found.clone());
         }
+    } else {
+        log::warn!("intent anchor cache lock poisoned, rebuilding anchor from scratch");
     }
 
     let policy = get_intent_policy();
@@ -77,8 +85,9 @@ fn load_or_build_intent_anchors(
         return Err("intent anchor embedding dimension mismatch".to_string());
     }
     let anchors = IntentAnchors { semantic, recency, graph };
-    let mut guard = cache.lock().expect("intent anchor cache lock poisoned");
-    guard.insert(dim, anchors.clone());
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(dim, anchors.clone());
+    }
     Ok(anchors)
 }
 
@@ -354,9 +363,13 @@ fn build_ranked_hits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::memory_entry::{MemoryEntry, MemoryId};
-    use crate::query::hybrid::{GraphExpansionOptions, QueryOptions};
-    use crate::query::planner::{ExecutionPath, QueryPlanner};
+    use crate::{
+        core::memory_entry::{MemoryEntry, MemoryId},
+        query::{
+            hybrid::{GraphExpansionOptions, QueryOptions},
+            planner::{ExecutionPath, QueryPlanner},
+        },
+    };
 
     struct TestEmbedder;
     impl QueryEmbedder for TestEmbedder {

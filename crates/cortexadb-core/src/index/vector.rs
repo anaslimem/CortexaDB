@@ -1,10 +1,15 @@
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use thiserror::Error;
 
-use crate::core::memory_entry::MemoryId;
-use crate::index::hnsw::{HnswBackend, HnswConfig};
+use crate::{
+    core::memory_entry::MemoryId,
+    index::hnsw::{HnswBackend, HnswConfig},
+};
 
 #[derive(Error, Debug)]
 pub enum VectorError {
