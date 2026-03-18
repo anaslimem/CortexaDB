@@ -764,11 +764,11 @@ mod tests {
         db.compact().expect("compact must not fail");
     }
 
-    // ----- ask_in_collection: sparse collection over-fetch regression -----
+    // ----- search_in_collection: sparse collection over-fetch regression -----
 
     #[test]
     fn test_search_in_collection_finds_entry_in_sparse_collection() {
-        // Regression: before the 4× fix, ask_in_collection returned empty results when the
+        // Regression: before the 4× fix, search_in_collection returned empty results when the
         // target collection had far fewer entries than top_k * candidate_multiplier entries globally.
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("testdb");
@@ -783,7 +783,7 @@ mod tests {
         let id_a = db.add_in_collection("ns_sparse", vec![1.0, 0.0, 0.0], None).unwrap();
         let id_b = db.add_in_collection("ns_sparse", vec![0.9, 0.1, 0.0], None).unwrap();
 
-        // Ask for top-2 in ns_sparse — both must be returned.
+        // Search for top-2 in ns_sparse — both must be returned.
         let hits = db.search_in_collection("ns_sparse", vec![1.0, 0.0, 0.0], 2, None).unwrap();
         let hit_ids: Vec<u64> = hits.iter().map(|h| h.id).collect();
         assert!(

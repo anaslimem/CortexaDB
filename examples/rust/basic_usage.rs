@@ -165,7 +165,7 @@ Content under heading 3.
     println!("   Connected: {} -> {} -> {}", id1, id2, id3);
 
     // -----------------------------------------------------------
-    // 7. Ask (query text -> helper embedding)
+    // 7. Search (query embedding -> top-k results)
     // -----------------------------------------------------------
     println!("\n[6] Querying memories...");
     let query = "Where does the user live?";
