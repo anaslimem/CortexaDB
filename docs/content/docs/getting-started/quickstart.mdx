@@ -41,7 +41,7 @@ mid3 = db.add("User's name is Alice.", metadata={"source": "onboarding"})
 
 ```python
 # Semantic search
-hits = db.query("What does the user like?").execute()
+hits = db.search("What does the user like?")
 for hit in hits:
     print(f"ID: {hit.id}, Score: {hit.score:.3f}")
 

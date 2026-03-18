@@ -17,7 +17,7 @@ db.add("text", vector=[0.1, 0.2, ...])  # must provide vector
 # With embedder - automatic
 db = CortexaDB.open("db.mem", embedder=OpenAIEmbedder())
 db.add("text")  # auto-embedded
-db.query("query").execute()  # auto-embedded
+db.search("query")  # auto-embedded
 ```
 
 ---

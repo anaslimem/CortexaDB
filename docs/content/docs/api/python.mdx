@@ -112,7 +112,7 @@ Starts a fluent query builder to search across the database.
 
 **Example:**
 ```python
-hits = db.query("What does the user prefer?").limit(5).use_graph().execute()
+hits = db.search("What does the user prefer?", limit=5, use_graph=True)
 
 for hit in hits:
     print(f"ID: {hit.id}, Score: {hit.score:.3f}")

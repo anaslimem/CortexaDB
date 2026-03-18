@@ -19,7 +19,7 @@ mid2 = db.add("User works at Stripe.")
 mid3 = db.add("User's favorite language is Python.")
 
 # Search
-hits = db.query("What programming language does the user like?").execute()
+hits = db.search("What programming language does the user like?")
 for hit in hits:
     mem = db.get(hit.id)
     print(f"[{hit.score:.3f}] {mem.content.decode()}")
@@ -43,7 +43,7 @@ db.connect(alice, acme, "works_at")
 db.connect(bob, acme, "works_at")
 
 # Query with graph expansion
-hits = db.query("Who works at Acme?").use_graph().execute()
+hits = db.search("Who works at Acme?", use_graph=True)
 ```
 
 ---
@@ -94,7 +94,7 @@ Long article about machine learning...
 ids = db.ingest(article, strategy="semantic", chunk_size=2048)
 
 # Query across all ingested documents
-hits = db.query("How do I configure the API?").limit(10).execute()
+hits = db.search("How do I configure the API?", limit=10)
 for hit in hits:
     mem = db.get(hit.id)
     print(f"[{hit.score:.3f}] {mem.content.decode()[:100]}...")
@@ -183,7 +183,7 @@ db.add("Meeting at 3pm", metadata={"category": "schedule"})
 db.add("Likes Python", metadata={"category": "preference"})
 
 # Filter by metadata (if supported by your query)
-hits = db.query("What are the user's preferences?").execute()
+hits = db.search("What are the user's preferences?")
 for hit in hits:
     mem = db.get(hit.id)
     print(f"{mem.content.decode()} [{mem.metadata}]")

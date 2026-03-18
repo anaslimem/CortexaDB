@@ -10,7 +10,7 @@ db.add("User prefers dark mode")
 db.add("User works at Stripe")
 
 # Semantic search
-hits = db.query("What does the user like?").execute()
+hits = db.search("What does the user like?")
 # => [Hit(id=1, score=0.87), Hit(id=2, score=0.72)]`;
 
 const kw = 'color: #D73A49'; // keyword
@@ -43,7 +43,7 @@ const lines = [
   { style: '', text: 'db.add("User works at Stripe")' },
   { style: '', text: '' },
   { style: cm, text: '# Semantic search' },
-  { style: '', text: 'hits = db.query("What does the user like?").execute()' },
+  { style: '', text: 'hits = db.search("What does the user like?")' },
   { style: cm, text: '# => [Hit(id=1, score=0.87), Hit(id=2, score=0.72)]' },
 ];
 

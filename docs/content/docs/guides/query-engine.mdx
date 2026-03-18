@@ -100,7 +100,7 @@ When `use_graph=True`, the query engine expands results using BFS traversal:
 5. Return final top-k
 
 ```python
-hits = db.query("query").use_graph().execute()
+hits = db.search("query", use_graph=True)
 ```
 
 Graph expansion only follows edges within the same collection.
@@ -123,7 +123,7 @@ When recency is part of the scoring weights:
 - Combined with other signals via weighted sum
 
 ```python
-hits = db.query("query").recency_bias().execute()
+hits = db.search("query", recency_bias=True)
 ```
 
 ---
@@ -152,7 +152,7 @@ Results can be filtered by metadata key-value pairs:
 
 ```python
 # Only return memories with source="onboarding"
-hits = db.query("query").filter(source="onboarding").execute()
+hits = db.search("query", filter={"source": "onboarding"})
 ```
 
 Metadata filtering is applied after vector search but before final scoring.
@@ -188,19 +188,19 @@ This is primarily used for advanced multi-signal retrieval pipelines.
 
 ```python
 # Basic vector search
-hits = db.query("What does the user prefer?").execute()
+hits = db.search("What does the user prefer?")
 
 # With graph expansion
-hits = db.query("query").use_graph().execute()
+hits = db.search("query", use_graph=True)
 
 # With recency bias
-hits = db.query("query").recency_bias().execute()
+hits = db.search("query", recency_bias=True)
 
 # Custom limit
-hits = db.query("query").limit(10).execute()
+hits = db.search("query", limit=10)
 
 # Combined
-hits = db.query("query").limit(10).use_graph().recency_bias().execute()
+hits = db.search("query", limit=10, use_graph=True, recency_bias=True)
 ```
 
 ---
