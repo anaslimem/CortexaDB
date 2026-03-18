@@ -10,8 +10,8 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg" alt="License" /></a>
-  <a href="#current-status"><img src="https://img.shields.io/badge/Status-Beta-brightgreen.svg" alt="Status" /></a>
-  <a href="https://github.com/anaslimem/CortexaDB/releases"><img src="https://img.shields.io/badge/Version-0.1.8-blue.svg" alt="Version" /></a>
+  <a href="#current-status"><img src="https://img.shields.io/badge/Status-Stable-brightgreen.svg" alt="Status" /></a>
+  <a href="https://github.com/anaslimem/CortexaDB/releases"><img src="https://img.shields.io/badge/Version-1.0.0-blue.svg" alt="Version" /></a>
   <a href="https://pepy.tech/projects/cortexadb"><img src="https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads" alt="Downloads" /></a>
   <a href="https://cortexa-db.vercel.app"><img src="https://img.shields.io/badge/Docs-cortexa--db.vercel.app-purple.svg" alt="Documentation" /></a>
 </p>
@@ -82,23 +82,26 @@ pip install cortexadb[docs,pdf]  # Optional: For PDF/Docx support
 <details>
 <summary><b>Technical Architecture & Benchmarks</b></summary>
 
-### Performance Benchmarks (v0.1.8)
+### Performance Benchmarks (v1.0.0)
 
-CortexaDB `v0.1.8` introduced a new batching architecture. Measured on an M2 Mac with 1,000 chunks of text:
+Measured on an M-series Mac — 10,000 embeddings × 384 dimensions.
 
-| Operation | v0.1.6 (Sync) | v0.1.8 (Batch) | Improvement |
-|-----------|---------------|----------------|-------------|
-| Ingestion | 12.4s         | **0.12s**      | **103x Faster** |
-| Memory Add| 15ms          | 1ms            | 15x Faster |
-| HNSW Search| 0.3ms        | 0.28ms         | - |
+| Operation | Latency / Time |
+|-----------|---------------|
+| Bulk Ingestion (1,000 chunks) | **0.12s** |
+| Single Memory Add | **1ms** |
+| HNSW Search p50 | **1.03ms** (debug) / ~0.3ms (release) |
+| HNSW Recall | **95%** |
+
+See the [full benchmark docs](https://cortexa-db.vercel.app/docs/resources/benchmarks) for HNSW vs Exact comparison and how to reproduce.
 
 </details>
 
 ---
 
 ## License & Status
-CortexaDB is currently in **Beta (v0.1.8)**. It is released under the **MIT** and **Apache-2.0** licenses.  
-We are actively refining the API and welcome feedback!
+CortexaDB `v1.0.0` is a **stable release** available under the **MIT** and **Apache-2.0** licenses.  
+We welcome feedback and contributions!
 
 ---
 > *CortexaDB — Because agents shouldn't have to choose between speed and a soul (memory).*

@@ -9,5 +9,5 @@ pub mod store;
 
 // Re-export the primary facade types for convenience.
 pub use chunker::{chunk, ChunkMetadata, ChunkResult, ChunkingStrategy};
-pub use facade::{CortexaDB, CortexaDBConfig, CortexaDBError, Memory, Stats};
+pub use facade::{BatchRecord, CortexaDB, CortexaDBBuilder, CortexaDBConfig, CortexaDBError, Hit, Memory, Stats};
 pub use index::{HnswBackend, HnswConfig, HnswError, IndexMode, MetricKind};
