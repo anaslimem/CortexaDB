@@ -271,7 +271,7 @@ impl Engine {
         match &cmd {
             Command::Add(entry) => {
                 // Write entry to segment storage
-                self._write_entry_to_segments(entry)?;
+                self.write_entry_to_segments(entry)?;
             }
             Command::Delete(id) => {
                 // Mark as deleted in segments
@@ -288,7 +288,7 @@ impl Engine {
         // In relaxed modes caller flushes later via sync policy.
         self.state_machine.apply_command(cmd)?;
 
-        // 5. Update tracking
+        // 3. Update tracking
         self.last_applied_id = cmd_id;
 
         Ok(cmd_id)
@@ -425,8 +425,8 @@ impl Engine {
         collection_bytes + content_bytes + embedding_bytes + metadata_bytes
     }
 
-    /// Helper: Write entry to segments
-    fn _write_entry_to_segments(
+    /// Write entry to segments.
+    fn write_entry_to_segments(
         &mut self,
         entry: &crate::core::memory_entry::MemoryEntry,
     ) -> Result<()> {
@@ -439,10 +439,8 @@ impl Engine {
         &self.state_machine
     }
 
-    /// Get mutable reference to the state machine
-    /// NOTE: If you modify state directly (not via execute_command),
-    /// you bypass WAL durability! Use execute_command() instead.
-    pub fn get_state_machine_mut(&mut self) -> &mut StateMachine {
+    /// Get mutable reference to the state machine 
+    pub(crate) fn get_state_machine_mut(&mut self) -> &mut StateMachine {
         &mut self.state_machine
     }
 

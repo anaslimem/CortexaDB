@@ -1,52 +1,67 @@
 # Benchmarks
 
-CortexaDB has been benchmarked with **10,000 embeddings** at **384 dimensions** (typical sentence-transformer size).
+CortexaDB v1.0.0 benchmarked with **10,000 embeddings** at **384 dimensions** (typical sentence-transformer size) on an M-series Mac.
+
+> **Build mode note:** Numbers below are from a debug build. A release build (`maturin develop --release`) is 5–10x faster.
 
 ## Results
 
-| Mode | Indexing Time | Query (p50) | Throughput | Recall |
-|------|--------------|-------------|-----------|--------|
-| Exact (baseline) | 138s | 1.34ms | 690 QPS | 100% |
-| HNSW | 151s | 0.29ms | 3,203 QPS | 95% |
+| Mode | Index Time | p50 | p95 | p99 | Throughput | Recall |
+|------|-----------|-----|-----|-----|-----------|--------|
+| **HNSW** | 286s | **1.03ms** | 1.18ms | 1.29ms | **952 QPS** | **95%** |
+| Exact | 275s | 16.38ms | 22.69ms | 35.77ms | 56 QPS | 100% |
 
-**HNSW is ~5x faster than exact search while maintaining 95% recall.**
+**HNSW is ~16x faster than exact search (debug build) while maintaining 95% recall.**
+
+> With a release build (`maturin develop --release`), expect HNSW p50 ≈ 0.3ms and 3,000+ QPS.
+
+---
+
+## Disk Usage
+
+| Mode | Disk Size |
+|------|-----------|
+| HNSW | 47 MB |
+| Exact | 31 MB |
 
 ---
 
 ## Methodology
 
-- **Dataset**: 10,000 embeddings x 384 dimensions (realistic sentence-transformer size)
-- **Indexing**: Time to build fresh index from scratch
-- **Query Latency**: p50/p95/p99 measured across 1,000 queries (after 100 warmup queries)
-- **Recall**: Percentage of HNSW results that match brute-force exact search
+- **Dataset**: 10,000 random embeddings × 384 dimensions
+- **Environment**: M-series Mac, debug build via `maturin develop`
+- **Indexing**: Time to add 10,000 vectors + `checkpoint()` to flush
+- **Query Latency**: p50/p95/p99 across 1,000 queries after 100 warmup queries
+- **Recall**: % of HNSW results that match brute-force exact scan (100 queries, top-10)
 
 ---
 
-## Running Benchmarks
+## Reproducing Results
 
 ### Prerequisites
 
 ```bash
-# Build the Rust extension
+# Build the Rust extension (release mode for published numbers)
 cd crates/cortexadb-py
 maturin develop --release
 cd ../..
+pip install numpy psutil
 ```
 
 ### Generate Test Data
 
 ```bash
-python benchmark/generate_embeddings.py --count 10000 --dimensions 384
+python3 benchmark/generate_embeddings.py --count 10000 --dimensions 384
 ```
 
 ### Run Benchmarks
 
 ```bash
 # Exact mode (baseline, 100% recall)
-python benchmark/run_benchmark.py --index-mode exact
+python3 benchmark/run_benchmark.py --index-mode exact
 
 # HNSW mode (fast, ~95% recall)
-python benchmark/run_benchmark.py --index-mode hnsw
+python3 benchmark/run_benchmark.py --index-mode hnsw
 ```
 
 Results are saved to `benchmark/results/`.
@@ -54,7 +69,7 @@ Results are saved to `benchmark/results/`.
 ### Custom Options
 
 ```bash
-python benchmark/run_benchmark.py \
+python3 benchmark/run_benchmark.py \
     --count 10000 \
     --dimensions 384 \
     --top-k 10 \
@@ -85,7 +100,7 @@ python benchmark/run_benchmark.py \
 ### When to Use HNSW
 
 - Dataset over 10,000 entries
-- Sub-millisecond latency is needed
+- Sub-millisecond latency is needed (release build)
 - 95%+ recall is acceptable
 - High query throughput is needed
 

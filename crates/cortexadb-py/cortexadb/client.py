@@ -281,7 +281,8 @@ class CortexaDB:
                             if self.get(target_id).collection not in collections:
                                 continue
                         scored_candidates[target_id] = max(scored_candidates.get(target_id, 0), hit.score * 0.9)
-                except: pass
+                except Exception:
+                    pass
 
         if recency_bias:
             now = time.time()
@@ -291,7 +292,8 @@ class CortexaDB:
                     age = max(0, now - mem.created_at)
                     decay = 0.5 ** (age / (30 * 86400))
                     scored_candidates[obj_id] *= (1.0 + 0.2 * decay)
-                except: pass
+                except Exception:
+                    pass
 
         final = [Hit(mid, s) for mid, s in scored_candidates.items()]
         final.sort(key=lambda h: h.score, reverse=True)
@@ -311,28 +313,33 @@ class CortexaDB:
         """Export all memories to a replay log."""
         from .replay import ReplayWriter
         writer = ReplayWriter(path, dimension=self._dimension)
-        report = {"checked": 0, "exported": 0, "skipped_missing_embedding": 0}
-        
-        # This is a bit slow as we iterate all IDs
+        report = {"checked": 0, "exported": 0, "skipped_missing_embedding": 0, "errors": []}
+
         stats = self.stats()
-        for i in range(1, stats.entries + 1):
+        total_live = stats.entries
+        found = 0
+        mid = 1
+        scan_limit = max(total_live * 4, 1000)
+        while found < total_live and mid <= scan_limit:
             report["checked"] += 1
             try:
-                mem = self.get(i)
+                mem = self.get(mid)
                 if mem.embedding:
                     writer.record_add(
                         id=mem.id,
                         text=bytes(mem.content).decode("utf-8") if mem.content else "",
                         embedding=mem.embedding,
                         collection=mem.collection,
-                        metadata=mem.metadata
+                        metadata=mem.metadata,
                     )
                     report["exported"] += 1
                 else:
                     report["skipped_missing_embedding"] += 1
-            except:
+                found += 1
+            except Exception:
                 pass
-        
+            mid += 1
+
         writer.close()
         self._last_export_replay_report = report
 

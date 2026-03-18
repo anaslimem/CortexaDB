@@ -1,22 +1,22 @@
 ---
 title: Benchmarks
-description: Performance benchmarks and methodology
+description: Performance benchmarks and methodology for v1.0.0
 ---
 
-CortexaDB delivers sub-millisecond query latency and rapid ingestion, optimized for local agentic workflows.
+CortexaDB delivers fast, local vector search optimized for AI agent memory workloads. Numbers below are from a **debug build** on an M-series Mac — a release build is 5–10x faster.
 
 ## Performance Overview
 
-Key metrics measured with **10,000 embeddings** (384 dimensions) on an M1 Pro Mac.
+Key metrics measured with **10,000 embeddings** (384 dimensions) on an M-series Mac, v1.0.0 debug build.
 
 <Cards>
-  <Card title="103x Faster Ingestion" icon={<Zap className="text-yellow-500" />}>
-    Batch ingestion processed 1,000 chunks in **0.12s** (formerly 12.4s).
+  <Card title="1.03ms p50 Search" icon={<Zap className="text-yellow-500" />}>
+    HNSW search on 10,000 vectors. Release build achieves **~0.3ms** p50.
   </Card>
-  <Card title="3,200+ QPS" icon={<TrendingUp className="text-blue-500" />}>
-    High-throughput HNSW search with sub-millisecond p50 latency.
+  <Card title="952+ QPS" icon={<TrendingUp className="text-blue-500" />}>
+    HNSW throughput (debug build). Release build exceeds **3,000 QPS**.
   </Card>
-  <Card title="95%+ Recall" icon={<Shield className="text-green-500" />}>
+  <Card title="95% Recall" icon={<Shield className="text-green-500" />}>
     Approximate search maintains high accuracy relative to brute-force.
   </Card>
 </Cards>
@@ -25,47 +25,59 @@ Key metrics measured with **10,000 embeddings** (384 dimensions) on an M1 Pro Ma
 
 ## Retrieval Benchmarks
 
-| Mode | Latency (p50) | Throughput | Recall | Index Time |
-|------|---------------|------------|--------|------------|
-| **HNSW** | **0.29ms** | **3,203 QPS** | 95% | 151s |
-| Exact | 1.34ms | 690 QPS | 100% | 138s |
+Measured: 10,000 embeddings × 384 dimensions, 1,000 queries, 100 warmup, top-10.
 
-## Ingestion Benchmarks
+| Mode | p50 | p95 | p99 | Throughput | Recall | Disk |
+|------|-----|-----|-----|-----------|--------|------|
+| **HNSW** | **1.03ms** | 1.18ms | 1.29ms | **952 QPS** | **95%** | 47 MB |
+| Exact | 16.38ms | 22.69ms | 35.77ms | 56 QPS | 100% | 31 MB |
 
-| Operation | Previous | Current | Speedup |
-|-----------|----------|---------|---------|
-| **Bulk Ingest** | 12.4s | **0.12s** | **103x** |
-| Memory Add | 15ms | 1ms | 15x |
-| HNSW Build | 151s | 151s | - |
+> [!NOTE]
+> These numbers are from a **debug build** (`maturin develop`). With a release build (`maturin develop --release`), HNSW achieves **~0.3ms p50** and **3,000+ QPS** — consistent with the ingestion benchmarks below.
+
+---
+
+## Ingestion
+
+| Operation | Time |
+|-----------|------|
+| Bulk Ingest (1,000 chunks) | **0.12s** |
+| Single Memory Add | **1ms** |
+| HNSW Index Build (10,000 vectors) | ~286s (debug) / ~140s (release) |
 
 ---
 
 ## Methodology
 
-- **Dataset**: 10,000 embeddings x 384 dimensions (Sentence-Transformers standard).
-- **Environment**: MacBook Pro M1 Pro (16-core GPU, 32GB RAM).
-- **Query Latency**: p50 measured across 1,000 queries after 100 warmup cycles.
-- **Recall**: Percentage of HNSW results identical to brute-force exact scan.
+- **Dataset**: 10,000 random embeddings × 384 dimensions.
+- **Environment**: M-series Mac. Debug build via `maturin develop`.
+- **Query Latency**: p50/p95/p99 measured across 1,000 queries after 100 warmup cycles.
+- **Recall**: % of HNSW results identical to brute-force exact scan (100 queries, top-10).
 
 ---
 
 ## Reproducing Results
 
-Build the release extension:
+Build the release extension for best performance:
 
 ```bash
 cd crates/cortexadb-py
 maturin develop --release
+cd ../..
+pip install numpy psutil
 ```
 
 Run the automated benchmark suite:
 
 ```bash
 # Generate 10k test vectors
-python benchmark/generate_embeddings.py --count 10000 --dimensions 384
+python3 benchmark/generate_embeddings.py --count 10000 --dimensions 384
 
 # Benchmark HNSW performance
-python benchmark/run_benchmark.py --index-mode hnsw
+python3 benchmark/run_benchmark.py --index-mode hnsw
+
+# Benchmark Exact performance
+python3 benchmark/run_benchmark.py --index-mode exact
 ```
 
 ---
@@ -76,11 +88,11 @@ python benchmark/run_benchmark.py --index-mode hnsw
 |--------|-----------|----------|
 | **Dataset Size** | < 10,000 entries | > 10,000 entries |
 | **Recall Needed** | 100% (Strict) | 95-99% (Semantic) |
-| **Latency Target** | < 5ms | < 1ms |
+| **Latency Target** | < 20ms (debug) / < 2ms (release) | < 5ms (debug) / < 1ms (release) |
 | **Resource Profile** | Minimum Memory | High Performance |
 
 > [!TIP]
-> For datasets between 1k and 10k, **Exact mode** is often faster due to zero index-building overhead while maintaining sub-millisecond latency on modern CPUs.
+> For datasets between 1k and 10k, **Exact mode** is often a good choice due to zero index-building overhead and 100% recall. HNSW shines at 10k+ entries where its sub-linear search complexity pays off.
 
 ---
 
