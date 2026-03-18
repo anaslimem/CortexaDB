@@ -46,7 +46,7 @@ export default function HomePage() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-fd-primary opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-fd-primary"></span>
             </span>
-            Now in Beta
+            v1.0.0 Stable
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-6 bg-linear-to-b from-fd-foreground to-fd-foreground/70 bg-clip-text text-transparent">
@@ -96,22 +96,22 @@ export default function HomePage() {
               <div className="p-3 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-500">
                 <Download className="w-6 h-6 transition-transform group-hover:scale-110" />
               </div>
-              <div className="text-3xl font-bold tracking-tight">4.7k+</div>
+              <div className="text-3xl font-bold tracking-tight">6k+</div>
               <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">PyPI Downloads</div>
             </div>
             <div className="flex flex-col items-center text-center space-y-2">
               <div className="p-3 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-500">
                 <Zap className="w-6 h-6 fill-current" />
               </div>
-              <div className="text-3xl font-bold tracking-tight text-fd-primary">103x</div>
-              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">Faster Ingestion</div>
+              <div className="text-3xl font-bold tracking-tight text-fd-primary">8,300+</div>
+              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">Inserts / Second</div>
             </div>
             <div className="flex flex-col items-center text-center space-y-2">
               <div className="p-3 rounded-xl bg-green-500/10 text-green-600 dark:text-green-500">
                 <Shield className="w-6 h-6" />
               </div>
-              <div className="text-3xl font-bold tracking-tight">Beta</div>
-              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">Production Ready</div>
+              <div className="text-3xl font-bold tracking-tight">0.3ms</div>
+              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">Search Latency</div>
             </div>
           </div>
         </div>
@@ -170,6 +170,42 @@ hits = db.query("What does the user like?").execute()
                 <p className="text-sm text-fd-muted-foreground">{feature.description}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Comparison Section */}
+      <section className="py-24 px-4 bg-fd-background">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-4 mb-12">
+            <h2 className="text-3xl font-bold">Why CortexaDB is the best choice</h2>
+            <div className="h-px bg-fd-border flex-1 ml-4 hidden md:block" />
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            <div className="p-6 rounded-xl border border-fd-border bg-fd-card">
+              <h3 className="text-xl font-bold mb-3 text-red-500">vs ChromaDB</h3>
+              <p className="text-fd-muted-foreground mb-4">Chroma uses Python plus external embedded databases in local mode, resulting in multi-millisecond overhead per query and slow batching.</p>
+              <div className="p-3 bg-fd-primary/10 rounded-lg border border-fd-primary/20">
+                <span className="font-semibold text-fd-primary">Our Advantage:</span> CortexaDB uses a single, unified Rust engine. You cross the FFI boundary exactly once, resulting in 10x faster ingestion and true ~0.3ms latency.
+              </div>
+            </div>
+
+            <div className="p-6 rounded-xl border border-fd-border bg-fd-card">
+              <h3 className="text-xl font-bold mb-3 text-orange-500">vs LanceDB</h3>
+              <p className="text-fd-muted-foreground mb-4">LanceDB is incredible for massive datasets, but its columnar nature creates fixed overhead for single-item reads and frequent updates.</p>
+              <div className="p-3 bg-fd-primary/10 rounded-lg border border-fd-primary/20">
+                <span className="font-semibold text-fd-primary">Our Advantage:</span> CortexaDB is tuned for OLTP agent workloads—fast, frequent reads/writes. Keeping the HNSW index in memory prevents disk bottlenecking.
+              </div>
+            </div>
+
+            <div className="p-6 rounded-xl border border-fd-border bg-fd-card">
+              <h3 className="text-xl font-bold mb-3 text-blue-500">vs FAISS / sqlite-vec</h3>
+              <p className="text-fd-muted-foreground mb-4">Raw C++ FAISS requires manual persistence, while SQLite vector extensions can be 1-5ms for exact search.</p>
+              <div className="p-3 bg-fd-primary/10 rounded-lg border border-fd-primary/20">
+                <span className="font-semibold text-fd-primary">Our Advantage:</span> We use USearch (state-of-the-art C++ SIMD) wrapped in a Rust storage engine with WAL. You get FAISS-level speeds with real database durability.
+              </div>
+            </div>
           </div>
         </div>
       </section>
