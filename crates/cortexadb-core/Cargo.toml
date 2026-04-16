@@ -1,6 +1,6 @@
 [package]
 name = "cortexadb-core"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["Anas Limem <limemanas0@gmail.com>"]
 description = "Fast, embedded vector + graph memory for AI agents"
@@ -24,7 +24,7 @@ crc = "3.0"
 arc-swap = "1.8.2"
 regex = "1.10"
 serde_json = "1.0"
-usearch = { version = "2.24.0", features = ["simsimd"] }
+usearch = { version = "2.25.1", features = ["simsimd"] }
 log = "0.4"
 
 

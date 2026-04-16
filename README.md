@@ -11,7 +11,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg" alt="License" /></a>
   <a href="#current-status"><img src="https://img.shields.io/badge/Status-Stable-brightgreen.svg" alt="Status" /></a>
-  <a href="https://github.com/anaslimem/CortexaDB/releases"><img src="https://img.shields.io/badge/Version-1.0.0-blue.svg" alt="Version" /></a>
+  <a href="https://github.com/anaslimem/CortexaDB/releases"><img src="https://img.shields.io/badge/Version-1.0.1-blue.svg" alt="Version" /></a>
   <a href="https://pepy.tech/projects/cortexadb"><img src="https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads" alt="Downloads" /></a>
   <a href="https://cortexa-db.vercel.app"><img src="https://img.shields.io/badge/Docs-cortexa--db.vercel.app-purple.svg" alt="Documentation" /></a>
 </p>
@@ -82,7 +82,7 @@ pip install cortexadb[docs,pdf]  # Optional: For PDF/Docx support
 <details>
 <summary><b>Technical Architecture & Benchmarks</b></summary>
 
-### Performance Benchmarks (v1.0.0)
+### Performance Benchmarks (v1.0.1)
 
 Measured on an M-series Mac — 10,000 embeddings × 384 dimensions.
 
@@ -100,7 +100,7 @@ See the [full benchmark docs](https://cortexa-db.vercel.app/docs/resources/bench
 ---
 
 ## License & Status
-CortexaDB `v1.0.0` is a **stable release** available under the **MIT** and **Apache-2.0** licenses.  
+CortexaDB `v1.0.1` is a **stable release** available under the **MIT** and **Apache-2.0** licenses.  
 We welcome feedback and contributions!
 
 ---
