@@ -1,6 +1,6 @@
 # Benchmarks
 
-CortexaDB v1.0.0 benchmarked with **10,000 embeddings** at **384 dimensions** (typical sentence-transformer size) on an M-series Mac.
+CortexaDB v1.0.1 benchmarked with **10,000 embeddings** at **384 dimensions** (typical sentence-transformer size) on an M-series Mac.
 
 > **Build mode note:** Numbers below are from a debug build. A release build (`maturin develop --release`) is 5–10x faster.
 
