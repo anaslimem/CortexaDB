@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{
+use crate::core::{
     command::Command,
     memory_entry::{MemoryEntry, MemoryId},
 };

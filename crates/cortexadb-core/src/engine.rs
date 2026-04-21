@@ -439,7 +439,7 @@ impl Engine {
         &self.state_machine
     }
 
-    /// Get mutable reference to the state machine 
+    /// Get mutable reference to the state machine
     pub(crate) fn get_state_machine_mut(&mut self) -> &mut StateMachine {
         &mut self.state_machine
     }
