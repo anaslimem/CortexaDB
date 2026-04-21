@@ -1,6 +1,14 @@
+'use client';
+
 import Link from 'next/link';
-import { ArrowRight, Database, GitBranch, Zap, Shield, Layers, Github, Star, Download, TrendingUp } from 'lucide-react';
-import { CodePreview } from '@/components/code-preview';
+import { ArrowRight, Database, GitBranch, Zap, Shield, Layers, Github, Star, Download, TrendingUp, Clock, HardDrive, Activity } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+interface Stats {
+  stars: number;
+  downloads: string;
+  cached?: boolean;
+}
 
 const features = [
   {
@@ -16,7 +24,7 @@ const features = [
   {
     icon: Zap,
     title: 'HNSW Indexing',
-    description: 'Ultra-fast approximate nearest neighbor search via USearch',
+    description: 'Ultra-fast approximate nearest neighbor search via USearch with 95% recall',
   },
   {
     icon: GitBranch,
@@ -35,7 +43,59 @@ const features = [
   },
 ];
 
+const stats = [
+  {
+    icon: Star,
+    value: '39',
+    label: 'GitHub Stars',
+    color: 'yellow',
+  },
+  {
+    icon: Download,
+    value: '10K+',
+    label: 'PyPI Downloads',
+    color: 'blue',
+  },
+  {
+    icon: Activity,
+    value: '8,300+',
+    label: 'Chunks / Second',
+    color: 'purple',
+    note: 'batch ingestion',
+  },
+  {
+    icon: Clock,
+    value: '1.03ms',
+    label: 'Search Latency',
+    color: 'green',
+    note: 'p50, debug build',
+  },
+];
+
 export default function HomePage() {
+  const [githubStars, setGithubStars] = useState<number>(39);
+  const [downloads, setDownloads] = useState<string>('10K+');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/stats')
+      .then(res => res.json())
+      .then((data: Stats) => {
+        if (data.stars) {
+          setGithubStars(data.stars);
+        }
+        if (data.downloads) {
+          setDownloads(data.downloads);
+        }
+      })
+      .catch(() => {
+        // Keep default values
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
+
   return (
     <div className="flex flex-col min-h-[calc(100vh-4rem)]">
       {/* Hero Section */}
@@ -46,7 +106,7 @@ export default function HomePage() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-fd-primary opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-fd-primary"></span>
             </span>
-            v1.0.0 Stable
+            v1.0.1 Stable
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-6 bg-linear-to-b from-fd-foreground to-fd-foreground/70 bg-clip-text text-transparent">
@@ -56,7 +116,7 @@ export default function HomePage() {
           </h1>
 
           <p className="text-xl text-fd-muted-foreground max-w-2xl mx-auto mb-10">
-            CortexaDB is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. Single-file, no server required.
+            CortexaDB is a simple, fast, and hard-durable embedded database designed specifically for AI agent memory. Single-file, zero-dependency, no server required.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -85,34 +145,28 @@ export default function HomePage() {
       <section className="py-12 border-y border-fd-border bg-fd-muted/10">
         <div className="max-w-6xl mx-auto px-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            <div className="flex flex-col items-center text-center space-y-2">
-              <div className="p-3 rounded-xl bg-yellow-500/10 text-yellow-600 dark:text-yellow-500">
-                <Star className="w-6 h-6 fill-current" />
+            {stats.map((stat) => (
+              <div key={stat.label} className="flex flex-col items-center text-center space-y-2">
+                <div className={`p-3 rounded-xl bg-${stat.color}-500/10 text-${stat.color}-600 dark:text-${stat.color}-500`}>
+                  <stat.icon className="w-6 h-6 fill-current" />
+                </div>
+                <div className="text-3xl font-bold tracking-tight">
+                  {loading ? (
+                    <span className="animate-pulse">...</span>
+                  ) : stat.label === 'GitHub Stars' ? (
+                    githubStars
+                  ) : stat.label === 'PyPI Downloads' ? (
+                    downloads
+                  ) : (
+                    stat.value
+                  )}
+                </div>
+                <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">{stat.label}</div>
+                {stat.note && (
+                  <div className="text-xs text-fd-muted-foreground">{stat.note}</div>
+                )}
               </div>
-              <div className="text-3xl font-bold tracking-tight">27</div>
-              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">GitHub Stars</div>
-            </div>
-            <div className="flex flex-col items-center text-center space-y-2">
-              <div className="p-3 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-500">
-                <Download className="w-6 h-6 transition-transform group-hover:scale-110" />
-              </div>
-              <div className="text-3xl font-bold tracking-tight">6k+</div>
-              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">PyPI Downloads</div>
-            </div>
-            <div className="flex flex-col items-center text-center space-y-2">
-              <div className="p-3 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-500">
-                <Zap className="w-6 h-6 fill-current" />
-              </div>
-              <div className="text-3xl font-bold tracking-tight text-fd-primary">8,300+</div>
-              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">Inserts / Second</div>
-            </div>
-            <div className="flex flex-col items-center text-center space-y-2">
-              <div className="p-3 rounded-xl bg-green-500/10 text-green-600 dark:text-green-500">
-                <Shield className="w-6 h-6" />
-              </div>
-              <div className="text-3xl font-bold tracking-tight">0.3ms</div>
-              <div className="text-sm text-fd-muted-foreground font-medium uppercase tracking-wider">Search Latency</div>
-            </div>
+            ))}
           </div>
         </div>
       </section>
@@ -147,8 +201,35 @@ hits = db.search("What does the user like?")
         </div>
       </section>
 
+      {/* Performance Highlight */}
+      <section className="py-12 px-4 bg-fd-muted/30">
+        <div className="max-w-4xl mx-auto">
+          <div className="rounded-xl border border-fd-border bg-fd-card p-8">
+            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+              <Zap className="w-6 h-6 text-fd-primary" />
+              Performance Benchmarks
+            </h2>
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="p-4 rounded-lg bg-fd-muted/50">
+                <div className="text-sm text-fd-muted-foreground mb-1">HNSW Mode (10K vectors)</div>
+                <div className="text-3xl font-bold text-fd-primary">1.03ms p50</div>
+                <div className="text-sm text-fd-muted-foreground">952 QPS · 95% recall</div>
+              </div>
+              <div className="p-4 rounded-lg bg-fd-muted/50">
+                <div className="text-sm text-fd-muted-foreground mb-1">Exact Mode (10K vectors)</div>
+                <div className="text-3xl font-bold">16.38ms p50</div>
+                <div className="text-sm text-fd-muted-foreground">56 QPS · 100% recall</div>
+              </div>
+            </div>
+            <p className="text-sm text-fd-muted-foreground mt-4">
+              Benchmarks on M-series Mac · 10,000 embeddings × 384 dimensions · Debug build
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Features Grid */}
-      <section className="py-24 px-4 bg-fd-muted/30">
+      <section className="py-24 px-4 bg-fd-background">
         <div className="max-w-6xl mx-auto">
           <h2 className="text-3xl font-bold text-center mb-4">
             Everything you need for agent memory
@@ -175,7 +256,7 @@ hits = db.search("What does the user like?")
       </section>
 
       {/* Comparison Section */}
-      <section className="py-24 px-4 bg-fd-background">
+      <section className="py-24 px-4 bg-fd-muted/30">
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center gap-4 mb-12">
             <h2 className="text-3xl font-bold">Why CortexaDB is the best choice</h2>
