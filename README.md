@@ -14,6 +14,7 @@
   <a href="https://github.com/anaslimem/CortexaDB/releases"><img src="https://img.shields.io/badge/Version-1.0.1-blue.svg" alt="Version" /></a>
   <a href="https://pepy.tech/projects/cortexadb"><img src="https://static.pepy.tech/personalized-badge/cortexadb?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads" alt="Downloads" /></a>
   <a href="https://cortexa-db.vercel.app"><img src="https://img.shields.io/badge/Docs-cortexa--db.vercel.app-purple.svg" alt="Documentation" /></a>
+  <a href="https://github.com/anaslimem/CortexaDB/stargazers"><img src="https://img.shields.io/github/stars/anaslimem/CortexaDB?style=flat" alt="Stars" /></a>
 </p>
 
 
@@ -92,6 +93,10 @@ Measured on an M-series Mac — 10,000 embeddings × 384 dimensions.
 | Single Memory Add | **1ms** |
 | HNSW Search p50 | **1.03ms** (debug) / ~0.3ms (release) |
 | HNSW Recall | **95%** |
+
+### Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=anaslimem/CortexaDB&type=Date)](https://star-history.com/#anaslimem/CortexaDB)
 
 See the [full benchmark docs](https://cortexa-db.vercel.app/docs/resources/benchmarks) for HNSW vs Exact comparison and how to reproduce.
 

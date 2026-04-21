@@ -9,7 +9,7 @@ CortexaDB v1.0.1 benchmarked with **10,000 embeddings** at **384 dimensions** (t
 | Mode | Index Time | p50 | p95 | p99 | Throughput | Recall |
 |------|-----------|-----|-----|-----|-----------|--------|
 | **HNSW** | 286s | **1.03ms** | 1.18ms | 1.29ms | **952 QPS** | **95%** |
-| Exact | 275s | 16.38ms | 22.69ms | 35.77ms | 56 QPS | 100% |
+| Exact | 275s | **16.38ms** | 22.69ms | 35.77ms | **56 QPS** | **100%** |
 
 **HNSW is ~16x faster than exact search (debug build) while maintaining 95% recall.**
 

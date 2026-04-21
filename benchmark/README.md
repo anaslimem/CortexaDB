@@ -28,12 +28,12 @@ python benchmark/run_benchmark.py --index-mode hnsw    # fast mode
 
 ## Current Results
 
-| Mode | Indexing | Query (p50) | Throughput | Recall |
-|------|----------|-------------|-----------|--------|
-| Exact | 138s | 1.34ms | 690 QPS | 100% |
-| HNSW | 151s | 0.29ms | 3,203 QPS | 95% |
+| Mode | Indexing | Query (p50) | p95 | p99 | Throughput | Recall | Disk Size |
+|------|----------|-------------|-----|-----|-----------|--------|-----------|
+| Exact | 275s | 16.38ms | 22.69ms | 35.77ms | 56 QPS | 100% | 31 MB |
+| HNSW | 286s | 1.03ms | 1.18ms | 1.29ms | 952 QPS | 95% | 47 MB |
 
-→ HNSW is **~5x faster** than exact with 95% recall
+→ **HNSW is ~16x faster** than exact search while maintaining 95% recall
 
 See the [main README](../README.md#benchmarks) for full documentation.
 
