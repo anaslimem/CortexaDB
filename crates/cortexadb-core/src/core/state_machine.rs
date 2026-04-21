@@ -188,6 +188,30 @@ impl StateMachine {
         Ok(neighbors)
     }
 
+    // TODO: Get all connected memories transitively via BFS
+    // pub fn get_connected_transitive(&self, id: MemoryId) -> Result<Vec<MemoryId>>
+
+    // TODO: Check if path exists between two nodes
+    // pub fn has_path(&self, from: MemoryId, to: MemoryId) -> bool
+
+    // TODO: Delete all memories in a collection
+    // pub fn delete_collection(&mut self, collection: &str) -> Result<()>
+
+    // TODO: Get all unique collection names
+    // pub fn collections(&self) -> Vec<String>
+
+    // TODO: Get count of memories in a collection
+    // pub fn collection_len(&self, collection: &str) -> usize
+
+    // TODO: Get N most recent memories
+    // pub fn get_latest(&self, n: usize) -> Vec<&MemoryEntry>
+
+    // TODO: Get N oldest memories
+    // pub fn get_oldest(&self, n: usize) -> Vec<&MemoryEntry>
+
+    // TODO: Add multiple entries in bulk
+    // pub fn add_many(&mut self, entries: Vec<MemoryEntry>) -> Result<()>
+
     /// Get size of state
     pub fn len(&self) -> usize {
         self.memories.len()
@@ -385,5 +409,150 @@ mod tests {
 
         let result = sm.connect(MemoryId(1), MemoryId(2), "bad".to_string());
         assert!(matches!(result, Err(StateMachineError::CrossCollectionEdge { .. })));
+    }
+
+    #[test]
+    fn test_disconnect_nonexistent_edge() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+        sm.add(create_test_entry(2, "default", 1000)).unwrap();
+
+        sm.disconnect(MemoryId(1), MemoryId(2)).unwrap();
+        sm.disconnect(MemoryId(1), MemoryId(2)).unwrap();
+
+        let neighbors = sm.get_neighbors(MemoryId(1)).unwrap();
+        assert!(neighbors.is_empty());
+    }
+
+    #[test]
+    fn test_disconnect_from_nonexistent_memory() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+
+        sm.disconnect(MemoryId(999), MemoryId(1)).unwrap();
+        assert_eq!(sm.len(), 1);
+    }
+
+    #[test]
+    fn test_get_memories_empty_collection() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "ns1", 1000)).unwrap();
+
+        let ns2_entries = sm.get_memories_in_collection("ns2");
+        assert!(ns2_entries.is_empty());
+
+        let default_entries = sm.get_memories_in_collection("default");
+        assert!(default_entries.is_empty());
+    }
+
+    #[test]
+    fn test_update_with_same_timestamp() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+        sm.add(create_test_entry(1, "updated_collection", 1000)).unwrap();
+
+        assert_eq!(sm.len(), 1);
+        let entry = sm.get_memory(MemoryId(1)).unwrap();
+        assert_eq!(entry.collection, "updated_collection");
+
+        let range = sm.get_memories_in_time_range(1000, 1000);
+        assert_eq!(range.len(), 1);
+    }
+
+    #[test]
+    fn test_delete_nonexistent_memory() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+
+        let result = sm.delete(MemoryId(999));
+        assert!(matches!(result, Err(StateMachineError::MemoryNotFound(..))));
+        assert_eq!(sm.len(), 1);
+    }
+
+    #[test]
+    fn test_delete_from_empty_state_machine() {
+        let mut sm = StateMachine::new();
+        let result = sm.delete(MemoryId(1));
+        assert!(matches!(result, Err(StateMachineError::MemoryNotFound(..))));
+    }
+
+    #[test]
+    fn test_connect_self_referential_edge() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+
+        let result = sm.connect(MemoryId(1), MemoryId(1), "self_refs".to_string());
+        assert!(result.is_ok());
+
+        let neighbors = sm.get_neighbors(MemoryId(1)).unwrap();
+        assert_eq!(neighbors.len(), 1);
+        assert_eq!(neighbors[0].0, MemoryId(1));
+    }
+
+    #[test]
+    fn test_multiple_edges_same_relation_rejected() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+        sm.add(create_test_entry(2, "default", 1000)).unwrap();
+
+        sm.connect(MemoryId(1), MemoryId(2), "rel".to_string()).unwrap();
+        sm.connect(MemoryId(1), MemoryId(2), "rel".to_string()).unwrap();
+
+        let neighbors = sm.get_neighbors(MemoryId(1)).unwrap();
+        assert_eq!(neighbors.len(), 1);
+    }
+
+    #[test]
+    fn test_different_relations_allowed() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+        sm.add(create_test_entry(2, "default", 1000)).unwrap();
+
+        sm.connect(MemoryId(1), MemoryId(2), "rel1".to_string()).unwrap();
+        sm.connect(MemoryId(1), MemoryId(2), "rel2".to_string()).unwrap();
+
+        let neighbors = sm.get_neighbors(MemoryId(1)).unwrap();
+        assert_eq!(neighbors.len(), 2);
+    }
+
+    #[test]
+    fn test_time_range_no_results() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+        sm.add(create_test_entry(2, "default", 2000)).unwrap();
+
+        let range = sm.get_memories_in_time_range(500, 800);
+        assert!(range.is_empty());
+
+        let range = sm.get_memories_in_time_range(2500, 3000);
+        assert!(range.is_empty());
+    }
+
+    #[test]
+    fn test_get_memory_nonexistent() {
+        let sm = StateMachine::new();
+        let result = sm.get_memory(MemoryId(1));
+        assert!(matches!(result, Err(StateMachineError::MemoryNotFound(..))));
+    }
+
+    #[test]
+    fn test_neighbors_nonexistent_memory() {
+        let sm = StateMachine::new();
+        let result = sm.get_neighbors(MemoryId(1));
+        assert!(matches!(result, Err(StateMachineError::MemoryNotFound(..))));
+    }
+
+    #[test]
+    fn test_update_preserves_edges() {
+        let mut sm = StateMachine::new();
+        sm.add(create_test_entry(1, "default", 1000)).unwrap();
+        sm.add(create_test_entry(2, "default", 1000)).unwrap();
+        sm.connect(MemoryId(1), MemoryId(2), "rel".to_string()).unwrap();
+
+        sm.add(create_test_entry(1, "default", 2000)).unwrap();
+
+        let neighbors = sm.get_neighbors(MemoryId(1)).unwrap();
+        assert_eq!(neighbors.len(), 1);
+        assert_eq!(neighbors[0].0, MemoryId(2));
     }
 }
