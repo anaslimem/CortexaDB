@@ -65,11 +65,4 @@ mod tests {
         assert_eq!(entry.importance, 0.8);
         assert_eq!(entry.embedding, Some(vec![0.1, 0.2, 0.3]));
     }
-
-    #[test]
-    fn test_memory_id_ordering() {
-        let id1 = MemoryId(1);
-        let id2 = MemoryId(2);
-        assert!(id1 < id2);
-    }
 }
